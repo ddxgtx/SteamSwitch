@@ -86,6 +86,19 @@ namespace SteamSwitcher
             Close();
         }
 
+        private void GitHubLink_Click(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "https://github.com/ddxgtx/SteamSwitch",
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+        }
+
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ClickCount == 2)
