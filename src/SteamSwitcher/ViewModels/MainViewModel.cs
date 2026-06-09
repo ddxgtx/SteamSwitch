@@ -304,44 +304,42 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private async Task StartInjectorAsync()
         {
-            if (_injector != null && _injector.IsConnected)
-            {
-                StatusText = "注入器已连接";
-                return;
-            }
-
             IsLoading = true;
             StatusText = "正在启动注入器...";
 
             try
             {
-                // 启动WebSocket服务器
-                _wsServer = new WebSocketServer(8081);
-                _wsServer.MessageReceived += OnWebSocketMessage;
-                await _wsServer.StartAsync();
-
-                // 如果Steam未运行，带调试参数启动
-                if (!_accountManager.GetSteamService().IsSteamRunning())
-                {
-                    StatusText = "正在启动Steam（调试模式）...";
-                    _accountManager.GetSteamService().StartSteamWithDebugging();
-                    await Task.Delay(5000); // 等待Steam启动
-                }
-
-                // 连接CEF
+                // 创建注入器
                 _injector = new SteamCEFInjector(_gameBinding, _accountManager);
-                _injector.StatusChanged += (s, msg) => StatusText = msg;
-                
-                var connected = await _injector.ConnectAsync();
-                IsInjectorConnected = connected;
-
-                if (connected)
+                _injector.StatusChanged += (s, msg) => 
                 {
-                    StatusText = "注入器已启动，Steam库界面已增强";
+                    Application.Current.Dispatcher.Invoke(() => StatusText = msg);
+                };
+
+                // 注入自定义文件到Steam目录
+                var injected = _injector.InjectCustomFiles();
+                
+                if (injected)
+                {
+                    IsInjectorConnected = true;
+                    StatusText = "注入完成！请重启Steam库界面生效";
+                    
+                    // 启动WebSocket服务器（用于JS通信）
+                    try
+                    {
+                        _wsServer = new WebSocketServer(8081);
+                        _wsServer.MessageReceived += OnWebSocketMessage;
+                        await _wsServer.StartAsync();
+                        StatusText = "注入完成！WebSocket服务器已启动";
+                    }
+                    catch (Exception wsEx)
+                    {
+                        StatusText = $"注入完成，但WebSocket启动失败: {wsEx.Message}";
+                    }
                 }
                 else
                 {
-                    StatusText = "注入器连接失败，请确保Steam已开启调试模式";
+                    StatusText = "注入失败，请检查Steam路径";
                 }
             }
             catch (Exception ex)
