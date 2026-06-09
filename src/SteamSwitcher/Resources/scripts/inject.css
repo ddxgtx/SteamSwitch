@@ -1,0 +1,44 @@
+.steamswitch-float-btn {
+    position: fixed !important;
+    bottom: 80px !important;
+    right: 30px !important;
+    z-index: 99999 !important;
+    background: linear-gradient(135deg, #0A84FF, #0066CC) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 12px !important;
+    padding: 14px 24px !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    box-shadow: 0 6px 20px rgba(10, 132, 255, 0.4) !important;
+    font-family: 'Segoe UI', Arial, sans-serif !important;
+}
+.steamswitch-float-btn:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: 0 8px 25px rgba(10, 132, 255, 0.5) !important;
+}
+.steamswitch-panel {
+    position: fixed !important;
+    bottom: 140px !important;
+    right: 30px !important;
+    z-index: 99998 !important;
+    background: rgba(27, 40, 56, 0.97) !important;
+    border-radius: 14px !important;
+    padding: 18px !important;
+    min-width: 260px !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6) !important;
+    display: none !important;
+    font-family: 'Segoe UI', Arial, sans-serif !important;
+}
+.steamswitch-panel.show { display: block !important; }
+.steamswitch-panel h3 { color: #FFF !important; font-size: 15px !important; margin: 0 0 14px 0 !important; font-weight: 600 !important; }
+.steamswitch-acc { display: flex !important; align-items: center !important; gap: 12px !important; padding: 10px 14px !important; border-radius: 8px !important; cursor: pointer !important; margin-bottom: 4px !important; }
+.steamswitch-acc:hover { background: rgba(255,255,255,0.08) !important; }
+.steamswitch-acc.active { background: rgba(10,132,255,0.25) !important; }
+.steamswitch-acc .ss-name { color: #FFF !important; font-size: 14px !important; }
+.steamswitch-acc .ss-user { color: #8F98A0 !important; font-size: 11px !important; }
+.steamswitch-acc .ss-badge { background: #30D158 !important; color: white !important; font-size: 10px !important; padding: 3px 8px !important; border-radius: 6px !important; margin-left: auto !important; }

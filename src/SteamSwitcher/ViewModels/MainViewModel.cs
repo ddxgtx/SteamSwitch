@@ -309,7 +309,7 @@ namespace SteamSwitcher.ViewModels
 
             try
             {
-                // 先启动WebSocket服务器获取随机端口
+                // 启动WebSocket服务器
                 int wsPort = 0;
                 try
                 {
@@ -332,7 +332,7 @@ namespace SteamSwitcher.ViewModels
                     Application.Current.Dispatcher.Invoke(() => StatusText = msg);
                 };
 
-                var injected = _injector.InjectAndRestart(wsPort);
+                var injected = await _injector.InjectAsync(wsPort);
                 
                 if (injected)
                 {
@@ -341,7 +341,7 @@ namespace SteamSwitcher.ViewModels
                 }
                 else
                 {
-                    StatusText = "注入失败，请检查Steam路径";
+                    StatusText = "注入失败，请确保Steam正在运行";
                 }
             }
             catch (Exception ex)

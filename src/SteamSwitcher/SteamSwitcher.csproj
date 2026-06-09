@@ -26,6 +26,9 @@
 
   <ItemGroup>
     <Resource Include="Resources\steam.ico" />
+    <Content Include="Resources\scripts\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>
