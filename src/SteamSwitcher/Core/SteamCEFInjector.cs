@@ -51,7 +51,7 @@ namespace SteamSwitcher.Core
             }
         }
 
-        public bool InjectCustomFiles()
+        public bool InjectCustomFiles(int wsPort = 8081)
         {
             try
             {
@@ -186,7 +186,6 @@ namespace SteamSwitcher.Core
 
                 // 写入自定义JS
                 var jsPath = Path.Combine(steamuiPath, "libraryroot.custom.js");
-                var wsPort = 8081;
                 var js = $@"
 (function() {{
     'use strict';

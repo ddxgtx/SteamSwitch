@@ -25,10 +25,12 @@ namespace SteamSwitcher.Core
         public bool IsRunning { get; private set; }
         public int ClientCount => _clients.Count;
 
-        public WebSocketServer(int port = 8081)
+        public WebSocketServer(int port = 0)
         {
-            _port = port;
+            _port = port; // 0 = 随机可用端口
         }
+
+        public int ActualPort { get; private set; }
 
         public async Task StartAsync()
         {
@@ -39,12 +41,13 @@ namespace SteamSwitcher.Core
                 _cts = new CancellationTokenSource();
                 _listener = new TcpListener(IPAddress.Loopback, _port);
                 _listener.Start();
+                ActualPort = ((IPEndPoint)_listener.LocalEndpoint).Port;
                 IsRunning = true;
                 _ = ListenAsync(_cts.Token);
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"无法启动服务器(端口{_port}): {ex.Message}", ex);
+                throw new InvalidOperationException($"无法启动服务器: {ex.Message}", ex);
             }
         }
 

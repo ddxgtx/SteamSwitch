@@ -309,33 +309,36 @@ namespace SteamSwitcher.ViewModels
 
             try
             {
-                // 创建注入器
+                // 先启动WebSocket服务器获取随机端口
+                int wsPort = 0;
+                try
+                {
+                    _wsServer = new WebSocketServer(0); // 0 = 随机端口
+                    _wsServer.MessageReceived += OnWebSocketMessage;
+                    await _wsServer.StartAsync();
+                    wsPort = _wsServer.ActualPort;
+                    StatusText = $"WebSocket服务器已启动 (端口: {wsPort})";
+                }
+                catch (Exception wsEx)
+                {
+                    StatusText = $"WebSocket启动失败: {wsEx.Message}";
+                    IsLoading = false;
+                    return;
+                }
+
+                // 创建注入器并注入文件
                 _injector = new SteamCEFInjector(_gameBinding, _accountManager);
                 _injector.StatusChanged += (s, msg) => 
                 {
                     Application.Current.Dispatcher.Invoke(() => StatusText = msg);
                 };
 
-                // 注入自定义文件到Steam目录
-                var injected = _injector.InjectCustomFiles();
+                var injected = _injector.InjectCustomFiles(wsPort);
                 
                 if (injected)
                 {
                     IsInjectorConnected = true;
-                    StatusText = "注入完成！请重启Steam库界面生效";
-                    
-                    // 启动WebSocket服务器（用于JS通信）
-                    try
-                    {
-                        _wsServer = new WebSocketServer(8081);
-                        _wsServer.MessageReceived += OnWebSocketMessage;
-                        await _wsServer.StartAsync();
-                        StatusText = "注入完成！WebSocket服务器已启动";
-                    }
-                    catch (Exception wsEx)
-                    {
-                        StatusText = $"注入完成，但WebSocket启动失败: {wsEx.Message}";
-                    }
+                    StatusText = $"注入完成！端口: {wsPort}，请重启Steam库界面";
                 }
                 else
                 {
