@@ -182,44 +182,17 @@ namespace SteamSwitcher.Core
                 if (silent)
                     args += " -silent";
 
-                if (silent)
+                var startInfo = new ProcessStartInfo
                 {
-                    // 使用CreateProcess以隐藏窗口的方式启动
-                    var si = new STARTUPINFO();
-                    si.cb = Marshal.SizeOf(si);
-                    si.dwFlags = (int)STARTF_USESHOWWINDOW;
-                    si.wShowWindow = SW_HIDE_SHORT;
+                    FileName = SteamExePath,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    CreateNoWindow = silent,  // 无感模式下不创建窗口
+                    WindowStyle = silent ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal
+                };
 
-                    var pi = new PROCESS_INFORMATION();
-
-                    bool success = CreateProcess(
-                        SteamExePath,
-                        $"\"{SteamExePath}\" {args}",
-                        IntPtr.Zero,
-                        IntPtr.Zero,
-                        false,
-                        CREATE_NEW_CONSOLE,
-                        IntPtr.Zero,
-                        Path.GetDirectoryName(SteamExePath),
-                        ref si,
-                        out pi);
-
-                    if (success)
-                    {
-                        // 关闭句柄
-                        if (pi.hProcess != IntPtr.Zero)
-                            Marshal.Release(pi.hProcess);
-                        if (pi.hThread != IntPtr.Zero)
-                            Marshal.Release(pi.hThread);
-                    }
-
-                    return success;
-                }
-                else
-                {
-                    Process.Start(SteamExePath, args);
-                    return true;
-                }
+                Process.Start(startInfo);
+                return true;
             }
             catch
             {

@@ -216,26 +216,7 @@ namespace SteamSwitcher.ViewModels
                     if (launchSteam && AutoStartSteam)
                     {
                         StatusText = "正在启动Steam...";
-                        
-                        if (SilentSwitch)
-                        {
-                            // 使用CreateProcess以隐藏窗口方式启动
-                            _accountManager.LaunchSteam(true);
-                            
-                            // 持续隐藏确保窗口不显示
-                            _ = Task.Run(async () =>
-                            {
-                                for (int i = 0; i < 200; i++)
-                                {
-                                    await Task.Delay(25);
-                                    _accountManager.GetSteamService().HideAllSteamWindows();
-                                }
-                            });
-                        }
-                        else
-                        {
-                            _accountManager.LaunchSteam(false);
-                        }
+                        _accountManager.LaunchSteam(SilentSwitch);
                     }
                 }
                 else
