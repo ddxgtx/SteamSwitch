@@ -130,9 +130,9 @@ namespace SteamSwitcher.Core
             }
         }
 
-        public bool LaunchSteam()
+        public bool LaunchSteam(bool silent = false)
         {
-            return _steamService.StartSteam();
+            return _steamService.StartSteam(silent: silent);
         }
 
         private async Task UpdateLoginUsersVdfAsync(string activeSteamId)

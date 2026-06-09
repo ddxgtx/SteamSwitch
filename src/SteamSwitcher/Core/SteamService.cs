@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 namespace SteamSwitcher.Core
@@ -8,6 +10,20 @@ namespace SteamSwitcher.Core
     public class SteamService
     {
         private readonly RegistryHelper _registryHelper = new();
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        private const int SW_MINIMIZE = 6;
+        private const int SW_HIDE = 0;
+        private const int SW_SHOWMINNOACTIVE = 7;
+        private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOACTIVATE = 0x0010;
 
         public string? SteamPath { get; private set; }
         public string? SteamExePath { get; private set; }
@@ -76,21 +92,71 @@ namespace SteamSwitcher.Core
             }
         }
 
-        public bool StartSteam(string? username = null)
+        public bool StartSteam(string? username = null, bool silent = false)
         {
             if (string.IsNullOrEmpty(SteamExePath) || !File.Exists(SteamExePath))
                 return false;
 
             try
             {
-                var args = string.IsNullOrEmpty(username) ? "" : $"-login {username}";
-                Process.Start(SteamExePath, args);
+                var args = new List<string>();
+                
+                if (!string.IsNullOrEmpty(username))
+                    args.Add($"-login {username}");
+                
+                if (silent)
+                    args.Add("-silent");
+
+                var process = Process.Start(SteamExePath, string.Join(" ", args));
+                
+                if (silent && process != null)
+                {
+                    // 等待Steam窗口出现然后最小化
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(2000);
+                        MinimizeSteamWindows();
+                    });
+                }
+
                 return true;
             }
             catch
             {
                 return false;
             }
+        }
+
+        public void MinimizeSteamWindows()
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName("steam");
+                foreach (var process in processes)
+                {
+                    if (process.MainWindowHandle != IntPtr.Zero)
+                    {
+                        ShowWindow(process.MainWindowHandle, SW_MINIMIZE);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void HideSteamWindows()
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName("steam");
+                foreach (var process in processes)
+                {
+                    if (process.MainWindowHandle != IntPtr.Zero)
+                    {
+                        ShowWindow(process.MainWindowHandle, SW_HIDE);
+                    }
+                }
+            }
+            catch { }
         }
 
         public string GetLoginUsersPath()

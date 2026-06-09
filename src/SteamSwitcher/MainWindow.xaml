@@ -381,14 +381,21 @@
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
                         <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}"
                                   Style="{StaticResource AppCheckBox}"/>
-                        <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}"
+                        <CheckBox Content="无感切换" IsChecked="{Binding SilentSwitch}"
                                   Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
-                        <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}"
-                                  Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked"
+                        <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}"
                                   Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                     </StackPanel>
 
                     <Grid Grid.Row="1">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,10">
+                            <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}"
+                                      Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked"
+                                      Style="{StaticResource AppCheckBox}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Grid.Row="2">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>

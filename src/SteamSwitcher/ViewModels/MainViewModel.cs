@@ -60,6 +60,9 @@ namespace SteamSwitcher.ViewModels
         [ObservableProperty]
         private bool _roundedMode;
 
+        [ObservableProperty]
+        private bool _silentSwitch;
+
         public AccountManager GetAccountManager() => _accountManager;
         public AppSettings GetSettings() => _settings;
 
@@ -83,6 +86,7 @@ namespace SteamSwitcher.ViewModels
             _avatarSize = _settings.AvatarSize;
             _glassEnabled = _settings.GlassEnabled;
             _roundedMode = _settings.RoundedMode;
+            _silentSwitch = _settings.SilentSwitch;
 
             PropertyChanged += OnPropertyChanged;
         }
@@ -117,6 +121,9 @@ namespace SteamSwitcher.ViewModels
                     break;
                 case nameof(RoundedMode):
                     _settings.RoundedMode = RoundedMode;
+                    break;
+                case nameof(SilentSwitch):
+                    _settings.SilentSwitch = SilentSwitch;
                     break;
             }
             SettingsService.Save(_settings);
@@ -196,7 +203,13 @@ namespace SteamSwitcher.ViewModels
                 if (AutoStartSteam)
                 {
                     StatusText = "正在启动Steam...";
-                    _accountManager.LaunchSteam();
+                    _accountManager.LaunchSteam(SilentSwitch);
+                    
+                    if (SilentSwitch)
+                    {
+                        await Task.Delay(1500);
+                        _accountManager.GetSteamService().MinimizeSteamWindows();
+                    }
                 }
             }
             else
