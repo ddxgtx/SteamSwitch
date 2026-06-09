@@ -313,11 +313,10 @@ namespace SteamSwitcher.ViewModels
                 int wsPort = 0;
                 try
                 {
-                    _wsServer = new WebSocketServer(0); // 0 = 随机端口
+                    _wsServer = new WebSocketServer(0);
                     _wsServer.MessageReceived += OnWebSocketMessage;
                     await _wsServer.StartAsync();
                     wsPort = _wsServer.ActualPort;
-                    StatusText = $"WebSocket服务器已启动 (端口: {wsPort})";
                 }
                 catch (Exception wsEx)
                 {
@@ -338,7 +337,13 @@ namespace SteamSwitcher.ViewModels
                 if (injected)
                 {
                     IsInjectorConnected = true;
-                    StatusText = $"注入完成！端口: {wsPort}，请重启Steam库界面";
+                    
+                    // 自动重启Steam库界面
+                    StatusText = "正在重启Steam库界面...";
+                    await Task.Delay(500);
+                    _injector.RestartSteamLibrary();
+                    
+                    StatusText = $"注入完成！端口: {wsPort}";
                 }
                 else
                 {
@@ -371,6 +376,52 @@ namespace SteamSwitcher.ViewModels
             {
                 switch (e.action)
                 {
+                    case "getAccounts":
+                        // 发送账号列表到前端
+                        var accList = Accounts.Select(a => new
+                        {
+                            steamId = a.SteamId,
+                            name = a.DisplayName,
+                            username = a.Username,
+                            isCurrent = a.IsCurrent
+                        }).ToList();
+                        
+                        await _wsServer?.SendToAllAsync("accountsData", new
+                        {
+                            accounts = accList,
+                            current = _accountManager.CurrentAccount?.PersonaName
+                        });
+                        break;
+
+                    case "switchAccount":
+                        if (e.data.TryGetProperty("steamId", out var switchSteamId))
+                        {
+                            var targetAccount = _accountManager.Accounts.FirstOrDefault(
+                                a => a.SteamId == switchSteamId.GetString());
+                            
+                            if (targetAccount != null)
+                            {
+                                var success = await _accountManager.SwitchAccountAsync(targetAccount);
+                                
+                                await _wsServer?.SendToAllAsync("switchResult", new
+                                {
+                                    success = success,
+                                    accountName = targetAccount.PersonaName,
+                                    error = success ? "" : "请先关闭Steam"
+                                });
+                                
+                                if (success)
+                                {
+                                    Application.Current.Dispatcher.Invoke(() =>
+                                    {
+                                        UpdateCurrentAccount();
+                                        StatusText = $"已切换到 {targetAccount.PersonaName}";
+                                    });
+                                }
+                            }
+                        }
+                        break;
+
                     case "switchAndLaunch":
                         if (e.data.TryGetProperty("appId", out var appIdElement))
                         {
@@ -378,7 +429,6 @@ namespace SteamSwitcher.ViewModels
                             var gameName = e.data.TryGetProperty("gameName", out var nameEl) 
                                 ? nameEl.GetString() ?? "" : "";
                             
-                            // 获取绑定的账号
                             var binding = _gameBinding.GetBinding(appId);
                             if (binding?.AccountSteamId != null)
                             {
@@ -396,7 +446,6 @@ namespace SteamSwitcher.ViewModels
                                     await _accountManager.SwitchAccountAsync(account);
                                     _accountManager.LaunchSteam();
                                     
-                                    // 记录游戏时间
                                     await _gameBinding.RecordPlayAsync(
                                         appId, account.SteamId, account.AccountName);
                                 }

@@ -28,11 +28,8 @@ namespace SteamSwitcher.Core
             try
             {
                 StatusChanged?.Invoke(this, "正在检测Steam调试端口...");
-
-                // 检查调试端口是否可用
                 using var http = new HttpClient();
                 http.Timeout = TimeSpan.FromSeconds(3);
-                
                 var response = await http.GetAsync($"http://localhost:{_debugPort}/json/version");
                 if (response.IsSuccessStatusCode)
                 {
@@ -40,8 +37,7 @@ namespace SteamSwitcher.Core
                     StatusChanged?.Invoke(this, "已连接到Steam CEF");
                     return true;
                 }
-
-                StatusChanged?.Invoke(this, "Steam调试端口未开放，请重启Steam");
+                StatusChanged?.Invoke(this, "Steam调试端口未开放");
                 return false;
             }
             catch (Exception ex)
@@ -64,263 +60,16 @@ namespace SteamSwitcher.Core
 
                 var steamuiPath = Path.Combine(steamPath, "steamui");
                 if (!Directory.Exists(steamuiPath))
-                {
                     Directory.CreateDirectory(steamuiPath);
-                }
 
-                // 写入自定义CSS - Steam会自动加载这些文件
-                var cssPath = Path.Combine(steamuiPath, "libraryroot.custom.css");
-                var css = @"
-/* Steam Switch - Custom Styles */
-.steamswitch-container {
-    position: fixed;
-    bottom: 60px;
-    right: 20px;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
+                // 写入CSS
+                File.WriteAllText(Path.Combine(steamuiPath, "libraryroot.custom.css"), GetCssContent(), System.Text.Encoding.UTF8);
 
-.steamswitch-btn {
-    background: linear-gradient(135deg, #0A84FF, #0066CC);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 12px 20px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.3);
-    transition: all 0.2s ease;
-    font-family: 'Segoe UI', Arial, sans-serif;
-}
+                // 写入JS（用端口替换占位符）
+                var js = GetJsContent().Replace("__WS_PORT__", wsPort.ToString());
+                File.WriteAllText(Path.Combine(steamuiPath, "libraryroot.custom.js"), js, System.Text.Encoding.UTF8);
 
-.steamswitch-btn:hover {
-    background: linear-gradient(135deg, #409CFF, #0A84FF);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(10, 132, 255, 0.4);
-}
-
-.steamswitch-btn:active {
-    transform: translateY(0);
-}
-
-.steamswitch-btn .icon {
-    font-size: 18px;
-}
-
-.steamswitch-btn.secondary {
-    background: #2A475E;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.steamswitch-btn.secondary:hover {
-    background: #3D6A8E;
-}
-
-.steamswitch-panel {
-    background: rgba(27, 40, 56, 0.95);
-    border-radius: 12px;
-    padding: 16px;
-    min-width: 200px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(10px);
-}
-
-.steamswitch-panel h3 {
-    color: #FFFFFF;
-    font-size: 14px;
-    margin: 0 0 12px 0;
-    font-weight: 600;
-}
-
-.steamswitch-account-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 0.15s;
-}
-
-.steamswitch-account-item:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
-
-.steamswitch-account-item.active {
-    background: rgba(10, 132, 255, 0.2);
-}
-
-.steamswitch-account-item .avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: #2A475E;
-}
-
-.steamswitch-account-item .name {
-    color: #FFFFFF;
-    font-size: 13px;
-}
-
-.steamswitch-account-item .status {
-    color: #66C0F4;
-    font-size: 11px;
-}
-
-.steamswitch-badge {
-    background: #30D158;
-    color: white;
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    margin-left: auto;
-}
-";
-                File.WriteAllText(cssPath, css);
-
-                // 写入自定义JS
-                var jsPath = Path.Combine(steamuiPath, "libraryroot.custom.js");
-                var js = $@"
-(function() {{
-    'use strict';
-    
-    if (window.__steamswitch_loaded) return;
-    window.__steamswitch_loaded = true;
-    
-    console.log('[SteamSwitch] Loading...');
-    
-    // WebSocket连接
-    let ws = null;
-    let reconnectTimer = null;
-    
-    function connectWebSocket() {{
-        try {{
-            ws = new WebSocket('ws://localhost:{wsPort}');
-            
-            ws.onopen = function() {{
-                console.log('[SteamSwitch] Connected to server');
-                if (reconnectTimer) {{
-                    clearInterval(reconnectTimer);
-                    reconnectTimer = null;
-                }}
-            }};
-            
-            ws.onmessage = function(e) {{
-                console.log('[SteamSwitch] Message:', e.data);
-                try {{
-                    var msg = JSON.parse(e.data);
-                    if (msg.action === 'refreshBindings') {{
-                        // 刷新绑定数据
-                        loadBindings();
-                    }}
-                }} catch(err) {{
-                    console.error('[SteamSwitch] Parse error:', err);
-                }}
-            }};
-            
-            ws.onclose = function() {{
-                console.log('[SteamSwitch] Disconnected');
-                if (!reconnectTimer) {{
-                    reconnectTimer = setInterval(connectWebSocket, 5000);
-                }}
-            }};
-            
-            ws.onerror = function(err) {{
-                console.log('[SteamSwitch] Error:', err);
-            }};
-        }} catch(e) {{
-            console.log('[SteamSwitch] Connection failed:', e);
-        }}
-    }}
-    
-    function sendToServer(action, data) {{
-        if (ws && ws.readyState === WebSocket.OPEN) {{
-            ws.send(JSON.stringify({{ action: action, ...data }}));
-            return true;
-        }}
-        return false;
-    }}
-    
-    // 获取当前游戏AppID
-    function getCurrentAppId() {{
-        var url = window.location.href;
-        var match = url.match(/app\/(\d+)/);
-        return match ? parseInt(match[1]) : null;
-    }}
-    
-    // 获取游戏名称
-    function getGameName() {{
-        var titleEl = document.querySelector('[class*=""AppName""]') || 
-                     document.querySelector('h1') ||
-                     document.querySelector('[class*=""title""]');
-        return titleEl ? titleEl.textContent.trim() : document.title;
-    }}
-    
-    // 注入按钮到游戏详情页
-    function injectGameDetailButton() {{
-        var appId = getCurrentAppId();
-        if (!appId) return;
-        
-        // 检查是否已注入
-        if (document.getElementById('steamswitch-inject-btn')) return;
-        
-        // 查找启动按钮区域
-        var launchArea = document.querySelector('[class*=""GameDetailsPlayArea""]') ||
-                        document.querySelector('[class*=""LaunchButton""]') ||
-                        document.querySelector('[class*=""PlayButton""]') ||
-                        document.querySelector('[class*=""apphub_OtherSiteAlts""]');
-        
-        if (!launchArea) return;
-        
-        // 创建按钮容器
-        var container = document.createElement('div');
-        container.id = 'steamswitch-inject-btn';
-        container.style.cssText = 'display:flex;gap:8px;margin-top:10px;';
-        
-        // 切换并启动按钮
-        var switchBtn = document.createElement('button');
-        switchBtn.className = 'steamswitch-btn';
-        switchBtn.innerHTML = '<span class=""icon"">⚡</span> 切换账号启动';
-        switchBtn.onclick = function() {{
-            sendToServer('switchAndLaunch', {{ appId: appId, gameName: getGameName() }});
-        }};
-        
-        // 绑定账号按钮
-        var bindBtn = document.createElement('button');
-        bindBtn.className = 'steamswitch-btn secondary';
-        bindBtn.innerHTML = '<span class=""icon"">📌</span> 绑定账号';
-        bindBtn.onclick = function() {{
-            sendToServer('showBindingDialog', {{ appId: appId, gameName: getGameName() }});
-        }};
-        
-        container.appendChild(switchBtn);
-        container.appendChild(bindBtn);
-        
-        // 插入到启动按钮后面
-        launchArea.parentNode.insertBefore(container, launchArea.nextSibling);
-        
-        console.log('[SteamSwitch] Injected button for app:', appId);
-    }}
-    
-    // 定期检查并注入
-    setInterval(injectGameDetailButton, 1000);
-    
-    // 初始化
-    connectWebSocket();
-    injectGameDetailButton();
-    
-    console.log('[SteamSwitch] Loaded successfully');
-}})();
-";
-                File.WriteAllText(jsPath, js);
-
-                StatusChanged?.Invoke(this, "注入文件已创建，重启Steam库界面生效");
+                StatusChanged?.Invoke(this, $"注入文件已创建 (端口: {wsPort})");
                 return true;
             }
             catch (Exception ex)
@@ -328,6 +77,241 @@ namespace SteamSwitcher.Core
                 StatusChanged?.Invoke(this, $"注入失败: {ex.Message}");
                 return false;
             }
+        }
+
+        public bool RestartSteamLibrary()
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName("steamwebhelper");
+                foreach (var proc in processes)
+                {
+                    try { proc.Kill(); } catch { }
+                }
+                StatusChanged?.Invoke(this, "Steam库界面已重启");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke(this, $"重启失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        private string GetCssContent()
+        {
+            return @"/* Steam Switch */
+.steamswitch-float-btn {
+    position: fixed !important;
+    bottom: 80px !important;
+    right: 30px !important;
+    z-index: 99999 !important;
+    background: linear-gradient(135deg, #0A84FF, #0066CC) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 12px !important;
+    padding: 14px 24px !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    box-shadow: 0 6px 20px rgba(10, 132, 255, 0.4) !important;
+    transition: all 0.2s ease !important;
+    font-family: 'Segoe UI', Arial, sans-serif !important;
+}
+.steamswitch-float-btn:hover {
+    transform: translateY(-3px) scale(1.02) !important;
+    box-shadow: 0 8px 25px rgba(10, 132, 255, 0.5) !important;
+}
+.steamswitch-float-btn:active {
+    transform: translateY(0) scale(0.98) !important;
+}
+.steamswitch-float-btn .ss-icon { font-size: 20px !important; }
+.steamswitch-panel {
+    position: fixed !important;
+    bottom: 140px !important;
+    right: 30px !important;
+    z-index: 99998 !important;
+    background: rgba(27, 40, 56, 0.97) !important;
+    border-radius: 14px !important;
+    padding: 18px !important;
+    min-width: 260px !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(102,192,244,0.15) !important;
+    display: none !important;
+    font-family: 'Segoe UI', Arial, sans-serif !important;
+}
+.steamswitch-panel.show { display: block !important; }
+.steamswitch-panel h3 {
+    color: #FFFFFF !important;
+    font-size: 15px !important;
+    margin: 0 0 14px 0 !important;
+    font-weight: 600 !important;
+    padding-bottom: 10px !important;
+    border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+}
+.steamswitch-acc {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    padding: 10px 14px !important;
+    border-radius: 8px !important;
+    cursor: pointer !important;
+    transition: background 0.15s !important;
+    margin-bottom: 4px !important;
+}
+.steamswitch-acc:hover { background: rgba(255,255,255,0.08) !important; }
+.steamswitch-acc.active { background: rgba(10,132,255,0.25) !important; }
+.steamswitch-acc .ss-avatar {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 8px !important;
+    background: #2A475E !important;
+    object-fit: cover !important;
+}
+.steamswitch-acc .ss-name { color: #FFF !important; font-size: 14px !important; font-weight: 500 !important; }
+.steamswitch-acc .ss-user { color: #8F98A0 !important; font-size: 11px !important; margin-top: 2px !important; }
+.steamswitch-acc .ss-badge {
+    background: #30D158 !important;
+    color: white !important;
+    font-size: 10px !important;
+    padding: 3px 8px !important;
+    border-radius: 6px !important;
+    margin-left: auto !important;
+    font-weight: 600 !important;
+}
+";
+        }
+
+        private string GetJsContent()
+        {
+            return @"(function() {
+    if (window.__steamswitch_loaded) return;
+    window.__steamswitch_loaded = true;
+    console.log('[SteamSwitch] Loading...');
+
+    var wsPort = __WS_PORT__;
+    var ws = null;
+    var reconnectTimer = null;
+    var accounts = [];
+    var currentAccount = null;
+
+    function connectWS() {
+        try {
+            ws = new WebSocket('ws://localhost:' + wsPort);
+            ws.onopen = function() {
+                console.log('[SteamSwitch] WS connected');
+                if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+                ws.send(JSON.stringify({ action: 'getAccounts' }));
+            };
+            ws.onmessage = function(e) {
+                console.log('[SteamSwitch] WS msg:', e.data);
+                try {
+                    var msg = JSON.parse(e.data);
+                    if (msg.action === 'accountsData') {
+                        accounts = msg.accounts || [];
+                        currentAccount = msg.current || null;
+                        updatePanel();
+                    } else if (msg.action === 'switchResult') {
+                        if (msg.success) {
+                            showNotification('已切换到 ' + msg.accountName);
+                            currentAccount = msg.accountName;
+                            ws.send(JSON.stringify({ action: 'getAccounts' }));
+                        } else {
+                            showNotification('切换失败: ' + (msg.error || '未知错误'));
+                        }
+                    }
+                } catch(err) {
+                    console.error('[SteamSwitch] Parse error:', err);
+                }
+            };
+            ws.onclose = function() {
+                console.log('[SteamSwitch] WS disconnected');
+                if (!reconnectTimer) reconnectTimer = setInterval(connectWS, 5000);
+            };
+        } catch(e) {
+            console.log('[SteamSwitch] WS error:', e);
+        }
+    }
+
+    function sendMsg(action, data) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ action: action, ...data }));
+            return true;
+        }
+        return false;
+    }
+
+    function showNotification(text) {
+        var n = document.createElement('div');
+        n.style.cssText = 'position:fixed;top:20px;right:20px;z-index:999999;background:#1B2838;color:white;padding:16px 24px;border-radius:10px;font-size:14px;font-family:Segoe UI,Arial,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,0.5);border:1px solid rgba(102,192,244,0.2);';
+        n.textContent = text;
+        document.body.appendChild(n);
+        setTimeout(function() { n.remove(); }, 3000);
+    }
+
+    function updatePanel() {
+        var panel = document.getElementById('steamswitch-panel');
+        if (!panel) return;
+        var list = panel.querySelector('.ss-list');
+        if (!list) return;
+        list.innerHTML = '';
+        accounts.forEach(function(acc) {
+            var item = document.createElement('div');
+            item.className = 'steamswitch-acc' + (acc.name === currentAccount ? ' active' : '');
+            var html = '<div>';
+            html += '<div class=""ss-name"">' + acc.name + '</div>';
+            html += '<div class=""ss-user"">' + acc.username + '</div>';
+            html += '</div>';
+            if (acc.name === currentAccount) {
+                html += '<span class=""ss-badge"">当前</span>';
+            }
+            item.innerHTML = html;
+            item.onclick = function() {
+                sendMsg('switchAccount', { steamId: acc.steamId });
+            };
+            list.appendChild(item);
+        });
+    }
+
+    function createUI() {
+        if (document.getElementById('steamswitch-float-btn')) return;
+
+        var btn = document.createElement('button');
+        btn.id = 'steamswitch-float-btn';
+        btn.className = 'steamswitch-float-btn';
+        btn.innerHTML = '<span class=""ss-icon"">⚡</span> Steam Switch';
+        btn.onclick = function(e) {
+            e.stopPropagation();
+            var panel = document.getElementById('steamswitch-panel');
+            if (panel) panel.classList.toggle('show');
+        };
+        document.body.appendChild(btn);
+
+        var panel = document.createElement('div');
+        panel.id = 'steamswitch-panel';
+        panel.className = 'steamswitch-panel';
+        panel.innerHTML = '<h3>⚡ 快速切换账号</h3><div class=""ss-list""></div>';
+        document.body.appendChild(panel);
+
+        document.addEventListener('click', function(e) {
+            if (!panel.contains(e.target) && e.target !== btn) {
+                panel.classList.remove('show');
+            }
+        });
+
+        updatePanel();
+    }
+
+    setTimeout(function() {
+        createUI();
+        connectWS();
+    }, 2000);
+})();
+";
         }
 
         public void Dispose()
