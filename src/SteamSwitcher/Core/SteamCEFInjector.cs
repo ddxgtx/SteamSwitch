@@ -1,53 +1,31 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Net.Http;
-using System.Text.Json;
+using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace SteamSwitcher.Core
 {
     public class SteamCEFInjector : IDisposable
     {
-        private readonly int _debugPort;
         private readonly GameAccountBinding _binding;
         private readonly AccountManager _accountManager;
 
         public bool IsConnected { get; private set; }
         public event EventHandler<string>? StatusChanged;
 
-        public SteamCEFInjector(GameAccountBinding binding, AccountManager accountManager, int debugPort = 8080)
+        // 注入标记，用于识别和移除注入内容
+        private const string INJECTION_START = "/* === STEAM SWITCH INJECT START === */";
+        private const string INJECTION_END = "/* === STEAM SWITCH INJECT END === */";
+
+        public SteamCEFInjector(GameAccountBinding binding, AccountManager accountManager)
         {
             _binding = binding;
             _accountManager = accountManager;
-            _debugPort = debugPort;
         }
 
-        public async Task<bool> ConnectAsync()
-        {
-            try
-            {
-                StatusChanged?.Invoke(this, "正在检测Steam调试端口...");
-                using var http = new HttpClient();
-                http.Timeout = TimeSpan.FromSeconds(3);
-                var response = await http.GetAsync($"http://localhost:{_debugPort}/json/version");
-                if (response.IsSuccessStatusCode)
-                {
-                    IsConnected = true;
-                    StatusChanged?.Invoke(this, "已连接到Steam CEF");
-                    return true;
-                }
-                StatusChanged?.Invoke(this, "Steam调试端口未开放");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                StatusChanged?.Invoke(this, $"连接失败: {ex.Message}");
-                return false;
-            }
-        }
-
-        public bool InjectCustomFiles(int wsPort = 8081)
+        public bool InjectAndRestart(int wsPort = 8081)
         {
             try
             {
@@ -59,22 +37,135 @@ namespace SteamSwitcher.Core
                 }
 
                 var steamuiPath = Path.Combine(steamPath, "steamui");
-                if (!Directory.Exists(steamuiPath))
-                    Directory.CreateDirectory(steamuiPath);
 
-                // 写入CSS
-                File.WriteAllText(Path.Combine(steamuiPath, "libraryroot.custom.css"), GetCssContent(), System.Text.Encoding.UTF8);
+                // 查找Steam的库CSS文件
+                var cssFiles = Directory.GetFiles(steamuiPath, "*.css", SearchOption.TopDirectoryOnly)
+                    .Where(f => f.Contains("library") || f.Contains("Library"))
+                    .ToList();
 
-                // 写入JS（用端口替换占位符）
-                var js = GetJsContent().Replace("__WS_PORT__", wsPort.ToString());
-                File.WriteAllText(Path.Combine(steamuiPath, "libraryroot.custom.js"), js, System.Text.Encoding.UTF8);
+                // 查找库JS文件
+                var jsFiles = Directory.GetFiles(steamuiPath, "*.js", SearchOption.TopDirectoryOnly)
+                    .Where(f => f.Contains("library") || f.Contains("Library"))
+                    .ToList();
 
-                StatusChanged?.Invoke(this, $"注入文件已创建 (端口: {wsPort})");
+                StatusChanged?.Invoke(this, $"找到 {cssFiles.Count} 个CSS, {jsFiles.Count} 个JS文件");
+
+                // 方法1: 尝试修改libraryroot相关文件
+                var injected = false;
+
+                // 查找并注入CSS
+                foreach (var cssFile in cssFiles)
+                {
+                    if (InjectIntoFile(cssFile, GetCssContent()))
+                    {
+                        injected = true;
+                        StatusChanged?.Invoke(this, $"已注入CSS: {Path.GetFileName(cssFile)}");
+                        break;
+                    }
+                }
+
+                // 如果没找到特定文件，尝试注入到所有小CSS文件
+                if (!injected)
+                {
+                    foreach (var cssFile in cssFiles.Where(f => new FileInfo(f).Length < 100000))
+                    {
+                        if (InjectIntoFile(cssFile, GetCssContent()))
+                        {
+                            injected = true;
+                            StatusChanged?.Invoke(this, $"已注入CSS: {Path.GetFileName(cssFile)}");
+                            break;
+                        }
+                    }
+                }
+
+                // 注入JS
+                var jsContent = GetJsContent().Replace("__WS_PORT__", wsPort.ToString());
+                injected = false;
+
+                foreach (var jsFile in jsFiles)
+                {
+                    if (InjectIntoFile(jsFile, jsContent))
+                    {
+                        injected = true;
+                        StatusChanged?.Invoke(this, $"已注入JS: {Path.GetFileName(jsFile)}");
+                        break;
+                    }
+                }
+
+                // 重启Steam库界面
+                StatusChanged?.Invoke(this, "正在重启Steam库界面...");
+                RestartSteamLibrary();
+
+                StatusChanged?.Invoke(this, $"注入完成！端口: {wsPort}");
                 return true;
             }
             catch (Exception ex)
             {
                 StatusChanged?.Invoke(this, $"注入失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool InjectIntoFile(string filePath, string content)
+        {
+            try
+            {
+                var fileContent = File.ReadAllText(filePath, Encoding.UTF8);
+
+                // 移除旧的注入内容
+                var startIndex = fileContent.IndexOf(INJECTION_START);
+                var endIndex = fileContent.IndexOf(INJECTION_END);
+                if (startIndex >= 0 && endIndex > startIndex)
+                {
+                    fileContent = fileContent.Remove(startIndex, endIndex - startIndex + INJECTION_END.Length);
+                }
+
+                // 添加新的注入内容
+                var injection = $"\n{INJECTION_START}\n{content}\n{INJECTION_END}\n";
+                fileContent += injection;
+
+                File.WriteAllText(filePath, fileContent, Encoding.UTF8);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public bool RemoveInjection()
+        {
+            try
+            {
+                var steamPath = _accountManager.GetSteamService().SteamPath;
+                if (string.IsNullOrEmpty(steamPath)) return false;
+
+                var steamuiPath = Path.Combine(steamPath, "steamui");
+                var allFiles = Directory.GetFiles(steamuiPath, "*.*", SearchOption.TopDirectoryOnly)
+                    .Where(f => f.EndsWith(".css") || f.EndsWith(".js"));
+
+                foreach (var file in allFiles)
+                {
+                    try
+                    {
+                        var content = File.ReadAllText(file, Encoding.UTF8);
+                        var startIndex = content.IndexOf(INJECTION_START);
+                        var endIndex = content.IndexOf(INJECTION_END);
+
+                        if (startIndex >= 0 && endIndex > startIndex)
+                        {
+                            content = content.Remove(startIndex, endIndex - startIndex + INJECTION_END.Length);
+                            File.WriteAllText(file, content, Encoding.UTF8);
+                        }
+                    }
+                    catch { }
+                }
+
+                StatusChanged?.Invoke(this, "已移除注入内容");
+                return true;
+            }
+            catch
+            {
                 return false;
             }
         }
@@ -88,19 +179,18 @@ namespace SteamSwitcher.Core
                 {
                     try { proc.Kill(); } catch { }
                 }
-                StatusChanged?.Invoke(this, "Steam库界面已重启");
                 return true;
             }
-            catch (Exception ex)
+            catch
             {
-                StatusChanged?.Invoke(this, $"重启失败: {ex.Message}");
                 return false;
             }
         }
 
         private string GetCssContent()
         {
-            return @"/* Steam Switch */
+            return @"
+/* Steam Switch Styles */
 .steamswitch-float-btn {
     position: fixed !important;
     bottom: 80px !important;
@@ -188,7 +278,8 @@ namespace SteamSwitcher.Core
 
         private string GetJsContent()
         {
-            return @"(function() {
+            return @"
+(function() {
     if (window.__steamswitch_loaded) return;
     window.__steamswitch_loaded = true;
     console.log('[SteamSwitch] Loading...');

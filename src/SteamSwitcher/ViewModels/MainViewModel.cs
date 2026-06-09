@@ -325,24 +325,18 @@ namespace SteamSwitcher.ViewModels
                     return;
                 }
 
-                // 创建注入器并注入文件
+                // 创建注入器并注入
                 _injector = new SteamCEFInjector(_gameBinding, _accountManager);
                 _injector.StatusChanged += (s, msg) => 
                 {
                     Application.Current.Dispatcher.Invoke(() => StatusText = msg);
                 };
 
-                var injected = _injector.InjectCustomFiles(wsPort);
+                var injected = _injector.InjectAndRestart(wsPort);
                 
                 if (injected)
                 {
                     IsInjectorConnected = true;
-                    
-                    // 自动重启Steam库界面
-                    StatusText = "正在重启Steam库界面...";
-                    await Task.Delay(500);
-                    _injector.RestartSteamLibrary();
-                    
                     StatusText = $"注入完成！端口: {wsPort}";
                 }
                 else
