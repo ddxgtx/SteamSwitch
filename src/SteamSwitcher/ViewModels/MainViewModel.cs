@@ -60,9 +60,6 @@ namespace SteamSwitcher.ViewModels
         [ObservableProperty]
         private bool _roundedMode;
 
-        [ObservableProperty]
-        private bool _silentSwitch;
-
         public AccountManager GetAccountManager() => _accountManager;
         public AppSettings GetSettings() => _settings;
 
@@ -86,7 +83,6 @@ namespace SteamSwitcher.ViewModels
             _avatarSize = _settings.AvatarSize;
             _glassEnabled = _settings.GlassEnabled;
             _roundedMode = _settings.RoundedMode;
-            _silentSwitch = _settings.SilentSwitch;
 
             PropertyChanged += OnPropertyChanged;
         }
@@ -121,9 +117,6 @@ namespace SteamSwitcher.ViewModels
                     break;
                 case nameof(RoundedMode):
                     _settings.RoundedMode = RoundedMode;
-                    break;
-                case nameof(SilentSwitch):
-                    _settings.SilentSwitch = SilentSwitch;
                     break;
             }
             SettingsService.Save(_settings);
@@ -213,18 +206,10 @@ namespace SteamSwitcher.ViewModels
                     StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
                     UpdateCurrentAccount();
 
-                    if (launchSteam)
+                    if (launchSteam && AutoStartSteam)
                     {
-                        if (SilentSwitch)
-                        {
-                            // 无感模式：只切换配置，不启动Steam
-                            StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}，请手动启动Steam";
-                        }
-                        else if (AutoStartSteam)
-                        {
-                            StatusText = "正在启动Steam...";
-                            _accountManager.LaunchSteam(false);
-                        }
+                        StatusText = "正在启动Steam...";
+                        _accountManager.LaunchSteam();
                     }
                 }
                 else
@@ -258,7 +243,7 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private void LaunchSteam()
         {
-            _accountManager.LaunchSteam(SilentSwitch);
+            _accountManager.LaunchSteam();
             IsSteamRunning = true;
             StatusText = "Steam已启动";
         }
