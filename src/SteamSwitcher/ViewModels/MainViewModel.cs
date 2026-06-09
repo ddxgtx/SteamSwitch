@@ -217,6 +217,15 @@ namespace SteamSwitcher.ViewModels
                     {
                         StatusText = "正在启动Steam...";
                         _accountManager.LaunchSteam(SilentSwitch);
+                        
+                        if (SilentSwitch)
+                        {
+                            // 等待Steam窗口出现后最小化
+                            await Task.Delay(500);
+                            _accountManager.GetSteamService().MinimizeSteamWindows();
+                            await Task.Delay(500);
+                            _accountManager.GetSteamService().MinimizeSteamWindows();
+                        }
                     }
                 }
                 else

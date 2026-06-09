@@ -137,7 +137,34 @@ namespace SteamSwitcher.Core
 
         public void MinimizeSteamWindows()
         {
-            HideAllSteamWindows();
+            try
+            {
+                // 获取Steam进程
+                var steamProcesses = Process.GetProcessesByName("steam");
+                var steamPids = new HashSet<uint>();
+                foreach (var p in steamProcesses)
+                {
+                    try { steamPids.Add((uint)p.Id); } catch { }
+                }
+
+                // 枚举并最小化所有Steam窗口
+                EnumWindows((hWnd, lParam) =>
+                {
+                    try
+                    {
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        if (steamPids.Contains(pid))
+                        {
+                            ShowWindow(hWnd, SW_MINIMIZE);
+                            SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, 
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                        }
+                    }
+                    catch { }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch { }
         }
 
         public void HideAllSteamWindows()
