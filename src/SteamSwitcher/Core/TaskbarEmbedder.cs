@@ -255,6 +255,10 @@ namespace SteamSwitcher.Core
                 IntPtr trayWnd = FindWindow("Shell_TrayWnd", null);
                 if (trayWnd == IntPtr.Zero) return taskbarWidth - 200;
 
+                // 获取任务栏位置
+                RECT taskbarRect;
+                GetWindowRect(trayWnd, out taskbarRect);
+
                 // 查找通知区域
                 IntPtr trayNotifyWnd = FindWindowEx(trayWnd, IntPtr.Zero, "TrayNotifyWnd", null);
                 if (trayNotifyWnd == IntPtr.Zero) return taskbarWidth - 200;
@@ -262,8 +266,10 @@ namespace SteamSwitcher.Core
                 RECT trayRect;
                 GetWindowRect(trayNotifyWnd, out trayRect);
 
-                // 返回通知区域左边的X坐标（相对于任务栏）
-                return trayRect.Left - (taskbarWidth - (trayRect.Right - trayRect.Left));
+                // 计算通知区域左边缘相对于任务栏的位置
+                int trayLeftRelative = trayRect.Left - taskbarRect.Left;
+                
+                return trayLeftRelative;
             }
             catch
             {
