@@ -97,17 +97,25 @@ namespace SteamSwitcher.Core
             }
         }
 
-        public bool StartSteam(string? username = null, bool silent = false)
+        public bool StartSteam(string? username = null, bool silent = false, bool enableDebugging = false)
         {
             if (string.IsNullOrEmpty(SteamExePath) || !File.Exists(SteamExePath))
                 return false;
 
             try
             {
-                var args = string.Empty;
+                var argsList = new List<string>();
+                
                 if (!string.IsNullOrEmpty(username))
-                    args = $"-login {username}";
+                    argsList.Add($"-login {username}");
 
+                if (enableDebugging)
+                {
+                    argsList.Add("-cef-enable-debugging");
+                    argsList.Add("-devtools-port 8080");
+                }
+
+                var args = string.Join(" ", argsList);
                 Process.Start(SteamExePath, args);
                 return true;
             }
@@ -115,6 +123,11 @@ namespace SteamSwitcher.Core
             {
                 return false;
             }
+        }
+
+        public bool StartSteamWithDebugging(string? username = null)
+        {
+            return StartSteam(username, enableDebugging: true);
         }
 
         public string GetLoginUsersPath()

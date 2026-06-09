@@ -17,12 +17,21 @@ namespace SteamSwitcher.ViewModels
     {
         private readonly AccountManager _accountManager;
         private readonly AppSettings _settings;
+        private readonly GameAccountBinding _gameBinding;
+        private SteamCEFInjector? _injector;
+        private WebSocketServer? _wsServer;
 
         [ObservableProperty]
         private ObservableCollection<AccountViewModel> _accounts = new();
 
         [ObservableProperty]
+        private ObservableCollection<GameBindingViewModel> _gameBindings = new();
+
+        [ObservableProperty]
         private AccountViewModel? _selectedAccount;
+
+        [ObservableProperty]
+        private GameBindingViewModel? _selectedGameBinding;
 
         [ObservableProperty]
         private bool _isLoading;
@@ -32,6 +41,9 @@ namespace SteamSwitcher.ViewModels
 
         [ObservableProperty]
         private bool _isSteamRunning;
+
+        [ObservableProperty]
+        private bool _isInjectorConnected;
 
         [ObservableProperty]
         private bool _autoStartSteam;
@@ -60,8 +72,12 @@ namespace SteamSwitcher.ViewModels
         [ObservableProperty]
         private bool _roundedMode;
 
+        [ObservableProperty]
+        private bool _enableLibraryInjection;
+
         public AccountManager GetAccountManager() => _accountManager;
         public AppSettings GetSettings() => _settings;
+        public GameAccountBinding GetGameBinding() => _gameBinding;
 
         public List<SteamAccount> GetPinnedAccounts()
         {
@@ -73,6 +89,9 @@ namespace SteamSwitcher.ViewModels
             _accountManager = new AccountManager();
             _accountManager.AccountsChanged += OnAccountsChanged;
 
+            _gameBinding = new GameAccountBinding();
+            _gameBinding.BindingsChanged += OnGameBindingsChanged;
+
             _settings = SettingsService.Load();
             _autoStartSteam = _settings.AutoStartSteam;
             _minimizeToTray = _settings.MinimizeToTray;
@@ -83,8 +102,26 @@ namespace SteamSwitcher.ViewModels
             _avatarSize = _settings.AvatarSize;
             _glassEnabled = _settings.GlassEnabled;
             _roundedMode = _settings.RoundedMode;
+            _enableLibraryInjection = _settings.EnableLibraryInjection;
 
             PropertyChanged += OnPropertyChanged;
+        }
+
+        private void OnGameBindingsChanged(object? sender, EventArgs e)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                UpdateGameBindingsList();
+            });
+        }
+
+        private void UpdateGameBindingsList()
+        {
+            GameBindings.Clear();
+            foreach (var binding in _gameBinding.GetAllBindings().Values)
+            {
+                GameBindings.Add(new GameBindingViewModel(binding));
+            }
         }
 
         private void OnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -117,6 +154,9 @@ namespace SteamSwitcher.ViewModels
                     break;
                 case nameof(RoundedMode):
                     _settings.RoundedMode = RoundedMode;
+                    break;
+                case nameof(EnableLibraryInjection):
+                    _settings.EnableLibraryInjection = EnableLibraryInjection;
                     break;
             }
             SettingsService.Save(_settings);
@@ -256,12 +296,151 @@ namespace SteamSwitcher.ViewModels
             StatusText = "正在关闭Steam...";
         }
 
+        [RelayCommand]
+        private async Task StartInjectorAsync()
+        {
+            if (_injector != null && _injector.IsConnected)
+            {
+                StatusText = "注入器已连接";
+                return;
+            }
+
+            IsLoading = true;
+            StatusText = "正在启动注入器...";
+
+            try
+            {
+                // 启动WebSocket服务器
+                _wsServer = new WebSocketServer(8081);
+                _wsServer.MessageReceived += OnWebSocketMessage;
+                await _wsServer.StartAsync();
+
+                // 如果Steam未运行，带调试参数启动
+                if (!_accountManager.GetSteamService().IsSteamRunning())
+                {
+                    StatusText = "正在启动Steam（调试模式）...";
+                    _accountManager.GetSteamService().StartSteamWithDebugging();
+                    await Task.Delay(5000); // 等待Steam启动
+                }
+
+                // 连接CEF
+                _injector = new SteamCEFInjector(_gameBinding, _accountManager);
+                _injector.StatusChanged += (s, msg) => StatusText = msg;
+                
+                var connected = await _injector.ConnectAsync();
+                IsInjectorConnected = connected;
+
+                if (connected)
+                {
+                    StatusText = "注入器已启动，Steam库界面已增强";
+                }
+                else
+                {
+                    StatusText = "注入器连接失败，请确保Steam已开启调试模式";
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"注入器启动失败: {ex.Message}";
+            }
+
+            IsLoading = false;
+        }
+
+        [RelayCommand]
+        private void StopInjector()
+        {
+            _injector?.Dispose();
+            _injector = null;
+            _wsServer?.Stop();
+            _wsServer?.Dispose();
+            _wsServer = null;
+            IsInjectorConnected = false;
+            StatusText = "注入器已停止";
+        }
+
+        private async void OnWebSocketMessage(object? sender, (string action, System.Text.Json.JsonElement data) e)
+        {
+            try
+            {
+                switch (e.action)
+                {
+                    case "switchAndLaunch":
+                        if (e.data.TryGetProperty("appId", out var appIdElement))
+                        {
+                            var appId = appIdElement.GetInt32();
+                            var gameName = e.data.TryGetProperty("gameName", out var nameEl) 
+                                ? nameEl.GetString() ?? "" : "";
+                            
+                            // 获取绑定的账号
+                            var binding = _gameBinding.GetBinding(appId);
+                            if (binding?.AccountSteamId != null)
+                            {
+                                var account = _accountManager.Accounts.FirstOrDefault(
+                                    a => a.SteamId == binding.AccountSteamId);
+                                
+                                if (account != null)
+                                {
+                                    Application.Current.Dispatcher.Invoke(() =>
+                                    {
+                                        SelectedAccount = Accounts.FirstOrDefault(
+                                            a => a.SteamId == account.SteamId);
+                                    });
+                                    
+                                    await _accountManager.SwitchAccountAsync(account);
+                                    _accountManager.LaunchSteam();
+                                    
+                                    // 记录游戏时间
+                                    await _gameBinding.RecordPlayAsync(
+                                        appId, account.SteamId, account.AccountName);
+                                }
+                            }
+                        }
+                        break;
+
+                    case "setBinding":
+                        if (e.data.TryGetProperty("appId", out var bindAppId) &&
+                            e.data.TryGetProperty("gameName", out var bindGameName) &&
+                            e.data.TryGetProperty("steamId", out var bindSteamId) &&
+                            e.data.TryGetProperty("accountName", out var bindAccountName))
+                        {
+                            await _gameBinding.SetBindingAsync(
+                                bindAppId.GetInt32(),
+                                bindGameName.GetString() ?? "",
+                                bindSteamId.GetString() ?? "",
+                                bindAccountName.GetString() ?? "");
+                        }
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"WebSocket message error: {ex.Message}");
+            }
+        }
+
         private void UpdateCurrentAccount()
         {
             foreach (var acc in Accounts)
             {
                 acc.IsCurrent = acc.Account == _accountManager.CurrentAccount;
             }
+        }
+    }
+
+    public partial class GameBindingViewModel : ObservableObject
+    {
+        public GameBinding Binding { get; }
+
+        public int AppId => Binding.AppId;
+        public string GameName => Binding.GameName;
+        public string? AccountName => Binding.AccountName;
+        public bool AutoSwitch => Binding.AutoSwitch;
+        public string LastPlayed => Binding.LastPlayed?.ToString("MM-dd HH:mm") ?? "从未";
+
+        public GameBindingViewModel(GameBinding binding)
+        {
+            Binding = binding;
         }
     }
 

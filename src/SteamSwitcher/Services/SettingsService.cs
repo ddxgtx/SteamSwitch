@@ -17,6 +17,7 @@ namespace SteamSwitcher.Services
         public int AvatarSize { get; set; } = 40;
         public bool GlassEnabled { get; set; } = true;
         public bool RoundedMode { get; set; } = true;
+        public bool EnableLibraryInjection { get; set; }
         public List<string> PinnedAccountIds { get; set; } = new();
     }
 
