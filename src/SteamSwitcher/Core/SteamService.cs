@@ -171,7 +171,6 @@ namespace SteamSwitcher.Core
         {
             try
             {
-                // 获取Steam进程ID
                 var steamProcesses = Process.GetProcessesByName("steam");
                 var steamPids = new HashSet<uint>();
                 foreach (var p in steamProcesses)
@@ -179,21 +178,15 @@ namespace SteamSwitcher.Core
                     try { steamPids.Add((uint)p.Id); } catch { }
                 }
 
-                // 枚举所有窗口并隐藏Steam窗口
                 EnumWindows((hWnd, lParam) =>
                 {
                     try
                     {
-                        if (!IsWindowVisible(hWnd))
-                            return true;
-
                         GetWindowThreadProcessId(hWnd, out uint pid);
-                        
                         if (steamPids.Contains(pid))
                         {
+                            // 彻底隐藏窗口
                             ShowWindow(hWnd, SW_HIDE);
-                            SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, 
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_HIDEWINDOW);
                         }
                     }
                     catch { }
