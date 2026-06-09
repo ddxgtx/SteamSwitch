@@ -14,79 +14,7 @@ namespace SteamSwitcher.Core
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
-        [DllImport("user32.dll")]
-        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-
-        [DllImport("user32.dll")]
-        private static extern bool IsWindowVisible(IntPtr hWnd);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
-
-        [DllImport("user32.dll")]
-        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-
-        [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-        [DllImport("kernel32.dll")]
-        private static extern bool CreateProcess(
-            string lpApplicationName,
-            string lpCommandLine,
-            IntPtr lpProcessAttributes,
-            IntPtr lpThreadAttributes,
-            bool bInheritHandles,
-            uint dwCreationFlags,
-            IntPtr lpEnvironment,
-            string lpCurrentDirectory,
-            ref STARTUPINFO lpStartupInfo,
-            out PROCESS_INFORMATION lpProcessInformation);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct STARTUPINFO
-        {
-            public int cb;
-            public string lpReserved;
-            public string lpDesktop;
-            public string lpTitle;
-            public int dwX;
-            public int dwY;
-            public int dwXSize;
-            public int dwYSize;
-            public int dwXCountChars;
-            public int dwYCountChars;
-            public int dwFillAttribute;
-            public int dwFlags;
-            public short wShowWindow;
-            public short cbReserved2;
-            public IntPtr lpReserved2;
-            public IntPtr hStdInput;
-            public IntPtr hStdOutput;
-            public IntPtr hStdError;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct PROCESS_INFORMATION
-        {
-            public IntPtr hProcess;
-            public IntPtr hThread;
-            public int dwProcessId;
-            public int dwThreadId;
-        }
-
-        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-        private const int SW_HIDE = 0;
         private const int SW_MINIMIZE = 6;
-        private const int SW_SHOWMINNOACTIVE = 7;
-        private const int SW_FORCEMINIMIZE = 11;
-        private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
-        private const uint SWP_NOMOVE = 0x0002;
-        private const uint SWP_NOSIZE = 0x0001;
-        private const uint SWP_NOACTIVATE = 0x0010;
-        private const uint STARTF_USESHOWWINDOW = 0x00000001;
-        private const uint CREATE_NEW_CONSOLE = 0x00000010;
-        private const short SW_HIDE_SHORT = 0;
 
         public string? SteamPath { get; private set; }
         public string? SteamExePath { get; private set; }
@@ -179,89 +107,14 @@ namespace SteamSwitcher.Core
                 var args = string.Empty;
                 if (!string.IsNullOrEmpty(username))
                     args = $"-login {username}";
-                if (silent)
-                    args += " -silent";
 
-                if (silent)
-                {
-                    // 使用 cmd /c start /min 以最小化方式启动
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "cmd.exe",
-                        Arguments = $"/c start \"\" /min \"{SteamExePath}\" {args}",
-                        WindowStyle = ProcessWindowStyle.Hidden,
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    };
-                    Process.Start(psi);
-                }
-                else
-                {
-                    Process.Start(SteamExePath, args);
-                }
-                
+                Process.Start(SteamExePath, args);
                 return true;
             }
             catch
             {
                 return false;
             }
-        }
-
-        public void MinimizeSteamWindows()
-        {
-            try
-            {
-                var steamProcesses = Process.GetProcessesByName("steam");
-                var steamPids = new HashSet<uint>();
-                foreach (var p in steamProcesses)
-                {
-                    try { steamPids.Add((uint)p.Id); } catch { }
-                }
-
-                EnumWindows((hWnd, lParam) =>
-                {
-                    try
-                    {
-                        GetWindowThreadProcessId(hWnd, out uint pid);
-                        if (steamPids.Contains(pid))
-                        {
-                            ShowWindow(hWnd, SW_MINIMIZE);
-                        }
-                    }
-                    catch { }
-                    return true;
-                }, IntPtr.Zero);
-            }
-            catch { }
-        }
-
-        public void HideAllSteamWindows()
-        {
-            try
-            {
-                var steamProcesses = Process.GetProcessesByName("steam");
-                var steamPids = new HashSet<uint>();
-                foreach (var p in steamProcesses)
-                {
-                    try { steamPids.Add((uint)p.Id); } catch { }
-                }
-
-                EnumWindows((hWnd, lParam) =>
-                {
-                    try
-                    {
-                        GetWindowThreadProcessId(hWnd, out uint pid);
-                        if (steamPids.Contains(pid))
-                        {
-                            ShowWindow(hWnd, SW_HIDE);
-                        }
-                    }
-                    catch { }
-                    return true;
-                }, IntPtr.Zero);
-            }
-            catch { }
         }
 
         public string GetLoginUsersPath()

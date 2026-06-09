@@ -213,22 +213,17 @@ namespace SteamSwitcher.ViewModels
                     StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
                     UpdateCurrentAccount();
 
-                    if (launchSteam && AutoStartSteam)
+                    if (launchSteam)
                     {
-                        StatusText = "正在启动Steam...";
-                        _accountManager.LaunchSteam(SilentSwitch);
-                        
                         if (SilentSwitch)
                         {
-                            // 持续隐藏Steam窗口
-                            _ = Task.Run(async () =>
-                            {
-                                for (int i = 0; i < 100; i++)
-                                {
-                                    await Task.Delay(50);
-                                    _accountManager.GetSteamService().HideAllSteamWindows();
-                                }
-                            });
+                            // 无感模式：只切换配置，不启动Steam
+                            StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}，请手动启动Steam";
+                        }
+                        else if (AutoStartSteam)
+                        {
+                            StatusText = "正在启动Steam...";
+                            _accountManager.LaunchSteam(false);
                         }
                     }
                 }

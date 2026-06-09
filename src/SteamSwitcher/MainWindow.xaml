@@ -376,7 +376,7 @@
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                         <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}"
                                   Style="{StaticResource AppCheckBox}"/>
-                        <CheckBox Content="无感切换" IsChecked="{Binding SilentSwitch}"
+                        <CheckBox Content="静默切换" IsChecked="{Binding SilentSwitch}"
                                   Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}"
                                   Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
