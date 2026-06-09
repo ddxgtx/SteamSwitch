@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Steam Switch"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "ddxgtx"
 #define MyAppURL "https://github.com/ddxgtx/SteamSwitch"
 #define MyAppExeName "SteamSwitch.exe"
@@ -47,7 +47,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "startwithwindows"; Description: "开机自动启动"; GroupDescription: "其他选项:"
+Name: "startwithwindows"; Description: "Start with Windows"; GroupDescription: "Other options:"
 
 [Files]
 Source: "F:\program\steam switch\release\SteamSwitch\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -114,3 +114,4 @@ begin
       UnInstallOldVersion();
   end;
 end;
+
