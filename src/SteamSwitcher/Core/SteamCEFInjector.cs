@@ -98,17 +98,29 @@ namespace SteamSwitcher.Core
                 // 注入到所有页面
                 int injected = 0;
                 int failed = 0;
+                var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "inject_log.txt");
+                File.WriteAllText(logPath, $"=== Steam Switch 注入日志 {DateTime.Now} ==={Environment.NewLine}");
+                File.AppendAllText(logPath, $"调试端口: {_debugPort}{Environment.NewLine}");
+                File.AppendAllText(logPath, $"WebSocket端口: {wsPort}{Environment.NewLine}");
+                File.AppendAllText(logPath, $"CSS长度: {css?.Length ?? 0}{Environment.NewLine}");
+                File.AppendAllText(logPath, $"JS长度: {js?.Length ?? 0}{Environment.NewLine}{Environment.NewLine}");
+
                 foreach (var page in pages.EnumerateArray())
                 {
                     var wsUrl = "";
                     var title = "";
+                    var url = "";
                     
                     try
                     {
                         wsUrl = page.GetProperty("webSocketDebuggerUrl").GetString() ?? "";
                         title = page.GetProperty("title").GetString() ?? "unknown";
+                        url = page.GetProperty("url").GetString() ?? "";
                     }
                     catch { continue; }
+                    
+                    File.AppendAllText(logPath, $"页面: {title} | URL: {url}{Environment.NewLine}");
+                    File.AppendAllText(logPath, $"  WebSocket: {wsUrl}{Environment.NewLine}");
                     
                     if (!string.IsNullOrEmpty(wsUrl))
                     {
@@ -117,12 +129,18 @@ namespace SteamSwitcher.Core
                             await InjectViaCDP(wsUrl, css, js);
                             injected++;
                             StatusChanged?.Invoke(this, $"已注入: {title}");
+                            File.AppendAllText(logPath, $"  结果: 成功{Environment.NewLine}");
                         }
                         catch (Exception ex)
                         {
                             failed++;
                             StatusChanged?.Invoke(this, $"注入失败 {title}: {ex.Message}");
+                            File.AppendAllText(logPath, $"  结果: 失败 - {ex.Message}{Environment.NewLine}");
                         }
+                    }
+                    else
+                    {
+                        File.AppendAllText(logPath, $"  结果: 跳过(无WebSocket){Environment.NewLine}");
                     }
                 }
 
@@ -185,69 +203,118 @@ namespace SteamSwitcher.Core
 
         private async Task InjectViaCDP(string wsUrl, string css, string js)
         {
+            var log = new System.Text.StringBuilder();
+            log.AppendLine($"[InjectViaCDP] 开始注入: {wsUrl}");
+
             using var ws = new System.Net.WebSockets.ClientWebSocket();
             ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(5);
             
-            var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15));
+            
+            log.AppendLine("[InjectViaCDP] 正在连接WebSocket...");
             await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
+            log.AppendLine($"[InjectViaCDP] WebSocket状态: {ws.State}");
 
             if (ws.State != System.Net.WebSockets.WebSocketState.Open)
             {
-                throw new Exception("WebSocket连接失败");
+                var err = log.ToString();
+                System.Diagnostics.Debug.WriteLine(err);
+                throw new Exception($"WebSocket连接失败，状态: {ws.State}");
             }
+
+            // 测试连接
+            log.AppendLine("[InjectViaCDP] 测试CDP连接...");
+            var testCmd = JsonSerializer.Serialize(new
+            {
+                id = 99,
+                method = "Runtime.evaluate",
+                @params = new
+                {
+                    expression = "document.title",
+                    returnByValue = true
+                }
+            });
+            var testResult = await SendCDP(ws, testCmd, cts.Token);
+            log.AppendLine($"[InjectViaCDP] 测试结果: {testResult}");
 
             // 注入CSS
             if (!string.IsNullOrEmpty(css))
             {
+                log.AppendLine("[InjectViaCDP] 注入CSS...");
+                var cssScript = "(function(){try{if(document.getElementById('ss-css'))return 'skip';var s=document.createElement('style');s.id='ss-css';s.textContent='" + EscapeJs(css) + "';document.head.appendChild(s);return 'ok'}catch(e){return 'err:'+e.message}})()";
+                
                 var cssCmd = JsonSerializer.Serialize(new
                 {
                     id = 1,
                     method = "Runtime.evaluate",
                     @params = new
                     {
-                        expression = "(function(){if(document.getElementById('ss-css'))return;var s=document.createElement('style');s.id='ss-css';s.textContent='" + css.Replace("'", "\\'").Replace("\n", " ") + "';document.head.appendChild(s)})()",
+                        expression = cssScript,
                         returnByValue = true
                     }
                 });
-                await SendCDP(ws, cssCmd, cts.Token);
+                var cssResult = await SendCDP(ws, cssCmd, cts.Token);
+                log.AppendLine($"[InjectViaCDP] CSS结果: {cssResult}");
             }
 
             // 注入JS
+            log.AppendLine("[InjectViaCDP] 注入JS...");
+            var jsScript = "(function(){try{if(window.__ss_loaded)return 'skip';window.__ss_loaded=true;" + js + ";return 'ok'}catch(e){return 'err:'+e.message}})()";
+            
             var jsCmd = JsonSerializer.Serialize(new
             {
                 id = 2,
                 method = "Runtime.evaluate",
                 @params = new
                 {
-                    expression = "(function(){if(window.__ss_loaded)return;window.__ss_loaded=true;" + js + "})()",
+                    expression = jsScript,
                     returnByValue = true
                 }
             });
-            await SendCDP(ws, jsCmd, cts.Token);
+            var jsResult = await SendCDP(ws, jsCmd, cts.Token);
+            log.AppendLine($"[InjectViaCDP] JS结果: {jsResult}");
 
+            // 关闭连接
             if (ws.State == System.Net.WebSockets.WebSocketState.Open)
             {
                 await ws.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, 
                     "", System.Threading.CancellationToken.None);
             }
+
+            log.AppendLine("[InjectViaCDP] 注入完成");
+            System.Diagnostics.Debug.WriteLine(log.ToString());
+            
+            // 写入日志文件
+            try
+            {
+                var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "inject_log.txt");
+                File.AppendAllText(logPath, log.ToString() + Environment.NewLine);
+            }
+            catch { }
         }
 
-        private async Task SendCDP(System.Net.WebSockets.ClientWebSocket ws, string cmd, 
+        private string EscapeJs(string js)
+        {
+            return js.Replace("\\", "\\\\")
+                     .Replace("'", "\\'")
+                     .Replace("\n", "\\n")
+                     .Replace("\r", "\\r")
+                     .Replace("\t", "\\t");
+        }
+
+        private async Task<string> SendCDP(System.Net.WebSockets.ClientWebSocket ws, string cmd, 
             System.Threading.CancellationToken ct)
         {
             var bytes = Encoding.UTF8.GetBytes(cmd);
             await ws.SendAsync(new ArraySegment<byte>(bytes), 
                 System.Net.WebSockets.WebSocketMessageType.Text, true, ct);
 
-            var buffer = new byte[8192];
+            var buffer = new byte[16384];
             var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
-            
-            // 检查响应
             var response = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            if (response.Contains("\"error\""))
-            {
-                throw new Exception("CDP执行错误: " + response.Substring(0, Math.Min(200, response.Length)));
-            }
+            
+            System.Diagnostics.Debug.WriteLine($"[CDP Response] {response}");
+            return response;
         }
 
         private string LoadResource(string name)
