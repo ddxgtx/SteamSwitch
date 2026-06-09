@@ -371,14 +371,9 @@
 
             <!-- 底部栏 -->
             <Border Grid.Row="2" Background="#19FFFFFF" CornerRadius="0,0,10,10" Padding="16,14">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-
-                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+                <StackPanel>
+                    <!-- 选项行 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                         <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}"
                                   Style="{StaticResource AppCheckBox}"/>
                         <CheckBox Content="无感切换" IsChecked="{Binding SilentSwitch}"
@@ -387,15 +382,15 @@
                                   Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                     </StackPanel>
 
-                    <Grid Grid.Row="1">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,10">
-                            <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}"
-                                      Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked"
-                                      Style="{StaticResource AppCheckBox}"/>
-                        </StackPanel>
-                    </Grid>
+                    <!-- 任务栏常驻 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}"
+                                  Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked"
+                                  Style="{StaticResource AppCheckBox}"/>
+                    </StackPanel>
 
-                    <Grid Grid.Row="2">
+                    <!-- 按钮行 -->
+                    <Grid Margin="0,0,0,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
@@ -412,20 +407,20 @@
                                 Style="{StaticResource SecondaryBtn}" Margin="6,0,0,0"/>
                     </Grid>
 
-                    <TextBlock Grid.Row="2" Text="{Binding StatusText}" 
+                    <!-- 状态文本 -->
+                    <TextBlock Text="{Binding StatusText}" 
                                Foreground="#48484A" FontSize="11"
-                               HorizontalAlignment="Center" Margin="0,10,0,0"/>
+                               HorizontalAlignment="Center" Margin="0,0,0,8"/>
 
                     <!-- 底部信息 -->
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" 
-                                Margin="0,28,0,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <TextBlock Text="Powered by " Foreground="#38383A" FontSize="10"/>
                         <TextBlock Text="ddxgtx" Foreground="#48484A" FontSize="10" FontWeight="Medium"/>
                         <TextBlock Text="  |  " Foreground="#38383A" FontSize="10"/>
                         <TextBlock Text="GitHub" Foreground="#0A84FF" FontSize="10" Cursor="Hand"
                                    MouseLeftButtonDown="GitHubLink_Click"/>
                     </StackPanel>
-                </Grid>
+                </StackPanel>
             </Border>
         </Grid>
     </Border>

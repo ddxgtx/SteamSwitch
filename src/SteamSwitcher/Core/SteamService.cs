@@ -131,13 +131,33 @@ namespace SteamSwitcher.Core
         {
             try
             {
+                // 查找所有Steam相关窗口
                 var processes = Process.GetProcessesByName("steam");
                 foreach (var process in processes)
                 {
-                    if (process.MainWindowHandle != IntPtr.Zero)
+                    try
                     {
-                        ShowWindow(process.MainWindowHandle, SW_MINIMIZE);
+                        if (process.MainWindowHandle != IntPtr.Zero)
+                        {
+                            ShowWindow(process.MainWindowHandle, SW_MINIMIZE);
+                        }
                     }
+                    catch { }
+                }
+                
+                // 也尝试查找Steam的其他窗口
+                foreach (var process in processes)
+                {
+                    try
+                    {
+                        process.Refresh();
+                        if (process.MainWindowHandle != IntPtr.Zero)
+                        {
+                            SetWindowPos(process.MainWindowHandle, HWND_BOTTOM, 0, 0, 0, 0, 
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                        }
+                    }
+                    catch { }
                 }
             }
             catch { }

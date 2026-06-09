@@ -189,55 +189,50 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private async Task SwitchAndLaunchAsync()
         {
-            if (SelectedAccount == null) return;
-
-            IsLoading = true;
-            StatusText = "正在切换账号...";
-
-            var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account);
-            if (success)
-            {
-                StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
-                UpdateCurrentAccount();
-
-                if (AutoStartSteam)
-                {
-                    StatusText = "正在启动Steam...";
-                    _accountManager.LaunchSteam(SilentSwitch);
-                    
-                    if (SilentSwitch)
-                    {
-                        await Task.Delay(1500);
-                        _accountManager.GetSteamService().MinimizeSteamWindows();
-                    }
-                }
-            }
-            else
-            {
-                StatusText = "切换失败，请确保Steam已关闭";
-            }
-
-            IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-            IsLoading = false;
+            await SwitchAccountAsync(launchSteam: true);
         }
 
         [RelayCommand]
         private async Task SwitchOnlyAsync()
+        {
+            await SwitchAccountAsync(launchSteam: false);
+        }
+
+        private async Task SwitchAccountAsync(bool launchSteam)
         {
             if (SelectedAccount == null) return;
 
             IsLoading = true;
             StatusText = "正在切换账号...";
 
-            var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account);
-            if (success)
+            try
             {
-                StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
-                UpdateCurrentAccount();
+                var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account);
+                if (success)
+                {
+                    StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
+                    UpdateCurrentAccount();
+
+                    if (launchSteam && AutoStartSteam)
+                    {
+                        StatusText = "正在启动Steam...";
+                        _accountManager.LaunchSteam(SilentSwitch);
+                        
+                        if (SilentSwitch)
+                        {
+                            await Task.Delay(2000);
+                            _accountManager.GetSteamService().MinimizeSteamWindows();
+                        }
+                    }
+                }
+                else
+                {
+                    StatusText = "切换失败，请确保Steam已关闭";
+                }
             }
-            else
+            catch (Exception ex)
             {
-                StatusText = "切换失败，请确保Steam已关闭";
+                StatusText = $"切换失败: {ex.Message}";
             }
 
             IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
@@ -261,7 +256,7 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private void LaunchSteam()
         {
-            _accountManager.LaunchSteam();
+            _accountManager.LaunchSteam(SilentSwitch);
             IsSteamRunning = true;
             StatusText = "Steam已启动";
         }
