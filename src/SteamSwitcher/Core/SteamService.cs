@@ -182,16 +182,24 @@ namespace SteamSwitcher.Core
                 if (silent)
                     args += " -silent";
 
-                var startInfo = new ProcessStartInfo
+                if (silent)
                 {
-                    FileName = SteamExePath,
-                    Arguments = args,
-                    UseShellExecute = false,
-                    CreateNoWindow = silent,  // 无感模式下不创建窗口
-                    WindowStyle = silent ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal
-                };
-
-                Process.Start(startInfo);
+                    // 使用 cmd /c start /min 以最小化方式启动
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "cmd.exe",
+                        Arguments = $"/c start \"\" /min \"{SteamExePath}\" {args}",
+                        WindowStyle = ProcessWindowStyle.Hidden,
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    Process.Start(psi);
+                }
+                else
+                {
+                    Process.Start(SteamExePath, args);
+                }
+                
                 return true;
             }
             catch
