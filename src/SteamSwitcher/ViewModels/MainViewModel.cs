@@ -220,8 +220,11 @@ namespace SteamSwitcher.ViewModels
                         
                         if (SilentSwitch)
                         {
-                            await Task.Delay(2000);
-                            _accountManager.GetSteamService().MinimizeSteamWindows();
+                            // 持续隐藏Steam窗口
+                            await Task.Delay(1000);
+                            _accountManager.GetSteamService().HideAllSteamWindows();
+                            await Task.Delay(1000);
+                            _accountManager.GetSteamService().HideAllSteamWindows();
                         }
                     }
                 }

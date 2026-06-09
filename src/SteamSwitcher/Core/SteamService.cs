@@ -17,13 +17,32 @@ namespace SteamSwitcher.Core
         [DllImport("user32.dll")]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
         private const int SW_MINIMIZE = 6;
         private const int SW_HIDE = 0;
         private const int SW_SHOWMINNOACTIVE = 7;
+        private const int SW_FORCEMINIMIZE = 11;
         private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOACTIVATE = 0x0010;
+        private const uint SWP_HIDEWINDOW = 0x0080;
 
         public string? SteamPath { get; private set; }
         public string? SteamExePath { get; private set; }
@@ -109,13 +128,17 @@ namespace SteamSwitcher.Core
 
                 var process = Process.Start(SteamExePath, string.Join(" ", args));
                 
-                if (silent && process != null)
+                if (silent)
                 {
-                    // 等待Steam窗口出现然后最小化
+                    // 立即开始监控并隐藏Steam窗口
                     _ = Task.Run(async () =>
                     {
-                        await Task.Delay(2000);
-                        MinimizeSteamWindows();
+                        // 持续尝试隐藏Steam窗口，持续5秒
+                        for (int i = 0; i < 50; i++)
+                        {
+                            await Task.Delay(100);
+                            HideAllSteamWindows();
+                        }
                     });
                 }
 
@@ -129,52 +152,41 @@ namespace SteamSwitcher.Core
 
         public void MinimizeSteamWindows()
         {
-            try
-            {
-                // 查找所有Steam相关窗口
-                var processes = Process.GetProcessesByName("steam");
-                foreach (var process in processes)
-                {
-                    try
-                    {
-                        if (process.MainWindowHandle != IntPtr.Zero)
-                        {
-                            ShowWindow(process.MainWindowHandle, SW_MINIMIZE);
-                        }
-                    }
-                    catch { }
-                }
-                
-                // 也尝试查找Steam的其他窗口
-                foreach (var process in processes)
-                {
-                    try
-                    {
-                        process.Refresh();
-                        if (process.MainWindowHandle != IntPtr.Zero)
-                        {
-                            SetWindowPos(process.MainWindowHandle, HWND_BOTTOM, 0, 0, 0, 0, 
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
+            HideAllSteamWindows();
         }
 
-        public void HideSteamWindows()
+        public void HideAllSteamWindows()
         {
             try
             {
-                var processes = Process.GetProcessesByName("steam");
-                foreach (var process in processes)
+                // 获取Steam进程ID
+                var steamProcesses = Process.GetProcessesByName("steam");
+                var steamPids = new HashSet<uint>();
+                foreach (var p in steamProcesses)
                 {
-                    if (process.MainWindowHandle != IntPtr.Zero)
-                    {
-                        ShowWindow(process.MainWindowHandle, SW_HIDE);
-                    }
+                    try { steamPids.Add((uint)p.Id); } catch { }
                 }
+
+                // 枚举所有窗口并隐藏Steam窗口
+                EnumWindows((hWnd, lParam) =>
+                {
+                    try
+                    {
+                        if (!IsWindowVisible(hWnd))
+                            return true;
+
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        
+                        if (steamPids.Contains(pid))
+                        {
+                            ShowWindow(hWnd, SW_HIDE);
+                            SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, 
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+                        }
+                    }
+                    catch { }
+                    return true;
+                }, IntPtr.Zero);
             }
             catch { }
         }
