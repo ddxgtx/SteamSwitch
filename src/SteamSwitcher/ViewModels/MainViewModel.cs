@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media.Imaging;
@@ -17,6 +18,7 @@ namespace SteamSwitcher.ViewModels
     {
         private readonly AccountManager _accountManager;
         private readonly AppSettings _settings;
+        private CancellationTokenSource? _saveSettingsCts;
 
         [ObservableProperty]
         private ObservableCollection<AccountViewModel> _accounts = new();
@@ -119,7 +121,26 @@ namespace SteamSwitcher.ViewModels
                     _settings.RoundedMode = RoundedMode;
                     break;
             }
-            SettingsService.Save(_settings);
+            DebounceSaveSettings();
+        }
+
+        private void DebounceSaveSettings()
+        {
+            _saveSettingsCts?.Cancel();
+            _saveSettingsCts = new CancellationTokenSource();
+            var token = _saveSettingsCts.Token;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(500, token);
+                    if (!token.IsCancellationRequested)
+                    {
+                        SettingsService.Save(_settings);
+                    }
+                }
+                catch (TaskCanceledException) { }
+            }, token);
         }
 
         private void OnAccountsChanged(object? sender, EventArgs e)
@@ -153,7 +174,12 @@ namespace SteamSwitcher.ViewModels
         private void UpdateAccountsList()
         {
             var pinnedIds = _settings.PinnedAccountIds ?? new List<string>();
-            
+
+            foreach (var vm in Accounts)
+            {
+                vm.PropertyChanged -= OnAccountPropertyChanged;
+            }
+
             Accounts.Clear();
             foreach (var account in _accountManager.Accounts)
             {
@@ -182,49 +208,45 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private async Task SwitchAndLaunchAsync()
         {
-            if (SelectedAccount == null) return;
-
-            IsLoading = true;
-            StatusText = "正在切换账号...";
-
-            var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account);
-            if (success)
-            {
-                StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
-                UpdateCurrentAccount();
-
-                if (AutoStartSteam)
-                {
-                    StatusText = "正在启动Steam...";
-                    _accountManager.LaunchSteam();
-                }
-            }
-            else
-            {
-                StatusText = "切换失败，请确保Steam已关闭";
-            }
-
-            IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-            IsLoading = false;
+            await SwitchAccountAsync(launchSteam: true);
         }
 
         [RelayCommand]
         private async Task SwitchOnlyAsync()
+        {
+            await SwitchAccountAsync(launchSteam: false);
+        }
+
+        private async Task SwitchAccountAsync(bool launchSteam)
         {
             if (SelectedAccount == null) return;
 
             IsLoading = true;
             StatusText = "正在切换账号...";
 
-            var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account);
-            if (success)
+            try
             {
-                StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
-                UpdateCurrentAccount();
+                var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account);
+                if (success)
+                {
+                    StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
+                    UpdateCurrentAccount();
+
+                    if (launchSteam && AutoStartSteam)
+                    {
+                        StatusText = "正在启动Steam...";
+                        _accountManager.LaunchSteam();
+                    }
+                }
+                else
+                {
+                    StatusText = "切换失败，请确保Steam已关闭";
+                }
             }
-            else
+            catch (Exception ex)
             {
-                StatusText = "切换失败，请确保Steam已关闭";
+                StatusText = $"切换失败: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"Switch error: {ex}");
             }
 
             IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();

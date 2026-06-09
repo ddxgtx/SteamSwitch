@@ -10,12 +10,13 @@ using SteamSwitcher.Models;
 
 namespace SteamSwitcher.Core
 {
-    public class AccountManager
+    public class AccountManager : IDisposable
     {
+        private static readonly HttpClient _httpClient = new();
         private readonly SteamService _steamService;
         private readonly VdfParser _vdfParser;
         private readonly RegistryHelper _registryHelper;
-        private readonly HttpClient _httpClient;
+        private bool _disposed;
 
         public List<SteamAccount> Accounts { get; private set; } = new();
         public SteamAccount? CurrentAccount { get; private set; }
@@ -23,11 +24,15 @@ namespace SteamSwitcher.Core
         public event EventHandler? AccountsChanged;
 
         public AccountManager()
+            : this(new SteamService(), new VdfParser(), new RegistryHelper())
         {
-            _steamService = new SteamService();
-            _vdfParser = new VdfParser();
-            _registryHelper = new RegistryHelper();
-            _httpClient = new HttpClient();
+        }
+
+        public AccountManager(SteamService steamService, VdfParser vdfParser, RegistryHelper registryHelper)
+        {
+            _steamService = steamService ?? throw new ArgumentNullException(nameof(steamService));
+            _vdfParser = vdfParser ?? throw new ArgumentNullException(nameof(vdfParser));
+            _registryHelper = registryHelper ?? throw new ArgumentNullException(nameof(registryHelper));
         }
 
         public SteamService GetSteamService() => _steamService;
@@ -124,8 +129,9 @@ namespace SteamSwitcher.Core
                 AccountsChanged?.Invoke(this, EventArgs.Empty);
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"Error switching account: {ex.Message}");
                 return false;
             }
         }
@@ -233,8 +239,9 @@ namespace SteamSwitcher.Core
                 image.Freeze();
                 return image;
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"Error loading image: {ex.Message}");
                 return null;
             }
         }
@@ -242,6 +249,14 @@ namespace SteamSwitcher.Core
         private static string GetValue(Dictionary<string, object> dict, string key)
         {
             return dict.TryGetValue(key, out var value) ? value?.ToString() ?? "" : "";
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+            }
         }
     }
 }

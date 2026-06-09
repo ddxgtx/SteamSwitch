@@ -37,7 +37,10 @@ namespace SteamSwitcher.Services
                     return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error loading settings: {ex.Message}");
+            }
             return new AppSettings();
         }
 
@@ -55,7 +58,10 @@ namespace SteamSwitcher.Services
                 });
                 File.WriteAllText(SettingsPath, json);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error saving settings: {ex.Message}");
+            }
         }
     }
 }

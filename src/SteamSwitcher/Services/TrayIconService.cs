@@ -47,8 +47,9 @@ namespace SteamSwitcher.Services
                     _notifyIcon.Icon = SystemIcons.Application;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"Error loading tray icon: {ex.Message}");
                 _notifyIcon.Icon = SystemIcons.Application;
             }
 

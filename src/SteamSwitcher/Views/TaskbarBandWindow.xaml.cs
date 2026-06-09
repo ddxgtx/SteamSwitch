@@ -170,7 +170,10 @@ namespace SteamSwitcher.Views
                     bitmap.Freeze();
                     image.Source = bitmap;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error loading avatar image: {ex.Message}");
+                }
             }
 
             image.Clip = new RectangleGeometry(new Rect(0, 0, size, size), radius, radius);

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using Microsoft.Win32;
 
 namespace SteamSwitcher.Core
@@ -14,8 +15,9 @@ namespace SteamSwitcher.Core
                 using var key = Registry.CurrentUser.OpenSubKey(SteamRegistryPath);
                 return key?.GetValue("AutoLoginUser") as string;
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"Error reading AutoLoginUser from registry: {ex.Message}");
                 return null;
             }
         }
@@ -44,8 +46,9 @@ namespace SteamSwitcher.Core
                 using var key = Registry.CurrentUser.OpenSubKey(SteamRegistryPath);
                 return key?.GetValue("SteamPath") as string;
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"Error reading SteamPath from registry: {ex.Message}");
                 return null;
             }
         }
@@ -57,8 +60,9 @@ namespace SteamSwitcher.Core
                 using var key = Registry.CurrentUser.OpenSubKey(SteamRegistryPath);
                 return key?.GetValue("SteamExe") as string;
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"Error reading SteamExe from registry: {ex.Message}");
                 return null;
             }
         }

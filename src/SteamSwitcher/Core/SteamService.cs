@@ -63,15 +63,19 @@ namespace SteamSwitcher.Core
                         process.Kill();
                         await process.WaitForExitAsync();
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error closing steam process: {ex.Message}");
+                    }
                 }
 
                 await Task.Delay(2000);
 
                 return !IsSteamRunning();
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"Error in CloseSteamAsync: {ex.Message}");
                 return false;
             }
         }
@@ -87,8 +91,9 @@ namespace SteamSwitcher.Core
                 Process.Start(SteamExePath, args);
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"Error starting Steam: {ex.Message}");
                 return false;
             }
         }
