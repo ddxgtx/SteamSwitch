@@ -187,6 +187,11 @@ namespace SteamSwitcher.ViewModels
             IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
 
             UpdateAccountsList();
+            
+            // 加载游戏绑定
+            await _gameBinding.LoadAsync();
+            UpdateGameBindingsList();
+            
             IsLoading = false;
         }
 

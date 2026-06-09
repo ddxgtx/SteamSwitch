@@ -337,6 +337,7 @@
 
                     <!-- 窗口控制按钮 -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button Content="🎮" Style="{StaticResource BtnSettings}" Click="GameBinding_Click" ToolTip="游戏绑定"/>
                         <Button Content="⚙" Style="{StaticResource BtnSettings}" Click="Settings_Click" ToolTip="设置"/>
                         <Button Content="↻" Style="{StaticResource BtnRefresh}" 
                                 Command="{Binding RefreshCommand}" ToolTip="刷新"/>
@@ -372,26 +373,29 @@
             <!-- 底部栏 -->
             <Border Grid.Row="2" Background="#19FFFFFF" CornerRadius="0,0,10,10" Padding="16,14">
                 <StackPanel>
-                    <!-- 选项行 -->
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                    <!-- 选项行1 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}"
                                   Style="{StaticResource AppCheckBox}"/>
                         <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}"
                                   Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                     </StackPanel>
 
-                    <!-- 任务栏常驻 -->
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                    <!-- 选项行2 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}"
                                   Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked"
                                   Style="{StaticResource AppCheckBox}"/>
+                        <CheckBox Content="库界面注入" IsChecked="{Binding EnableLibraryInjection}"
+                                  Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                     </StackPanel>
 
                     <!-- 按钮行 -->
-                    <Grid Margin="0,0,0,10">
+                    <Grid Margin="0,4,0,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
                         <Button Grid.Column="0" Content="切换并启动" 
@@ -402,7 +406,12 @@
                         <Button Grid.Column="1" Content="仅切换" 
                                 Command="{Binding SwitchOnlyCommand}"
                                 IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
-                                Style="{StaticResource SecondaryBtn}" Margin="6,0,0,0"/>
+                                Style="{StaticResource SecondaryBtn}" Margin="6,0,6,0"/>
+
+                        <Button Grid.Column="2" Content="🎮" 
+                                Command="{Binding StartInjectorCommand}"
+                                IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
+                                Style="{StaticResource BtnRefresh}" ToolTip="启动库注入"/>
                     </Grid>
 
                     <!-- 状态文本 -->

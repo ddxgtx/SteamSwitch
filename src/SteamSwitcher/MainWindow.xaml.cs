@@ -123,6 +123,13 @@ namespace SteamSwitcher
             settingsWindow.ShowDialog();
         }
 
+        private void GameBinding_Click(object sender, RoutedEventArgs e)
+        {
+            var bindingWindow = new GameBindingWindow(_viewModel, _viewModel.GetGameBinding());
+            bindingWindow.Owner = this;
+            bindingWindow.ShowDialog();
+        }
+
         private void OnSettingsPositionChanged(object? sender, Core.TaskbarPosition position)
         {
             if (_taskbarBand != null && _taskbarBand.IsPinned)
