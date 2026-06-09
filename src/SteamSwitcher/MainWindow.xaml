@@ -1,0 +1,415 @@
+<Window x:Class="SteamSwitcher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Steam Switch"
+        Height="600" Width="400"
+        MinHeight="500" MinWidth="340"
+        WindowStartupLocation="CenterScreen"
+        Background="#000000"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ResizeMode="CanResizeWithGrip"
+        Closing="Window_Closing"
+        StateChanged="Window_StateChanged"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <local:InverseBoolConverter x:Key="InverseBool" xmlns:local="clr-namespace:SteamSwitcher.Converters"/>
+        
+        <!-- 关闭按钮 -->
+        <Style x:Key="BtnClose" TargetType="Button">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#98989D"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" x:Name="bg">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#E81123"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        
+        <!-- 最小化/最大化按钮 -->
+        <Style x:Key="BtnWindow" TargetType="Button">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#98989D"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" x:Name="bg">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#1AFFFFFF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 设置按钮 -->
+        <Style x:Key="BtnSettings" TargetType="Button">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#98989D"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="6" x:Name="bg">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#1AFFFFFF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 主按钮 -->
+        <Style x:Key="PrimaryBtn" TargetType="Button">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Background" Value="#0A84FF"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="b">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#409CFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#0066CC"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="b" Property="Background" Value="#220A84FF"/>
+                                <Setter Property="Foreground" Value="#55FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 次要按钮 -->
+        <Style x:Key="SecondaryBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="#1C1C1E"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="10" 
+                                BorderBrush="#38383A" BorderThickness="1" x:Name="b">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#2C2C2E"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="b" Property="Background" Value="#111111"/>
+                                <Setter Property="Foreground" Value="#55FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 刷新按钮 -->
+        <Style x:Key="BtnRefresh" TargetType="Button">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#98989D"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="8" x:Name="b">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#1AFFFFFF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 复选框 -->
+        <Style x:Key="AppCheckBox" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#98989D"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="18" Height="18" CornerRadius="5"
+                                    Background="#1C1C1E" BorderBrush="#48484A"
+                                    BorderThickness="1.5" x:Name="cb">
+                                <TextBlock Text="✓" Foreground="White" FontSize="11" FontWeight="Bold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Visibility="Collapsed" x:Name="ck"/>
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="cb" Property="Background" Value="#0A84FF"/>
+                                <Setter TargetName="cb" Property="BorderBrush" Value="#0A84FF"/>
+                                <Setter TargetName="ck" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 列表 -->
+        <Style x:Key="AccountList" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Height" Value="76"/>
+                        <Setter Property="Margin" Value="0,2"/>
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border Background="{TemplateBinding Background}" CornerRadius="14" x:Name="b">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="b" Property="Background" Value="#14FFFFFF"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="b" Property="Background" Value="#1A0A84FF"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 账项模板 -->
+        <DataTemplate x:Key="AccountItem">
+            <Grid Margin="14,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="50"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Width="46" Height="46" CornerRadius="12" 
+                        Background="#1C1C1E" VerticalAlignment="Center">
+                    <Border.Clip>
+                        <RectangleGeometry Rect="0,0,46,46" RadiusX="12" RadiusY="12"/>
+                    </Border.Clip>
+                    <Image Source="{Binding Avatar}" Stretch="UniformToFill"/>
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <TextBlock Text="{Binding DisplayName}" Foreground="White" 
+                               FontSize="15" FontWeight="Medium"/>
+                    <TextBlock Text="{Binding Username}" Foreground="#636366" 
+                               FontSize="12" Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <Border Grid.Column="2" VerticalAlignment="Center" Margin="8,0"
+                        Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}"
+                        Background="#2230D158" CornerRadius="8" Padding="10,5">
+                    <TextBlock Text="当前" Foreground="#30D158" FontSize="11" FontWeight="SemiBold"/>
+                </Border>
+
+                <ToggleButton Grid.Column="3" VerticalAlignment="Center"
+                              IsChecked="{Binding IsPinned}"
+                              Width="36" Height="36"
+                              Cursor="Hand"
+                              Background="Transparent">
+                    <ToggleButton.Style>
+                        <Style TargetType="ToggleButton">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="{TemplateBinding Background}" 
+                                                CornerRadius="8" Width="36" Height="36" x:Name="b">
+                                            <TextBlock Text="📌" FontSize="16" 
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Opacity="0.4" x:Name="i"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="b" Property="Background" Value="#1AFFFFFF"/>
+                                                <Setter TargetName="i" Property="Opacity" Value="0.8"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="i" Property="Opacity" Value="1"/>
+                                                <Setter TargetName="i" Property="Text" Value="📍"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ToggleButton.Style>
+                </ToggleButton>
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Border Background="#1C1C1E" CornerRadius="10" BorderBrush="#2C2C2E" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 自定义标题栏 -->
+            <Border Grid.Row="0" Background="#1C1C1E" CornerRadius="10,10,0,0" Padding="0">
+                <Grid Height="40">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Logo和标题 -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                        <Border Width="24" Height="24" CornerRadius="6" Background="#0A84FF" Margin="0,0,10,0">
+                            <TextBlock Text="⇄" Foreground="White" FontSize="14" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Text="Steam" FontSize="15" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock Text=" Switch" FontSize="15" FontWeight="Light" Foreground="#636366" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- 窗口控制按钮 -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button Content="⚙" Style="{StaticResource BtnSettings}" Click="Settings_Click" ToolTip="设置"/>
+                        <Button Content="↻" Style="{StaticResource BtnRefresh}" 
+                                Command="{Binding RefreshCommand}" ToolTip="刷新"/>
+                        <Button Content="─" Style="{StaticResource BtnWindow}" Click="Minimize_Click"/>
+                        <Button Content="□" Style="{StaticResource BtnWindow}" Click="Maximize_Click"/>
+                        <Button Content="✕" Style="{StaticResource BtnClose}" Click="Close_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="0" Height="0.5" VerticalAlignment="Bottom" Background="#2C2C2E"/>
+
+            <!-- 内容区 -->
+            <Border Grid.Row="1" Background="#1C1C1E" Margin="0">
+                <Grid>
+                    <ListBox ItemsSource="{Binding Accounts}"
+                             SelectedItem="{Binding SelectedAccount}"
+                             Style="{StaticResource AccountList}"
+                             ItemTemplate="{StaticResource AccountItem}"/>
+                    
+                    <Border Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"
+                            Background="#E61C1C1E">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ProgressBar IsIndeterminate="True" Width="100" Height="2" 
+                                         Foreground="#0A84FF" Background="#38383A"/>
+                            <TextBlock Text="{Binding StatusText}" Foreground="#98989D" 
+                                       HorizontalAlignment="Center" Margin="0,14,0,0" FontSize="13"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- 底部栏 -->
+            <Border Grid.Row="2" Background="#19FFFFFF" CornerRadius="0,0,10,10" Padding="16,14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+                        <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}"
+                                  Style="{StaticResource AppCheckBox}"/>
+                        <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}"
+                                  Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
+                        <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}"
+                                  Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked"
+                                  Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Button Grid.Column="0" Content="切换并启动" 
+                                Command="{Binding SwitchAndLaunchCommand}"
+                                IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
+                                Style="{StaticResource PrimaryBtn}" Margin="0,0,6,0"/>
+
+                        <Button Grid.Column="1" Content="仅切换" 
+                                Command="{Binding SwitchOnlyCommand}"
+                                IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
+                                Style="{StaticResource SecondaryBtn}" Margin="6,0,0,0"/>
+                    </Grid>
+
+                    <TextBlock Grid.Row="2" Text="{Binding StatusText}" 
+                               Foreground="#48484A" FontSize="11"
+                               HorizontalAlignment="Center" Margin="0,10,0,0"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
