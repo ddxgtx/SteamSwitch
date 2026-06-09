@@ -126,22 +126,7 @@ namespace SteamSwitcher.Core
                 if (silent)
                     args.Add("-silent");
 
-                var process = Process.Start(SteamExePath, string.Join(" ", args));
-                
-                if (silent)
-                {
-                    // 立即开始监控并隐藏Steam窗口
-                    _ = Task.Run(async () =>
-                    {
-                        // 持续尝试隐藏Steam窗口，持续5秒
-                        for (int i = 0; i < 50; i++)
-                        {
-                            await Task.Delay(100);
-                            HideAllSteamWindows();
-                        }
-                    });
-                }
-
+                Process.Start(SteamExePath, string.Join(" ", args));
                 return true;
             }
             catch

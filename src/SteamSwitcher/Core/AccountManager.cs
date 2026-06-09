@@ -154,6 +154,7 @@ namespace SteamSwitcher.Core
                             if (userEntry.Key == activeSteamId)
                             {
                                 userData["MostRecent"] = "1";
+                                userData["RememberPassword"] = "1";
                                 userData["Timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
                             }
                             else
