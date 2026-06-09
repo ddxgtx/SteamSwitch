@@ -9,7 +9,8 @@ namespace SteamSwitcher.Core
     {
         Left,
         Center,
-        Right
+        Right,
+        Auto // 自动定位到系统托盘左侧
     }
 
     public class TaskbarEmbedder
@@ -48,13 +49,10 @@ namespace SteamSwitcher.Core
         private const int WS_POPUP = unchecked((int)0x80000000);
         private const int WS_EX_TOOLWINDOW = 0x00000080;
         private const int WS_EX_NOACTIVATE = 0x08000000;
-        private const int WS_EX_TRANSPARENT = 0x00000020;
 
         private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_FRAMECHANGED = 0x0020;
-        private const uint SWP_NOMOVE = 0x0002;
-        private const uint SWP_NOSIZE = 0x0001;
 
         [StructLayout(LayoutKind.Sequential)]
         public struct RECT
@@ -70,8 +68,9 @@ namespace SteamSwitcher.Core
         private IntPtr _parentHandle;
         private bool _isEmbedded;
         private int _width;
-        private TaskbarPosition _position = TaskbarPosition.Right;
+        private TaskbarPosition _position = TaskbarPosition.Auto;
         private int _offsetX;
+        private System.Windows.Threading.DispatcherTimer? _positionTimer;
 
         public bool IsEmbedded => _isEmbedded;
         public TaskbarPosition Position
@@ -108,6 +107,21 @@ namespace SteamSwitcher.Core
             hwndSource.EnsureHandle();
 
             EmbedToTaskbar();
+            StartPositionTimer();
+        }
+
+        private void StartPositionTimer()
+        {
+            _positionTimer = new System.Windows.Threading.DispatcherTimer();
+            _positionTimer.Interval = TimeSpan.FromSeconds(2);
+            _positionTimer.Tick += (s, e) =>
+            {
+                if (_isEmbedded)
+                {
+                    UpdatePosition();
+                }
+            };
+            _positionTimer.Start();
         }
 
         private void EmbedToTaskbar()
@@ -135,20 +149,7 @@ namespace SteamSwitcher.Core
                 exStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
                 SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
 
-                RECT taskbarRect;
-                GetWindowRect(taskbarHandle, out taskbarRect);
-
-                int taskbarWidth = taskbarRect.Right - taskbarRect.Left;
-                int taskbarHeight = taskbarRect.Bottom - taskbarRect.Top;
-
-                int x = CalculateX(taskbarWidth);
-                int y = 2;
-                int height = taskbarHeight - 4;
-
-                SetWindowPos(hwnd, IntPtr.Zero,
-                             x, y,
-                             _width, height,
-                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                UpdatePosition();
 
                 _embeddedWindow.Show();
                 _isEmbedded = true;
@@ -167,6 +168,8 @@ namespace SteamSwitcher.Core
 
             try
             {
+                _positionTimer?.Stop();
+
                 IntPtr hwnd = new WindowInteropHelper(_embeddedWindow).Handle;
                 SetParent(hwnd, IntPtr.Zero);
 
@@ -221,13 +224,52 @@ namespace SteamSwitcher.Core
 
         private int CalculateX(int taskbarWidth)
         {
-            return _position switch
+            // 找到系统托盘区域的位置
+            int trayX = FindTrayAreaLeft(taskbarWidth);
+
+            switch (_position)
             {
-                TaskbarPosition.Left => 10 + _offsetX,
-                TaskbarPosition.Center => (taskbarWidth - _width) / 2 + _offsetX,
-                TaskbarPosition.Right => taskbarWidth - _width - 10 - _offsetX,
-                _ => taskbarWidth - _width - 10 - _offsetX
-            };
+                case TaskbarPosition.Left:
+                    return 10 + _offsetX;
+
+                case TaskbarPosition.Center:
+                    return (taskbarWidth - _width) / 2 + _offsetX;
+
+                case TaskbarPosition.Right:
+                    return taskbarWidth - _width - 10 - _offsetX;
+
+                case TaskbarPosition.Auto:
+                    // 自动定位到系统托盘左侧
+                    return trayX - _width - 5 + _offsetX;
+
+                default:
+                    return trayX - _width - 5 + _offsetX;
+            }
+        }
+
+        private int FindTrayAreaLeft(int taskbarWidth)
+        {
+            try
+            {
+                // 查找系统托盘通知区域
+                IntPtr trayWnd = FindWindow("Shell_TrayWnd", null);
+                if (trayWnd == IntPtr.Zero) return taskbarWidth - 200;
+
+                // 查找通知区域
+                IntPtr trayNotifyWnd = FindWindowEx(trayWnd, IntPtr.Zero, "TrayNotifyWnd", null);
+                if (trayNotifyWnd == IntPtr.Zero) return taskbarWidth - 200;
+
+                RECT trayRect;
+                GetWindowRect(trayNotifyWnd, out trayRect);
+
+                // 返回通知区域左边的X坐标（相对于任务栏）
+                return trayRect.Left - (taskbarWidth - (trayRect.Right - trayRect.Left));
+            }
+            catch
+            {
+                // 出错时返回默认位置
+                return taskbarWidth - 200;
+            }
         }
 
         public void HandleWndProc(IntPtr hwnd, int msg)
@@ -238,6 +280,13 @@ namespace SteamSwitcher.Core
                 EmbedToTaskbar();
                 TaskbarCreated?.Invoke(this, EventArgs.Empty);
             }
+        }
+
+        public void Dispose()
+        {
+            _positionTimer?.Stop();
+            _positionTimer = null;
+            RemoveFromTaskbar();
         }
     }
 }

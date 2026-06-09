@@ -173,15 +173,19 @@
                                     <TextBlock Grid.Column="0" Text="显示位置" 
                                                Foreground="#98989D" FontSize="13" VerticalAlignment="Center"/>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                        <RadioButton Content="左" Margin="0,0,14,0"
+                                        <RadioButton Content="自动" IsChecked="True" Margin="0,0,10,0"
+                                                     GroupName="TaskbarPos" Checked="Position_Changed"
+                                                     x:Name="PosAuto"
+                                                     Style="{StaticResource SettingsRadioButton}"/>
+                                        <RadioButton Content="左" Margin="0,0,10,0"
                                                      GroupName="TaskbarPos" Checked="Position_Changed"
                                                      x:Name="PosLeft"
                                                      Style="{StaticResource SettingsRadioButton}"/>
-                                        <RadioButton Content="中" Margin="0,0,14,0"
+                                        <RadioButton Content="中" Margin="0,0,10,0"
                                                      GroupName="TaskbarPos" Checked="Position_Changed"
                                                      x:Name="PosCenter"
                                                      Style="{StaticResource SettingsRadioButton}"/>
-                                        <RadioButton Content="右" IsChecked="True"
+                                        <RadioButton Content="右"
                                                      GroupName="TaskbarPos" Checked="Position_Changed"
                                                      x:Name="PosRight"
                                                      Style="{StaticResource SettingsRadioButton}"/>

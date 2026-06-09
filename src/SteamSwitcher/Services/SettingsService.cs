@@ -12,7 +12,7 @@ namespace SteamSwitcher.Services
         public bool MinimizeToTray { get; set; } = true;
         public bool StartWithWindows { get; set; }
         public bool TaskbarPinned { get; set; }
-        public TaskbarPosition TaskbarPosition { get; set; } = TaskbarPosition.Right;
+        public TaskbarPosition TaskbarPosition { get; set; } = TaskbarPosition.Auto;
         public int TaskbarOffset { get; set; }
         public int AvatarSize { get; set; } = 40;
         public bool GlassEnabled { get; set; } = true;

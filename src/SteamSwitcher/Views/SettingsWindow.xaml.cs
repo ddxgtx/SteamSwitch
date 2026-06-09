@@ -30,6 +30,9 @@ namespace SteamSwitcher.Views
         {
             switch (_viewModel.TaskbarPosition)
             {
+                case TaskbarPosition.Auto:
+                    PosAuto.IsChecked = true;
+                    break;
                 case TaskbarPosition.Left:
                     PosLeft.IsChecked = true;
                     break;
@@ -49,9 +52,11 @@ namespace SteamSwitcher.Views
         {
             if (!IsLoaded) return;
 
-            var position = TaskbarPosition.Right;
-            if (PosLeft.IsChecked == true) position = TaskbarPosition.Left;
+            var position = TaskbarPosition.Auto;
+            if (PosAuto.IsChecked == true) position = TaskbarPosition.Auto;
+            else if (PosLeft.IsChecked == true) position = TaskbarPosition.Left;
             else if (PosCenter.IsChecked == true) position = TaskbarPosition.Center;
+            else if (PosRight.IsChecked == true) position = TaskbarPosition.Right;
 
             _viewModel.TaskbarPosition = position;
             PositionChanged?.Invoke(this, position);
