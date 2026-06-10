@@ -135,6 +135,11 @@ namespace SteamSwitcher.Core
             return _steamService.StartSteam(silent: silent);
         }
 
+        public bool LaunchGame(int appId)
+        {
+            return _steamService.StartGame(appId);
+        }
+
         private async Task UpdateLoginUsersVdfAsync(string activeSteamId)
         {
             var loginUsersPath = _steamService.GetLoginUsersPath();

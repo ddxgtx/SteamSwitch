@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 
@@ -43,6 +44,9 @@ namespace SteamSwitcher.Core
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern uint RegisterWindowMessage(string lpMsg);
 
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
         private const int WS_CHILD = 0x40000000;
@@ -53,6 +57,8 @@ namespace SteamSwitcher.Core
         private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_FRAMECHANGED = 0x0020;
+        private const int EdgeMargin = 8;
+        private const int TrayReserveGap = 56;
 
         [StructLayout(LayoutKind.Sequential)]
         public struct RECT
@@ -110,6 +116,12 @@ namespace SteamSwitcher.Core
             StartPositionTimer();
         }
 
+        public void UpdateWidth(int width)
+        {
+            _width = Math.Max(1, width);
+            if (_isEmbedded) UpdatePosition();
+        }
+
         private void StartPositionTimer()
         {
             _positionTimer = new System.Windows.Threading.DispatcherTimer();
@@ -149,15 +161,15 @@ namespace SteamSwitcher.Core
                 exStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
                 SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
 
-                UpdatePosition();
-
-                _embeddedWindow.Show();
                 _isEmbedded = true;
-
                 _parentHandle = taskbarHandle;
+
+                UpdatePosition();
+                _embeddedWindow.Show();
             }
             catch (Exception ex)
             {
+                _isEmbedded = false;
                 System.Diagnostics.Debug.WriteLine($"EmbedToTaskbar failed: {ex.Message}");
             }
         }
@@ -207,13 +219,23 @@ namespace SteamSwitcher.Core
                 int taskbarWidth = taskbarRect.Right - taskbarRect.Left;
                 int taskbarHeight = taskbarRect.Bottom - taskbarRect.Top;
 
-                int x = CalculateX(taskbarWidth);
-                int y = 2;
-                int height = taskbarHeight - 4;
+                int trayX = FindTrayAreaLeft(taskbarWidth);
+                int desiredWidth = DipsToPixels(_width);
+                int width = GetEffectiveWidth(taskbarWidth, trayX, desiredWidth);
+                int x = CalculateX(taskbarWidth, trayX, width);
+                int availableHeight = Math.Max(24, taskbarHeight - 4);
+                int desiredHeight = DipsToPixels(_embeddedWindow.ActualHeight > 0
+                    ? _embeddedWindow.ActualHeight
+                    : _embeddedWindow.Height);
+                if (desiredHeight <= 0)
+                    desiredHeight = availableHeight;
+
+                int height = Math.Clamp(desiredHeight, 24, availableHeight);
+                int y = Math.Max(2, (taskbarHeight - height) / 2);
 
                 SetWindowPos(hwnd, IntPtr.Zero,
                              x, y,
-                             _width, height,
+                             width, height,
                              SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
             }
             catch (Exception ex)
@@ -222,60 +244,135 @@ namespace SteamSwitcher.Core
             }
         }
 
-        private int CalculateX(int taskbarWidth)
+        private int GetEffectiveWidth(int taskbarWidth, int trayX, int desiredWidth)
         {
-            // 找到系统托盘区域的位置
-            int trayX = FindTrayAreaLeft(taskbarWidth);
+            if (_position is TaskbarPosition.Auto or TaskbarPosition.Right)
+            {
+                int safeMaxWidth = CalculateRightEdge(trayX) - EdgeMargin;
+                if (safeMaxWidth > 24)
+                    return Math.Min(desiredWidth, safeMaxWidth);
+            }
+
+            return desiredWidth;
+        }
+
+        private int DipsToPixels(double value)
+        {
+            if (_embeddedWindow == null || double.IsNaN(value) || double.IsInfinity(value))
+                return 0;
+
+            var source = PresentationSource.FromVisual(_embeddedWindow);
+            double scale = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+            return Math.Max(1, (int)Math.Ceiling(value * scale));
+        }
+
+        private int CalculateX(int taskbarWidth, int trayX, int width)
+        {
+            int x;
+            int? protectedMaxX = null;
 
             switch (_position)
             {
                 case TaskbarPosition.Left:
-                    return 10 + _offsetX;
+                    x = 10 + _offsetX;
+                    break;
 
                 case TaskbarPosition.Center:
-                    return (taskbarWidth - _width) / 2 + _offsetX;
+                    x = (taskbarWidth - width) / 2 + _offsetX;
+                    break;
 
                 case TaskbarPosition.Right:
-                    return taskbarWidth - _width - 10 - _offsetX;
-
                 case TaskbarPosition.Auto:
-                    // 自动定位到系统托盘左侧
-                    return trayX - _width - 5 + _offsetX;
+                    // 右侧和自动模式以常驻条最右侧边框为锚点，正偏移表示继续向左让出空间。
+                    int rightEdge = CalculateRightEdge(trayX);
+                    x = rightEdge - width;
+                    protectedMaxX = x;
+                    break;
 
                 default:
-                    return trayX - _width - 5 + _offsetX;
+                    int defaultRightEdge = CalculateRightEdge(trayX);
+                    x = defaultRightEdge - width;
+                    protectedMaxX = x;
+                    break;
             }
+
+            return ClampX(x, taskbarWidth, width, protectedMaxX);
+        }
+
+        private int CalculateRightEdge(int trayX)
+        {
+            int requestedRightEdge = trayX - TrayReserveGap - Math.Max(0, _offsetX);
+            return Math.Max(EdgeMargin + 24, requestedRightEdge);
+        }
+
+        private int ClampX(int x, int taskbarWidth, int width, int? protectedMaxX)
+        {
+            int maxX = Math.Max(EdgeMargin, taskbarWidth - width - EdgeMargin);
+            if (protectedMaxX.HasValue)
+                maxX = Math.Min(maxX, Math.Max(EdgeMargin, protectedMaxX.Value));
+
+            return Math.Clamp(x, EdgeMargin, maxX);
         }
 
         private int FindTrayAreaLeft(int taskbarWidth)
         {
             try
             {
-                // 查找系统托盘通知区域
                 IntPtr trayWnd = FindWindow("Shell_TrayWnd", null);
-                if (trayWnd == IntPtr.Zero) return taskbarWidth - 200;
+                if (trayWnd == IntPtr.Zero) return taskbarWidth - 280;
 
-                // 获取任务栏位置
                 RECT taskbarRect;
                 GetWindowRect(trayWnd, out taskbarRect);
 
-                // 查找通知区域
                 IntPtr trayNotifyWnd = FindWindowEx(trayWnd, IntPtr.Zero, "TrayNotifyWnd", null);
-                if (trayNotifyWnd == IntPtr.Zero) return taskbarWidth - 200;
+                if (trayNotifyWnd == IntPtr.Zero)
+                    trayNotifyWnd = FindChildWindowRecursive(trayWnd, "TrayNotifyWnd");
+                if (trayNotifyWnd != IntPtr.Zero)
+                {
+                    RECT trayRect;
+                    GetWindowRect(trayNotifyWnd, out trayRect);
+                    int trayLeftRelative = trayRect.Left - taskbarRect.Left;
+                    if (trayLeftRelative > 0 && trayLeftRelative < taskbarWidth)
+                        return trayLeftRelative;
+                }
 
-                RECT trayRect;
-                GetWindowRect(trayNotifyWnd, out trayRect);
+                IntPtr sysPager = FindWindowEx(trayWnd, IntPtr.Zero, "SysPager", null);
+                if (sysPager == IntPtr.Zero)
+                    sysPager = FindChildWindowRecursive(trayWnd, "SysPager");
+                if (sysPager != IntPtr.Zero)
+                {
+                    RECT pagerRect;
+                    GetWindowRect(sysPager, out pagerRect);
+                    int pagerLeft = pagerRect.Left - taskbarRect.Left;
+                    if (pagerLeft > 0 && pagerLeft < taskbarWidth)
+                        return pagerLeft;
+                }
 
-                // 计算通知区域左边缘相对于任务栏的位置
-                int trayLeftRelative = trayRect.Left - taskbarRect.Left;
-                
-                return trayLeftRelative;
+                var taskbarRight = taskbarRect.Right - taskbarRect.Left;
+                return taskbarRight > 400 ? taskbarRight - 280 : taskbarRight - 180;
             }
             catch
             {
-                // 出错时返回默认位置
-                return taskbarWidth - 200;
+                return taskbarWidth - 280;
             }
+        }
+
+        private static IntPtr FindChildWindowRecursive(IntPtr parent, string className)
+        {
+            IntPtr child = IntPtr.Zero;
+            while ((child = FindWindowEx(parent, child, null, null)) != IntPtr.Zero)
+            {
+                var currentClass = new StringBuilder(256);
+                GetClassName(child, currentClass, currentClass.Capacity);
+                if (string.Equals(currentClass.ToString(), className, StringComparison.Ordinal))
+                    return child;
+
+                var nested = FindChildWindowRecursive(child, className);
+                if (nested != IntPtr.Zero)
+                    return nested;
+            }
+
+            return IntPtr.Zero;
         }
 
         public void HandleWndProc(IntPtr hwnd, int msg)

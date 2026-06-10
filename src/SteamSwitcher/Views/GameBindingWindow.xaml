@@ -2,14 +2,18 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="游戏账号绑定"
-        Height="450" Width="500"
+        Height="640" Width="820"
+        MinHeight="560" MinWidth="720"
         WindowStartupLocation="CenterOwner"
         Background="#1C1C1E"
         WindowStyle="None"
+        ResizeMode="CanResizeWithGrip"
         AllowsTransparency="True"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
-    
+
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
         <Style x:Key="BtnClose" TargetType="Button">
             <Setter Property="Width" Value="36"/>
             <Setter Property="Height" Value="28"/>
@@ -35,21 +39,30 @@
             </Setter>
         </Style>
 
-        <Style x:Key="AddBtn" TargetType="Button">
-            <Setter Property="Height" Value="32"/>
+        <Style x:Key="PrimaryBtn" TargetType="Button">
+            <Setter Property="Height" Value="34"/>
             <Setter Property="Background" Value="#0A84FF"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="6" x:Name="b">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border Background="{TemplateBinding Background}" CornerRadius="8" x:Name="b">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="16,0"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="b" Property="Background" Value="#409CFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#0066CC"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="b" Property="Background" Value="#220A84FF"/>
+                                <Setter Property="Foreground" Value="#55FFFFFF"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -57,152 +70,485 @@
             </Setter>
         </Style>
 
-        <DataTemplate x:Key="BindingItemTemplate">
-            <Border Background="#2C2C2E" CornerRadius="8" Padding="12" Margin="0,2">
+        <Style x:Key="SecondaryBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="#3A3A3C"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="8"
+                                BorderBrush="#48484A" BorderThickness="1" x:Name="b">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="16,0"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#4A4A4C"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#2C2C2E"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DangerBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="#FF453A"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="8" x:Name="b">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="16,0"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#FF6960"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#CC372E"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="IconBtn" TargetType="Button">
+            <Setter Property="Width" Value="34"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#98989D"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="8" x:Name="b">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#1AFFFFFF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate x:Key="GameItemTemplate">
+            <Border Background="#24242A" CornerRadius="10" Padding="12,10" Margin="0,3"
+                    BorderBrush="#32323A" BorderThickness="1">
                 <Grid>
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="{Binding GameName}" Foreground="White" FontSize="14" FontWeight="Medium"/>
-                        <TextBlock Foreground="#636366" FontSize="11" Margin="0,4,0,0">
-                            <TextBlock.Text>
-                                <MultiBinding StringFormat="AppID: {0} | 账号: {1}">
-                                    <Binding Path="AppId"/>
-                                    <Binding Path="AccountName"/>
-                                </MultiBinding>
-                            </TextBlock.Text>
-                        </TextBlock>
-                        <TextBlock Foreground="#48484A" FontSize="10" Margin="0,2,0,0">
-                            <Run Text="上次游玩: "/>
-                            <Run Text="{Binding LastPlayed}"/>
-                        </TextBlock>
+                    <Border Grid.Column="0" Width="42" Height="42" CornerRadius="10"
+                            Background="#182C45" Margin="0,0,12,0">
+                        <Border.Clip>
+                            <RectangleGeometry Rect="0,0,42,42" RadiusX="10" RadiusY="10"/>
+                        </Border.Clip>
+                        <Grid>
+                            <TextBlock Text="🎮" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Image Source="{Binding IconPath}" Stretch="UniformToFill"/>
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" Foreground="White" FontSize="14"
+                                   FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Border Background="#17171B" CornerRadius="5" Padding="7,2">
+                                <TextBlock Text="{Binding AppId, StringFormat='AppID: {0}'}"
+                                           Foreground="#8E8E96" FontSize="10"/>
+                            </Border>
+                            <Border Background="#1E3A2B" CornerRadius="5" Padding="7,2" Margin="6,0,0,0"
+                                    Visibility="{Binding HasBinding, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="已绑定" Foreground="#30D158" FontSize="10" FontWeight="SemiBold"/>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
 
-                    <CheckBox Grid.Column="1" Content="自动切换" 
-                              IsChecked="{Binding AutoSwitch}" 
-                              Foreground="#98989D" FontSize="11"
-                              VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}" Foreground="#6C6C72" FontSize="10"
+                               VerticalAlignment="Center" Margin="14,0,0,0"/>
 
-                    <Button Grid.Column="2" Content="✕" 
-                            Tag="{Binding AppId}"
-                            Click="RemoveBinding_Click"
-                            Width="24" Height="24"
-                            Background="Transparent" Foreground="#636366"
-                            BorderThickness="0" Cursor="Hand"
-                            VerticalAlignment="Center"/>
-                </Grid>
-            </Border>
-        </DataTemplate>
-    </Window.Resources>
-    
-    <Border Background="#1C1C1E" CornerRadius="10" BorderBrush="#2C2C2E" BorderThickness="1">
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-
-            <!-- 标题栏 -->
-            <Border Grid.Row="0" Background="#1C1C1E" CornerRadius="10,10,0,0">
-                <Grid Height="40">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-
-                    <TextBlock Grid.Column="0" Text="🎮 游戏账号绑定" FontSize="15" FontWeight="SemiBold" 
-                               Foreground="White" VerticalAlignment="Center" Margin="16,0,0,0"/>
-
-                    <Button Grid.Column="1" Content="✕" 
-                            Style="{StaticResource BtnClose}" Click="Close_Click" Margin="0,0,8,0"/>
-                </Grid>
-            </Border>
-
-            <Border Grid.Row="0" Height="0.5" VerticalAlignment="Bottom" Background="#2C2C2E"/>
-
-            <!-- 绑定列表 -->
-            <ListBox Grid.Row="1" ItemsSource="{Binding GameBindings}"
-                     ItemTemplate="{StaticResource BindingItemTemplate}"
-                     Background="Transparent" BorderThickness="0"
-                     Margin="8,8,8,0">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListBoxItem">
-                                    <ContentPresenter/>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </ListBox.ItemContainerStyle>
-            </ListBox>
-
-            <!-- 添加绑定 -->
-            <Border Grid.Row="2" Background="#2C2C2E" CornerRadius="8" Margin="8,8,8,8" Padding="12">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-
-                    <TextBlock Grid.Column="0" Text="AppID:" Foreground="#98989D" 
-                               VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Grid.Column="1" x:Name="AppIdInput" 
-                             Background="#1C1C1E" Foreground="White" 
-                             BorderBrush="#48484A" BorderThickness="1"
-                             Padding="6,4" Margin="0,0,12,0"/>
-
-                    <TextBlock Grid.Column="2" Text="游戏名:" Foreground="#98989D" 
-                               VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Grid.Column="3" x:Name="GameNameInput" 
-                             Background="#1C1C1E" Foreground="White" 
-                             BorderBrush="#48484A" BorderThickness="1"
-                             Padding="6,4" Margin="0,0,12,0"/>
-
-                    <Button Grid.Column="4" Content="添加" 
-                            Style="{StaticResource AddBtn}" Width="60"
-                            Click="AddBinding_Click"/>
-                </Grid>
-            </Border>
-
-            <!-- 底部 -->
-            <Border Grid.Row="3" Background="#19FFFFFF" CornerRadius="0,0,10,10" Padding="16,10">
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Content="关闭" Width="80" Click="Close_Click">
-                        <Button.Style>
-                            <Style TargetType="Button">
-                                <Setter Property="Height" Value="30"/>
-                                <Setter Property="Background" Value="#3A3A3C"/>
-                                <Setter Property="Foreground" Value="White"/>
-                                <Setter Property="FontSize" Value="12"/>
-                                <Setter Property="Cursor" Value="Hand"/>
+                    <ToggleButton Grid.Column="3" x:Name="PinBtn" VerticalAlignment="Center"
+                                  Width="34" Height="34" Cursor="Hand" Margin="8,0,0,0"
+                                  IsChecked="{Binding IsPinned, Mode=OneWay}"
+                                  Click="ToggleGamePin_Click">
+                        <ToggleButton.Style>
+                            <Style TargetType="ToggleButton">
+                                <Setter Property="Background" Value="Transparent"/>
                                 <Setter Property="Template">
                                     <Setter.Value>
-                                        <ControlTemplate TargetType="Button">
-                                            <Border Background="{TemplateBinding Background}" CornerRadius="6" x:Name="b">
-                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="#17171B" CornerRadius="8"
+                                                    Width="34" Height="34" x:Name="b">
+                                                <TextBlock Text="📌" FontSize="14"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                           Opacity="0.35" x:Name="i"/>
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="b" Property="Background" Value="#4A4A4C"/>
+                                                    <Setter TargetName="b" Property="Background" Value="#2F3D4A"/>
+                                                    <Setter TargetName="i" Property="Opacity" Value="0.75"/>
+                                                </Trigger>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="b" Property="Background" Value="#1A3D5F"/>
+                                                    <Setter TargetName="i" Property="Opacity" Value="1"/>
+                                                    <Setter TargetName="i" Property="Text" Value="📍"/>
+                                                    <Setter TargetName="b" Property="ToolTip" Value="已固定到任务栏"/>
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Setter.Value>
                                 </Setter>
                             </Style>
-                        </Button.Style>
-                    </Button>
+                        </ToggleButton.Style>
+                    </ToggleButton>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <Style x:Key="GameListStyle" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="MinHeight" Value="74"/>
+                        <Setter Property="Margin" Value="0"/>
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border Background="{TemplateBinding Background}" CornerRadius="8"
+                                            Margin="0,1" x:Name="b">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="b" Property="Background" Value="#14FFFFFF"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="b" Property="Background" Value="#1A0A84FF"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="#1C1C1E" CornerRadius="10" BorderBrush="#2C2C2E" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 标题栏 -->
+            <Border Grid.Row="0" Background="#1C1C1E" CornerRadius="10,10,0,0">
+                <Grid Height="44">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                        <Border Width="24" Height="24" CornerRadius="6" Background="#0A84FF"
+                                Margin="0,0,10,0">
+                            <TextBlock Text="🎮" Foreground="White" FontSize="12"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Text="游戏账号绑定" FontSize="15" FontWeight="SemiBold"
+                                   Foreground="White" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="GameCountLabel" Foreground="#636366" FontSize="12"
+                                   VerticalAlignment="Center" Margin="10,0,0,0"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="1" Content="✕"
+                            Style="{StaticResource BtnClose}" Click="Close_Click" Margin="0,0,8,0"/>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="0" Height="0.5" VerticalAlignment="Bottom" Background="#2C2C2E"/>
+
+            <!-- 主体内容 -->
+            <Grid Grid.Row="1" Margin="20,16,20,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="300"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 左侧：游戏列表 -->
+                <Grid Grid.Column="0" Margin="0,0,12,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- 标题行 -->
+                    <Grid Grid.Row="0" Margin="2,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="已安装游戏" Foreground="#D8D8DE" FontSize="14"
+                                   FontWeight="SemiBold" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                        <Button Grid.Column="1" Content="↻ 扫描" Style="{StaticResource SecondaryBtn}"
+                                Height="34" FontSize="12" Click="ScanGames_Click"/>
+                    </Grid>
+
+                    <!-- 搜索框 -->
+                    <Border Grid.Row="1" Background="#24242A" CornerRadius="10" Padding="10,8" Margin="0,0,0,10"
+                            BorderBrush="#383842" BorderThickness="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" x:Name="SearchIcon" Text="🔍" Foreground="#8E8E96"
+                                       VerticalAlignment="Center" Margin="4,0,8,0" FontSize="13"/>
+                            <TextBox Grid.Column="1" x:Name="SearchBox"
+                                     Background="Transparent" Foreground="White"
+                                     BorderThickness="0" CaretBrush="White"
+                                     FontSize="13" Padding="4,0" VerticalAlignment="Center"
+                                     TextChanged="SearchBox_TextChanged"
+                                     GotFocus="SearchBox_GotFocus"
+                                     LostFocus="SearchBox_LostFocus"/>
+                            <Button Grid.Column="2" x:Name="ClearSearchBtn" Content="✕"
+                                    Style="{StaticResource IconBtn}" Width="24" Height="24"
+                                    FontSize="10" Click="ClearSearch_Click"
+                                    Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- 游戏列表 -->
+                    <Border Grid.Row="2" Background="#18181D" CornerRadius="10"
+                            BorderBrush="#2E2E38" BorderThickness="1">
+                        <Grid>
+                            <ListBox x:Name="GameListBox"
+                                     ItemsSource="{Binding GameList, UpdateSourceTrigger=PropertyChanged}"
+                                     SelectedItem="{Binding SelectedGame, UpdateSourceTrigger=PropertyChanged}"
+                                     ItemTemplate="{StaticResource GameItemTemplate}"
+                                     Style="{StaticResource GameListStyle}"
+                                     Padding="8">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel/>
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                            </ListBox>
+
+                            <TextBlock Text="点击 [扫描] 加载本地 Steam 游戏"
+                                       Foreground="#6C6C72" FontSize="13"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="{Binding ShowEmptyHint, Converter={StaticResource BoolToVis}}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- 手动添加按钮 -->
+                    <Border Grid.Row="3" Margin="0,8,0,0">
+                        <Button x:Name="ManualAddToggle" Content="+ 手动添加游戏"
+                                Style="{StaticResource SecondaryBtn}" Height="34" FontSize="12"
+                                Click="ManualAddToggle_Click"/>
+                    </Border>
+                </Grid>
+
+                <!-- 右侧：绑定面板 -->
+                <Border Grid.Column="1" Background="#202024" CornerRadius="10" Padding="16"
+                        BorderBrush="#34343C" BorderThickness="1">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Margin="0,0,0,14">
+                            <TextBlock Text="绑定设置" Foreground="White" FontSize="15" FontWeight="SemiBold"/>
+                            <TextBlock Text="为游戏指定启动前切换的 Steam 账号" Foreground="#7C7C84"
+                                       FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <!-- 选中游戏信息 + 绑定状态 -->
+                        <StackPanel Grid.Row="1">
+                            <Border Background="#24242A" CornerRadius="10" Padding="12"
+                                    BorderBrush="#383842" BorderThickness="1" Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="已选游戏" Foreground="#8E8E96" FontSize="11" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding SelectedGameName}" Foreground="White" FontSize="16"
+                                               FontWeight="SemiBold" Margin="0,6,0,0"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding SelectedGameAppId, StringFormat='AppID: {0}'}"
+                                               Foreground="#6C6C72" FontSize="11" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Background="#1E3A2B" CornerRadius="10" Padding="12"
+                                    Visibility="{Binding SelectedGameHasBinding, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="已绑定账号" Foreground="#30D158" FontSize="11" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding SelectedGameBindingAccount}" Foreground="White"
+                                               FontSize="13" FontWeight="Medium" Margin="0,4,0,0"/>
+                                    <TextBlock Text="{Binding SelectedGameBindingTime, StringFormat='绑定时间: {0}'}"
+                                               Foreground="#1A8C3E" FontSize="10" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- 账号选择 -->
+                        <StackPanel Grid.Row="2" Margin="0,0,0,0">
+                            <TextBlock Text="选择账号" Foreground="#8E8E96" FontSize="11" FontWeight="SemiBold" Margin="0,10,0,8"/>
+                            <ListBox x:Name="AccountListBox"
+                                     ItemsSource="{Binding Accounts}"
+                                     SelectedItem="{Binding SelectedBindingAccount}"
+                                     Background="#18181D" BorderBrush="#303038" BorderThickness="1"
+                                     Padding="4">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Height" Value="50"/>
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border Background="{TemplateBinding Background}"
+                                                            CornerRadius="8" Margin="0,2"
+                                                            x:Name="b" Padding="9,6">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Grid.Column="0" Width="34" Height="34"
+                                                                    CornerRadius="17"
+                                                                    Background="#3A3A3C"
+                                                                    VerticalAlignment="Center">
+                                                                <Image Source="{Binding Avatar}"
+                                                                       Stretch="UniformToFill">
+                                                                    <Image.Clip>
+                                                                        <EllipseGeometry Center="17,17"
+                                                                                         RadiusX="17" RadiusY="17"/>
+                                                                    </Image.Clip>
+                                                                </Image>
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1"
+                                                                        VerticalAlignment="Center" Margin="10,0,0,0">
+                                                                <TextBlock Text="{Binding DisplayName}"
+                                                                           Foreground="White" FontSize="13"
+                                                                           FontWeight="Medium"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding Username}"
+                                                                           Foreground="#6C6C72" FontSize="10"/>
+                                                            </StackPanel>
+                                                            <Border Grid.Column="2"
+                                                                    Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}"
+                                                                    Background="#1E3A2B" CornerRadius="5"
+                                                                    Padding="6,2" VerticalAlignment="Center">
+                                                                <TextBlock Text="当前" Foreground="#30D158" FontSize="10" FontWeight="SemiBold"/>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="b"
+                                                                    Property="Background" Value="#14FFFFFF"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="b"
+                                                                    Property="Background" Value="#1A0A84FF"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                            </ListBox>
+                        </StackPanel>
+
+                        <!-- 操作按钮 -->
+                        <StackPanel Grid.Row="3" Margin="0,12,0,0">
+                            <Button Content="保存绑定"
+                                    Style="{StaticResource PrimaryBtn}"
+                                    Height="38" FontSize="13"
+                                    Click="SaveBinding_Click" Margin="0,0,0,8"/>
+                            <Button Content="删除绑定"
+                                    Style="{StaticResource DangerBtn}"
+                                    Height="36" FontSize="12"
+                                    Click="RemoveBinding_Click"
+                                    Visibility="{Binding SelectedGameHasBinding, Converter={StaticResource BoolToVis}}"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 手动添加面板(可折叠) -->
+            <Border Grid.Row="1" x:Name="ManualAddPanel" Background="#202024" CornerRadius="10"
+                    Padding="14,12" Margin="20,8,20,8" Visibility="Collapsed"
+                    BorderBrush="#34343C" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="AppID" Foreground="#98989D" FontSize="12"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Grid.Column="1" x:Name="ManualAppIdInput"
+                             Background="#17171B" Foreground="White"
+                             BorderBrush="#48484A" BorderThickness="1"
+                             Padding="8,6" FontSize="12" Margin="0,0,12,0"/>
+
+                    <TextBlock Grid.Column="2" Text="游戏名" Foreground="#98989D" FontSize="12"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Grid.Column="3" x:Name="ManualGameNameInput"
+                             Background="#17171B" Foreground="White"
+                             BorderBrush="#48484A" BorderThickness="1"
+                             Padding="8,6" FontSize="12" Margin="0,0,12,0"/>
+
+                    <Button Grid.Column="4" Content="添加绑定"
+                            Style="{StaticResource PrimaryBtn}" Height="34" FontSize="12"
+                            Click="ManualAddBinding_Click" Margin="0,0,8,0" Width="82"/>
+
+                    <Button Grid.Column="5" Content="✕"
+                            Style="{StaticResource IconBtn}" Width="28" Height="28" FontSize="10"
+                            Click="ManualAddToggle_Click"/>
+                </Grid>
+            </Border>
+
+            <!-- 底部栏 -->
+            <Border Grid.Row="2" Background="#1C1C20" CornerRadius="0,0,10,10" Padding="20,12">
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                    <TextBlock Text="{Binding StatusText}" Foreground="#6C6C72" FontSize="11"
+                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <Button Content="关闭" Style="{StaticResource SecondaryBtn}"
+                            Width="82" Height="34" FontSize="12" Click="Close_Click"/>
                 </StackPanel>
             </Border>
         </Grid>

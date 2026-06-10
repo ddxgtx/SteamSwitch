@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-06-10
+
+### Added
+- 新增桌面悬浮窗，可拖动、置顶、锁定位置并保存坐标
+- 新增悬浮窗透明度调节和功能开关
+- 新增固定游戏启动前确认开关
+- 新增启动时自动扫描游戏开关
+- 新增游戏图标自动读取与固定游戏快捷启动
+- 新增 Steam 库界面注入开关和游戏账号绑定入口
+- 新增 README 免责声明，明确 Steam 注入、调试端口和反作弊相关风险
+
+### Changed
+- 主界面、游戏界面、设置页、任务栏常驻和悬浮窗改为更现代的液态玻璃视觉
+- 任务栏常驻改为右边框锚定模型，新增游戏后向左扩展
+- 任务栏常驻增强系统托盘避让和高 DPI 定位
+- 设置页重新组织常规、游戏、任务栏、悬浮窗和外观分组
+- 安装脚本版本更新为 2.0.0，并改为相对路径
+
+### Fixed
+- 修复任务栏常驻新增固定游戏后右对齐失效的问题
+- 修复任务栏常驻遮挡 Windows 隐藏图标按钮的问题
+- 修复固定游戏图标无法读取时的回退显示问题
+- 修复任务栏常驻未响应固定账号变化的问题
+
 ## [1.1.0] - 2026-06-09
 
 ### Added

@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Steam Switch"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "ddxgtx"
 #define MyAppURL "https://github.com/ddxgtx/SteamSwitch"
 #define MyAppExeName "SteamSwitch.exe"
@@ -22,10 +22,10 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-LicenseFile=F:\program\steam switch\LICENSE
-OutputDir=F:\program\steam switch\installer
+LicenseFile=LICENSE
+OutputDir=installer
 OutputBaseFilename=SteamSwitch-v{#MyAppVersion}-win-x64-setup
-SetupIconFile=F:\program\steam switch\src\SteamSwitcher\Resources\steam.ico
+SetupIconFile=src\SteamSwitcher\Resources\steam.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -50,8 +50,8 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 Name: "startwithwindows"; Description: "Start with Windows"; GroupDescription: "Other options:"
 
 [Files]
-Source: "F:\program\steam switch\release\SteamSwitch\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "F:\program\steam switch\release\SteamSwitch\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "release\SteamSwitch\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "release\SteamSwitch\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -114,4 +114,3 @@ begin
       UnInstallOldVersion();
   end;
 end;
-

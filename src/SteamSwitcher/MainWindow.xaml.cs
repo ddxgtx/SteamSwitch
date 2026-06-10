@@ -2,7 +2,9 @@ using System;
 using System.ComponentModel;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using SteamSwitcher.Services;
 using SteamSwitcher.ViewModels;
 using SteamSwitcher.Views;
@@ -14,13 +16,16 @@ namespace SteamSwitcher
         private readonly MainViewModel _viewModel;
         private readonly TrayIconService _trayIcon;
         private TaskbarBandWindow? _taskbarBand;
+        private DesktopFloatingWindow? _desktopFloatingWindow;
+        private bool _gameSearchPlaceholder = true;
+        private const string GameSearchHint = "搜索游戏名称或 AppID...";
 
         public MainWindow()
         {
-            InitializeComponent();
-            
             _viewModel = new MainViewModel();
             DataContext = _viewModel;
+
+            InitializeComponent();
 
             _trayIcon = new TrayIconService(this);
             _trayIcon.AccountSelected += OnTrayAccountSelected;
@@ -34,6 +39,37 @@ namespace SteamSwitcher
         {
             await _viewModel.InitializeAsync();
             _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+
+            GameSearchBox.Text = GameSearchHint;
+            GameSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0x63, 0x63, 0x66));
+            _gameSearchPlaceholder = true;
+
+            SettingsOffsetSlider.Value = _viewModel.TaskbarOffset;
+            SettingsOffsetText.Text = _viewModel.TaskbarOffset.ToString();
+            SettingsAvatarSlider.Value = _viewModel.AvatarSize;
+            SettingsAvatarText.Text = _viewModel.AvatarSize.ToString();
+            SettingsFloatingOpacitySlider.Value = _viewModel.DesktopFloatingOpacity;
+            SettingsFloatingOpacityText.Text = $"{_viewModel.DesktopFloatingOpacity}%";
+            SyncTaskbarPositionRadios();
+
+            if ((_viewModel.IsTaskbarPinned || _viewModel.DesktopFloatingEnabled) &&
+                _viewModel.GetSettings().PinnedGameIds.Count > 0 &&
+                _viewModel.GameList.Count == 0)
+            {
+                await _viewModel.ScanGamesAsync();
+            }
+
+            if (_viewModel.IsTaskbarPinned)
+            {
+                AttachToTaskbar();
+            }
+
+            if (_viewModel.DesktopFloatingEnabled)
+            {
+                AttachDesktopFloating();
+            }
+
+            SwitchToAccounts();
         }
 
         private void OnTrayAccountSelected(object? sender, string steamId)
@@ -58,6 +94,7 @@ namespace SteamSwitcher
             {
                 _taskbarBand?.Detach();
                 _taskbarBand?.Close();
+                _desktopFloatingWindow?.Close();
                 _trayIcon.Dispose();
                 Application.Current.Shutdown();
             }
@@ -113,61 +150,402 @@ namespace SteamSwitcher
 
         private void Settings_Click(object sender, RoutedEventArgs e)
         {
-            var settingsWindow = new SettingsWindow(_viewModel);
-            settingsWindow.Owner = this;
-            settingsWindow.PositionChanged += OnSettingsPositionChanged;
-            settingsWindow.OffsetChanged += OnSettingsOffsetChanged;
-            settingsWindow.AvatarSizeChanged += OnSettingsAvatarSizeChanged;
-            settingsWindow.GlassChanged += OnSettingsGlassChanged;
-            settingsWindow.RoundedChanged += OnSettingsRoundedChanged;
-            settingsWindow.ShowDialog();
+            SwitchToSettings();
         }
 
-        private void GameBinding_Click(object sender, RoutedEventArgs e)
+        private void SideAccounts_Click(object sender, RoutedEventArgs e)
         {
-            var bindingWindow = new GameBindingWindow(_viewModel, _viewModel.GetGameBinding());
-            bindingWindow.Owner = this;
-            bindingWindow.ShowDialog();
+            SwitchToAccounts();
+        }
+
+        private void SideGames_Click(object sender, RoutedEventArgs e)
+        {
+            SwitchToGames();
+        }
+
+        private void SideSettings_Click(object sender, RoutedEventArgs e)
+        {
+            SwitchToSettings();
+        }
+
+        private void SwitchToAccounts()
+        {
+            AccountView.Visibility = Visibility.Visible;
+            GameView.Visibility = Visibility.Collapsed;
+            SettingsView.Visibility = Visibility.Collapsed;
+            SetSidebarActive(SideAccounts, SideAccentAccount,
+                             SideGames, SideAccentGame,
+                             SideSettings, SideAccentSettings);
+        }
+
+        private void SwitchToGames()
+        {
+            AccountView.Visibility = Visibility.Collapsed;
+            GameView.Visibility = Visibility.Visible;
+            SettingsView.Visibility = Visibility.Collapsed;
+            SetSidebarActive(SideGames, SideAccentGame,
+                             SideAccounts, SideAccentAccount,
+                             SideSettings, SideAccentSettings);
+
+            if (_viewModel.GameList.Count == 0)
+            {
+                _ = _viewModel.ScanGamesAsync().ContinueWith(t =>
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        GameScanStatus.Text = _viewModel.GameList.Count > 0
+                            ? $"已安装游戏 — {_viewModel.GameList.Count} 款"
+                            : "未找到已安装的游戏";
+                    });
+                });
+            }
+            else
+            {
+                GameScanStatus.Text = $"共 {_viewModel.GameList.Count} 款游戏";
+            }
+        }
+
+        private void SwitchToSettings()
+        {
+            AccountView.Visibility = Visibility.Collapsed;
+            GameView.Visibility = Visibility.Collapsed;
+            SettingsView.Visibility = Visibility.Visible;
+            SetSidebarActive(SideSettings, SideAccentSettings,
+                             SideAccounts, SideAccentAccount,
+                             SideGames, SideAccentGame);
+        }
+
+        private static void SetSidebarActive(
+            Button active, Border activeAccent,
+            Button inactive1, Border inactiveAccent1,
+            Button inactive2, Border inactiveAccent2)
+        {
+            var activeBg = new SolidColorBrush(Color.FromArgb(26, 10, 132, 255));
+            var activeFg = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
+            var inactiveBg = Brushes.Transparent;
+            var inactiveFg = new SolidColorBrush(Color.FromRgb(0x8E, 0x8E, 0x96));
+
+            active.Background = activeBg;
+            active.Foreground = activeFg;
+            active.FontWeight = FontWeights.SemiBold;
+            activeAccent.Background = activeFg;
+
+            inactive1.Background = inactiveBg;
+            inactive1.Foreground = inactiveFg;
+            inactive1.FontWeight = FontWeights.Normal;
+            inactiveAccent1.Background = Brushes.Transparent;
+
+            inactive2.Background = inactiveBg;
+            inactive2.Foreground = inactiveFg;
+            inactive2.FontWeight = FontWeights.Normal;
+            inactiveAccent2.Background = Brushes.Transparent;
+        }
+
+        private async void GameScan_Click(object sender, RoutedEventArgs e)
+        {
+            await _viewModel.ScanGamesAsync();
+            GameScanStatus.Text = _viewModel.GameList.Count > 0
+                ? $"共 {_viewModel.GameList.Count} 款游戏"
+                : "未找到已安装的游戏";
+        }
+
+        private void GameSearchBox_GotFocus(object sender, RoutedEventArgs e)
+        {
+            if (_gameSearchPlaceholder)
+            {
+                GameSearchBox.Text = "";
+                GameSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(255, 255, 255));
+                _gameSearchPlaceholder = false;
+            }
+        }
+
+        private void GameSearchBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(GameSearchBox.Text))
+            {
+                GameSearchBox.Text = GameSearchHint;
+                GameSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0x63, 0x63, 0x66));
+                _gameSearchPlaceholder = true;
+            }
+        }
+
+        private void GameSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_gameSearchPlaceholder) return;
+
+            GameClearSearch.Visibility = string.IsNullOrWhiteSpace(GameSearchBox.Text)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
+            var search = GameSearchBox.Text.Trim().ToLower();
+            if (string.IsNullOrEmpty(search))
+            {
+                GameListBox.ItemsSource = _viewModel.GameList;
+            }
+            else
+            {
+                var filtered = _viewModel.GameList
+                    .Where(g => g.GameName.ToLower().Contains(search) ||
+                                g.AppId.ToString().Contains(search));
+                GameListBox.ItemsSource = new System.Collections.ObjectModel.ObservableCollection<GameListViewModel>(filtered);
+            }
+        }
+
+        private void GameClearSearch_Click(object sender, RoutedEventArgs e)
+        {
+            GameSearchBox.Text = "";
+            GameSearchBox_GotFocus(sender, e);
+            GameClearSearch.Visibility = Visibility.Collapsed;
+            GameListBox.ItemsSource = _viewModel.GameList;
+        }
+
+        private async void GameSaveBinding_Click(object sender, RoutedEventArgs e)
+        {
+            var game = _viewModel.SelectedGame;
+            var account = _viewModel.SelectedBindingAccount ?? _viewModel.SelectedAccount;
+            if (game == null)
+            {
+                MessageBox.Show("请先在列表中选择一个游戏", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            if (account == null)
+            {
+                MessageBox.Show("请先在右侧账号列表中选择要绑定的账号", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            await _viewModel.SaveGameBinding(game.AppId, game.GameName, account.SteamId, account.DisplayName);
+            GameScanStatus.Text = $"已绑定 {game.GameName} → {account.DisplayName}";
+        }
+
+        private async void GameRemoveBinding_Click(object sender, RoutedEventArgs e)
+        {
+            var game = _viewModel.SelectedGame;
+            if (game == null) return;
+
+            var result = MessageBox.Show($"确定要删除 {game.GameName} 的账号绑定吗？", "确认删除",
+                MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result == MessageBoxResult.Yes)
+            {
+                await _viewModel.RemoveGameBinding(game.AppId);
+                GameScanStatus.Text = $"已删除 {game.GameName} 的绑定";
+            }
+        }
+
+        private void GamePinToggle_Click(object sender, RoutedEventArgs e)
+        {
+            var game = _viewModel.SelectedGame;
+            if (game == null) return;
+
+            _viewModel.ToggleGamePin(game.AppId);
+            GamePinToggle.IsChecked = _viewModel.IsGamePinned(game.AppId);
+
+            if (game.IsPinned && !game.HasBinding)
+            {
+                MessageBox.Show("该游戏尚未绑定账号，请先添加账号绑定后再固定到任务栏。",
+                    "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private void GameItemPinToggle_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.DataContext is GameListViewModel game)
+            {
+                _viewModel.ToggleGamePin(game.AppId);
+                game.IsPinned = _viewModel.IsGamePinned(game.AppId);
+
+                if (game.IsPinned && !game.HasBinding)
+                {
+                    MessageBox.Show("该游戏尚未绑定账号，请先添加账号绑定后再固定到任务栏。",
+                        "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+
+                GamePinToggle.IsChecked = game.IsPinned;
+            }
+        }
+
+        private void ManualAddToggle_Click(object sender, RoutedEventArgs e)
+        {
+            ManualAddPanel.Visibility = ManualAddPanel.Visibility == Visibility.Visible
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+
+        private async void ManualAddBinding_Click(object sender, RoutedEventArgs e)
+        {
+            if (!int.TryParse(ManualAppId.Text?.Trim(), out int appId))
+            {
+                MessageBox.Show("请输入有效的 AppID", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var gameName = ManualGameName.Text?.Trim();
+            if (string.IsNullOrEmpty(gameName))
+            {
+                MessageBox.Show("请输入游戏名称", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var account = _viewModel.SelectedBindingAccount ?? _viewModel.SelectedAccount;
+            if (account == null)
+            {
+                MessageBox.Show("请先在右侧选择要绑定的账号", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            await _viewModel.SaveGameBinding(appId, gameName, account.SteamId, account.DisplayName);
+
+            ManualAppId.Text = "";
+            ManualGameName.Text = "";
+            ManualAddPanel.Visibility = Visibility.Collapsed;
+            GameScanStatus.Text = $"已手动绑定 {gameName} → {account.DisplayName}";
+
+            var game = _viewModel.GameList.FirstOrDefault(g => g.AppId == appId);
+            if (game != null)
+                _viewModel.SelectedGame = game;
+        }
+
+        private void SettingsPos_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is RadioButton rb && rb.IsChecked == true && rb.Tag is string tag)
+            {
+                _viewModel.TaskbarPosition = tag switch
+                {
+                    "Auto" => Core.TaskbarPosition.Auto,
+                    "Left" => Core.TaskbarPosition.Left,
+                    "Center" => Core.TaskbarPosition.Center,
+                    "Right" => Core.TaskbarPosition.Right,
+                    _ => Core.TaskbarPosition.Auto
+                };
+                if (_taskbarBand != null && _taskbarBand.IsPinned)
+                    _taskbarBand.SetPosition(_viewModel.TaskbarPosition);
+            }
+        }
+
+        private void SyncTaskbarPositionRadios()
+        {
+            switch (_viewModel.TaskbarPosition)
+            {
+                case Core.TaskbarPosition.Left:
+                    SettingsPosLeft.IsChecked = true;
+                    break;
+                case Core.TaskbarPosition.Center:
+                    SettingsPosCenter.IsChecked = true;
+                    break;
+                case Core.TaskbarPosition.Right:
+                    SettingsPosRight.IsChecked = true;
+                    break;
+                default:
+                    SettingsPosAuto.IsChecked = true;
+                    break;
+            }
+        }
+
+        private void SettingsOffset_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_viewModel == null) return;
+            int val = (int)e.NewValue;
+            _viewModel.TaskbarOffset = val;
+            SettingsOffsetText.Text = val.ToString();
+            if (_taskbarBand != null && _taskbarBand.IsPinned)
+                _taskbarBand.SetOffset(val);
+        }
+
+        private void SettingsAvatar_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_viewModel == null) return;
+            int val = (int)e.NewValue;
+            _viewModel.AvatarSize = val;
+            SettingsAvatarText.Text = val.ToString();
+            if (_taskbarBand != null && _taskbarBand.IsPinned)
+                _taskbarBand.SetAvatarSize(val);
+            if (_desktopFloatingWindow != null)
+                _desktopFloatingWindow.SetAvatarSize(val);
+        }
+
+        private void SettingsGlass_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_taskbarBand != null && _taskbarBand.IsPinned)
+                _taskbarBand.SetGlassEnabled(_viewModel.GlassEnabled);
+            _desktopFloatingWindow?.SetGlassEnabled(_viewModel.GlassEnabled);
+        }
+
+        private void SettingsRounded_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_taskbarBand != null && _taskbarBand.IsPinned)
+                _taskbarBand.SetRoundedMode(_viewModel.RoundedMode);
+            _desktopFloatingWindow?.SetRoundedMode(_viewModel.RoundedMode);
+        }
+
+        private async void DesktopFloating_Checked(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded) return;
+
+            if (_viewModel.GetSettings().PinnedGameIds.Count > 0 && _viewModel.GameList.Count == 0)
+            {
+                await _viewModel.ScanGamesAsync();
+            }
+
+            AttachDesktopFloating();
+        }
+
+        private void DesktopFloating_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded) return;
+
+            DetachDesktopFloating();
+        }
+
+        private void SettingsFloatingTopmost_Changed(object sender, RoutedEventArgs e)
+        {
+            _desktopFloatingWindow?.SetTopmostEnabled(_viewModel.DesktopFloatingTopmost);
+        }
+
+        private void SettingsFloatingLocked_Changed(object sender, RoutedEventArgs e)
+        {
+            _desktopFloatingWindow?.SetLocked(_viewModel.DesktopFloatingLocked);
+        }
+
+        private void SettingsFloatingOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_viewModel == null) return;
+            int val = (int)e.NewValue;
+            _viewModel.DesktopFloatingOpacity = val;
+            SettingsFloatingOpacityText.Text = $"{val}%";
+            _desktopFloatingWindow?.SetOpacityPercent(val);
         }
 
         private void OnSettingsPositionChanged(object? sender, Core.TaskbarPosition position)
         {
             if (_taskbarBand != null && _taskbarBand.IsPinned)
-            {
                 _taskbarBand.SetPosition(position);
-            }
         }
 
         private void OnSettingsOffsetChanged(object? sender, int offset)
         {
             if (_taskbarBand != null && _taskbarBand.IsPinned)
-            {
                 _taskbarBand.SetOffset(offset);
-            }
         }
 
         private void OnSettingsAvatarSizeChanged(object? sender, int size)
         {
             if (_taskbarBand != null && _taskbarBand.IsPinned)
-            {
                 _taskbarBand.SetAvatarSize(size);
-            }
+            _desktopFloatingWindow?.SetAvatarSize(size);
         }
 
         private void OnSettingsGlassChanged(object? sender, bool enabled)
         {
             if (_taskbarBand != null && _taskbarBand.IsPinned)
-            {
                 _taskbarBand.SetGlassEnabled(enabled);
-            }
+            _desktopFloatingWindow?.SetGlassEnabled(enabled);
         }
 
         private void OnSettingsRoundedChanged(object? sender, bool rounded)
         {
             if (_taskbarBand != null && _taskbarBand.IsPinned)
-            {
                 _taskbarBand.SetRoundedMode(rounded);
-            }
+            _desktopFloatingWindow?.SetRoundedMode(rounded);
         }
 
         protected override void OnStateChanged(EventArgs e)
@@ -178,11 +556,15 @@ namespace SteamSwitcher
 
         private void TaskbarPin_Checked(object sender, RoutedEventArgs e)
         {
+            if (!IsLoaded) return;
+
             AttachToTaskbar();
         }
 
         private void TaskbarPin_Unchecked(object sender, RoutedEventArgs e)
         {
+            if (!IsLoaded) return;
+
             DetachFromTaskbar();
         }
 
@@ -192,16 +574,20 @@ namespace SteamSwitcher
                 return;
 
             var pinnedAccounts = _viewModel.GetPinnedAccounts();
-            if (pinnedAccounts.Count == 0)
+            var pinnedGames = _viewModel.GetPinnedGames();
+            if (pinnedAccounts.Count == 0 && pinnedGames.Count == 0)
             {
-                _viewModel.StatusText = "请先固定至少一个账号";
+                _viewModel.StatusText = "请先固定至少一个账号或游戏";
                 _viewModel.IsTaskbarPinned = false;
                 return;
             }
 
             _taskbarBand = new TaskbarBandWindow(_viewModel.GetAccountManager());
             _taskbarBand.AccountSwitchRequested += OnTaskbarAccountSwitch;
+            _taskbarBand.GameLaunchRequested += OnTaskbarGameLaunch;
+            _taskbarBand.SetViewModel(_viewModel);
             _taskbarBand.SetPinnedAccounts(pinnedAccounts);
+            _taskbarBand.SetPinnedGames(pinnedGames);
             
             _taskbarBand.SetPosition(_viewModel.TaskbarPosition);
             _taskbarBand.SetOffset(_viewModel.TaskbarOffset);
@@ -225,6 +611,59 @@ namespace SteamSwitcher
             _viewModel.IsTaskbarPinned = false;
         }
 
+        private void AttachDesktopFloating()
+        {
+            if (_desktopFloatingWindow != null)
+                return;
+
+            var pinnedAccounts = _viewModel.GetPinnedAccounts();
+            var pinnedGames = _viewModel.GetPinnedGames();
+            if (pinnedAccounts.Count == 0 && pinnedGames.Count == 0)
+            {
+                _viewModel.StatusText = "请先固定至少一个账号或游戏";
+                _viewModel.DesktopFloatingEnabled = false;
+                return;
+            }
+
+            var settings = _viewModel.GetSettings();
+            _desktopFloatingWindow = new DesktopFloatingWindow(_viewModel.GetAccountManager());
+            _desktopFloatingWindow.AccountSwitchRequested += OnTaskbarAccountSwitch;
+            _desktopFloatingWindow.GameLaunchRequested += OnTaskbarGameLaunch;
+            _desktopFloatingWindow.PositionChanged += (s, pos) =>
+            {
+                settings.DesktopFloatingLeft = pos.left;
+                settings.DesktopFloatingTop = pos.top;
+                SettingsService.Save(settings);
+            };
+            _desktopFloatingWindow.Closed += (s, e) => _desktopFloatingWindow = null;
+            _desktopFloatingWindow.SetViewModel(_viewModel);
+            _desktopFloatingWindow.SetPinnedAccounts(pinnedAccounts);
+            _desktopFloatingWindow.SetPinnedGames(pinnedGames);
+            _desktopFloatingWindow.SetAvatarSize(_viewModel.AvatarSize);
+            _desktopFloatingWindow.SetGlassEnabled(_viewModel.GlassEnabled);
+            _desktopFloatingWindow.SetRoundedMode(_viewModel.RoundedMode);
+            _desktopFloatingWindow.SetTopmostEnabled(_viewModel.DesktopFloatingTopmost);
+            _desktopFloatingWindow.SetLocked(_viewModel.DesktopFloatingLocked);
+            _desktopFloatingWindow.SetOpacityPercent(_viewModel.DesktopFloatingOpacity);
+            _desktopFloatingWindow.SetSavedPosition(settings.DesktopFloatingLeft, settings.DesktopFloatingTop);
+            _desktopFloatingWindow.Show();
+
+            _viewModel.DesktopFloatingEnabled = true;
+        }
+
+        private void DetachDesktopFloating()
+        {
+            if (_desktopFloatingWindow == null)
+            {
+                _viewModel.DesktopFloatingEnabled = false;
+                return;
+            }
+
+            _desktopFloatingWindow.Close();
+            _desktopFloatingWindow = null;
+            _viewModel.DesktopFloatingEnabled = false;
+        }
+
         private async void OnTaskbarAccountSwitch(object? sender, Models.SteamAccount account)
         {
             _viewModel.IsLoading = true;
@@ -237,6 +676,7 @@ namespace SteamSwitcher
             {
                 _viewModel.StatusText = $"已切换到 {account.PersonaName}";
                 _taskbarBand?.UpdateCurrentAccount(account);
+                _desktopFloatingWindow?.UpdateCurrentAccount(account);
 
                 if (_viewModel.AutoStartSteam)
                 {
@@ -252,6 +692,26 @@ namespace SteamSwitcher
             _viewModel.IsSteamRunning = accountManager.GetSteamService().IsSteamRunning();
             _viewModel.IsLoading = false;
 
+            _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+        }
+
+        private async void OnTaskbarGameLaunch(object? sender, int appId)
+        {
+            if (_viewModel.ConfirmBeforeGameLaunch)
+            {
+                var game = _viewModel.GameList.FirstOrDefault(g => g.AppId == appId);
+                var gameName = game?.GameName ?? $"AppID {appId}";
+                var result = MessageBox.Show(
+                    $"确定要切换账号并启动 {gameName} 吗？",
+                    "确认启动游戏",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (result != MessageBoxResult.Yes)
+                    return;
+            }
+
+            await _viewModel.LaunchPinnedGameAsync(appId);
             _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
         }
     }
