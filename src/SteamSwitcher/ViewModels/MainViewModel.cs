@@ -304,6 +304,9 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private async Task StartInjectorAsync()
         {
+            var logPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug.log");
+            System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] StartInjectorAsync called{Environment.NewLine}");
+
             IsLoading = true;
             StatusText = "正在启动注入器...";
 
@@ -313,39 +316,56 @@ namespace SteamSwitcher.ViewModels
                 int wsPort = 0;
                 try
                 {
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Creating WebSocket server...{Environment.NewLine}");
                     _wsServer = new WebSocketServer(0);
                     _wsServer.MessageReceived += OnWebSocketMessage;
                     await _wsServer.StartAsync();
                     wsPort = _wsServer.ActualPort;
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] WebSocket started on port: {wsPort}{Environment.NewLine}");
                 }
                 catch (Exception wsEx)
                 {
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] WebSocket failed: {wsEx.Message}{Environment.NewLine}");
                     StatusText = $"WebSocket启动失败: {wsEx.Message}";
                     IsLoading = false;
                     return;
                 }
 
                 // 创建注入器并注入
-                _injector = new SteamCEFInjector(_gameBinding, _accountManager);
-                _injector.StatusChanged += (s, msg) => 
+                try
                 {
-                    Application.Current.Dispatcher.Invoke(() => StatusText = msg);
-                };
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Creating injector...{Environment.NewLine}");
+                    _injector = new SteamCEFInjector(_gameBinding, _accountManager);
+                    _injector.StatusChanged += (s, msg) => 
+                    {
+                        Application.Current.Dispatcher.Invoke(() => StatusText = msg);
+                        System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Status: {msg}{Environment.NewLine}");
+                    };
 
-                var injected = await _injector.InjectAsync(wsPort);
-                
-                if (injected)
-                {
-                    IsInjectorConnected = true;
-                    StatusText = $"注入完成！端口: {wsPort}";
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Calling InjectAsync...{Environment.NewLine}");
+                    var injected = await _injector.InjectAsync(wsPort);
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] InjectAsync returned: {injected}{Environment.NewLine}");
+                    
+                    if (injected)
+                    {
+                        IsInjectorConnected = true;
+                        StatusText = $"注入完成！端口: {wsPort}";
+                    }
+                    else
+                    {
+                        StatusText = "注入失败，请确保Steam正在运行";
+                    }
                 }
-                else
+                catch (Exception injEx)
                 {
-                    StatusText = "注入失败，请确保Steam正在运行";
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Injector error: {injEx.GetType().Name}: {injEx.Message}{Environment.NewLine}");
+                    System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Stack: {injEx.StackTrace}{Environment.NewLine}");
+                    StatusText = $"注入器错误: {injEx.Message}";
                 }
             }
             catch (Exception ex)
             {
+                System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Fatal error: {ex.GetType().Name}: {ex.Message}{Environment.NewLine}");
                 StatusText = $"注入器启动失败: {ex.Message}";
             }
 
@@ -423,26 +443,75 @@ namespace SteamSwitcher.ViewModels
                             var gameName = e.data.TryGetProperty("gameName", out var nameEl) 
                                 ? nameEl.GetString() ?? "" : "";
                             
-                            var binding = _gameBinding.GetBinding(appId);
-                            if (binding?.AccountSteamId != null)
+                            // 检查是否有指定的目标账号
+                            SteamAccount? targetAccount = null;
+                            if (e.data.TryGetProperty("targetSteamId", out var targetIdEl))
                             {
-                                var account = _accountManager.Accounts.FirstOrDefault(
-                                    a => a.SteamId == binding.AccountSteamId);
-                                
-                                if (account != null)
+                                var targetSteamId = targetIdEl.GetString();
+                                targetAccount = _accountManager.Accounts.FirstOrDefault(
+                                    a => a.SteamId == targetSteamId);
+                            }
+                            
+                            // 如果没有指定，使用绑定的账号
+                            if (targetAccount == null)
+                            {
+                                var binding = _gameBinding.GetBinding(appId);
+                                if (binding?.AccountSteamId != null)
                                 {
-                                    Application.Current.Dispatcher.Invoke(() =>
-                                    {
-                                        SelectedAccount = Accounts.FirstOrDefault(
-                                            a => a.SteamId == account.SteamId);
-                                    });
-                                    
-                                    await _accountManager.SwitchAccountAsync(account);
-                                    _accountManager.LaunchSteam();
-                                    
-                                    await _gameBinding.RecordPlayAsync(
-                                        appId, account.SteamId, account.AccountName);
+                                    targetAccount = _accountManager.Accounts.FirstOrDefault(
+                                        a => a.SteamId == binding.AccountSteamId);
                                 }
+                            }
+                            
+                            if (targetAccount != null)
+                            {
+                                Application.Current.Dispatcher.Invoke(() =>
+                                {
+                                    SelectedAccount = Accounts.FirstOrDefault(
+                                        a => a.SteamId == targetAccount.SteamId);
+                                });
+                                
+                                await _accountManager.SwitchAccountAsync(targetAccount);
+                                _accountManager.LaunchSteam();
+                                
+                                await _gameBinding.RecordPlayAsync(
+                                    appId, targetAccount.SteamId, targetAccount.AccountName);
+                                
+                                await _wsServer?.SendToAllAsync("switchResult", new
+                                {
+                                    success = true,
+                                    accountName = targetAccount.PersonaName
+                                });
+                            }
+                            else
+                            {
+                                await _wsServer?.SendToAllAsync("switchResult", new
+                                {
+                                    success = false,
+                                    error = "未找到绑定的账号"
+                                });
+                            }
+                        }
+                        break;
+
+                    case "bindGame":
+                        if (e.data.TryGetProperty("appId", out var bindAppId2) &&
+                            e.data.TryGetProperty("gameName", out var bindGameName2))
+                        {
+                            var currentAcc = _accountManager.CurrentAccount;
+                            if (currentAcc != null)
+                            {
+                                await _gameBinding.SetBindingAsync(
+                                    bindAppId2.GetInt32(),
+                                    bindGameName2.GetString() ?? "",
+                                    currentAcc.SteamId,
+                                    currentAcc.AccountName);
+                                
+                                await _wsServer?.SendToAllAsync("bindingSaved", new
+                                {
+                                    appId = bindAppId2.GetInt32(),
+                                    accountName = currentAcc.AccountName
+                                });
                             }
                         }
                         break;

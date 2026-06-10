@@ -161,11 +161,21 @@ namespace SteamSwitcher.Core
             try
             {
                 using var http = new HttpClient();
-                http.Timeout = TimeSpan.FromSeconds(1);
+                http.Timeout = TimeSpan.FromSeconds(5);
                 var resp = await http.GetAsync($"http://localhost:{port}/json/version");
+                
+                // 记录结果到日志
+                var logPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug.log");
+                System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] CheckPort {port}: StatusCode={resp.StatusCode}{Environment.NewLine}");
+                
                 return resp.IsSuccessStatusCode;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                var logPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug.log");
+                System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] CheckPort {port}: Failed={ex.Message}{Environment.NewLine}");
+                return false;
+            }
         }
 
         private bool StartSteamWithDebug()
@@ -196,8 +206,13 @@ namespace SteamSwitcher.Core
         private async Task<JsonElement> GetPagesAsync()
         {
             using var http = new HttpClient();
-            http.Timeout = TimeSpan.FromSeconds(3);
-            var json = await http.GetStringAsync($"http://localhost:{_debugPort}/json");
+            http.Timeout = TimeSpan.FromSeconds(10);
+            var url = $"http://localhost:{_debugPort}/json";
+            var json = await http.GetStringAsync(url);
+            
+            var logPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug.log");
+            System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] GetPages from {url}: {json.Length} chars{Environment.NewLine}");
+            
             return JsonDocument.Parse(json).RootElement;
         }
 
