@@ -20,7 +20,7 @@ using SteamSwitcher.Services;
 
 namespace SteamSwitcher.ViewModels
 {
-    public partial class MainViewModel : ObservableObject
+    public partial class MainViewModel : ObservableObject, IDisposable
     {
         private const int SteamDebugPort = 8080;
         private readonly AccountManager _accountManager;
@@ -143,6 +143,15 @@ namespace SteamSwitcher.ViewModels
         [ObservableProperty]
         private bool _confirmBeforeGameLaunch;
 
+        [ObservableProperty]
+        private bool _silentCloseSteam = true;
+
+        [ObservableProperty]
+        private bool _checkUpdateOnStartup = true;
+
+        [ObservableProperty]
+        private bool _showNotificationOnSteamClose;
+
         public AccountManager GetAccountManager() => _accountManager;
         public AppSettings GetSettings() => _settings;
         public GameAccountBinding GetGameBinding() => _gameBinding;
@@ -233,7 +242,7 @@ namespace SteamSwitcher.ViewModels
 
             try
             {
-                var success = await _accountManager.SwitchAccountAsync(account);
+                var success = await _accountManager.SwitchAccountAsync(account, SilentCloseSteam);
                 if (!success)
                 {
                     StatusText = "切换失败，请确保 Steam 已关闭";
@@ -299,6 +308,9 @@ namespace SteamSwitcher.ViewModels
             _enableLibraryInjection = _settings.EnableLibraryInjection;
             _autoScanGamesOnStartup = _settings.AutoScanGamesOnStartup;
             _confirmBeforeGameLaunch = _settings.ConfirmBeforeGameLaunch;
+            _silentCloseSteam = _settings.SilentCloseSteam;
+            _checkUpdateOnStartup = _settings.CheckUpdateOnStartup;
+            _showNotificationOnSteamClose = _settings.ShowNotificationOnSteamClose;
             SettingsService.SetStartWithWindows(_startWithWindows);
 
             _settingsSaveTimer = new DispatcherTimer
@@ -608,14 +620,18 @@ namespace SteamSwitcher.ViewModels
                     {
                         _ = StartInjectorAsync().ContinueWith(t =>
                         {
-                            if (!IsInjectorConnected)
+                            if (t.IsFaulted)
+                            {
+                                AppLogger.Error("StartInjectorAsync failed", t.Exception);
+                            }
+                            if (t.IsFaulted || !IsInjectorConnected)
                             {
                                 Application.Current.Dispatcher.Invoke(() =>
                                 {
                                     EnableLibraryInjection = false;
                                 });
                             }
-                        });
+                        }, TaskContinuationOptions.NotOnCanceled);
                     }
                     else
                         StopInjector();
@@ -625,6 +641,15 @@ namespace SteamSwitcher.ViewModels
                     break;
                 case nameof(ConfirmBeforeGameLaunch):
                     _settings.ConfirmBeforeGameLaunch = ConfirmBeforeGameLaunch;
+                    break;
+                case nameof(SilentCloseSteam):
+                    _settings.SilentCloseSteam = SilentCloseSteam;
+                    break;
+                case nameof(CheckUpdateOnStartup):
+                    _settings.CheckUpdateOnStartup = CheckUpdateOnStartup;
+                    break;
+                case nameof(ShowNotificationOnSteamClose):
+                    _settings.ShowNotificationOnSteamClose = ShowNotificationOnSteamClose;
                     break;
             }
 
@@ -671,11 +696,52 @@ namespace SteamSwitcher.ViewModels
                 AppLogger.Info("Library injection is enabled; auto-starting injector after initialization.");
                 _ = StartInjectorAsync();
             }
+
+            if (CheckUpdateOnStartup)
+            {
+                _ = CheckForUpdatesAsync();
+            }
+        }
+
+        private async Task CheckForUpdatesAsync()
+        {
+            try
+            {
+                using var http = new System.Net.Http.HttpClient();
+                http.DefaultRequestHeaders.Add("User-Agent", "SteamSwitch");
+                var response = await http.GetAsync("https://api.github.com/repos/ddxgtx/SteamSwitch/releases/latest");
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                    var tagName = doc.RootElement.GetProperty("tag_name").GetString();
+                    if (!string.IsNullOrEmpty(tagName))
+                    {
+                        var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+                        var latestVersion = tagName.TrimStart('v', 'V');
+                        if (Version.TryParse(latestVersion, out var latest) && Version.TryParse(currentVersion, out var current) && latest > current)
+                        {
+                            StatusText = $"发现新版本 v{latestVersion}";
+                            AppLogger.Info($"New version available: v{latestVersion} (current: v{currentVersion})");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Check for updates failed.", ex);
+            }
         }
 
         private void UpdateAccountsList()
         {
             var pinnedIds = _settings.PinnedAccountIds ?? new List<string>();
+
+            // Unsubscribe from old AccountViewModel events
+            foreach (var oldVm in Accounts)
+            {
+                oldVm.PropertyChanged -= OnAccountPropertyChanged;
+            }
 
             Accounts.Clear();
             foreach (var account in _accountManager.Accounts)
@@ -754,7 +820,7 @@ namespace SteamSwitcher.ViewModels
 
             try
             {
-                var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account);
+                var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account, SilentCloseSteam);
                 if (success)
                 {
                     StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
@@ -763,7 +829,7 @@ namespace SteamSwitcher.ViewModels
                     if (launchSteam && AutoStartSteam)
                     {
                         StatusText = "正在启动 Steam...";
-                        _accountManager.LaunchSteam();
+                        _accountManager.LaunchSteam(silent: true);
                     }
                 }
                 else
@@ -798,7 +864,7 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private void LaunchSteam()
         {
-            _accountManager.LaunchSteam();
+            _accountManager.LaunchSteam(silent: true);
             IsSteamRunning = true;
             StatusText = "Steam 已启动";
         }
@@ -1068,7 +1134,7 @@ namespace SteamSwitcher.ViewModels
 
             try
             {
-                var success = await _accountManager.SwitchAccountAsync(account);
+                var success = await _accountManager.SwitchAccountAsync(account, SilentCloseSteam);
                 if (!success)
                 {
                     StatusText = "切换失败，请确保 Steam 已关闭";
@@ -1115,6 +1181,15 @@ namespace SteamSwitcher.ViewModels
             }
 
             OnPropertyChanged(nameof(CurrentAccountName));
+        }
+
+        public void Dispose()
+        {
+            _settingsSaveTimer?.Stop();
+            _injector?.Dispose();
+            _wsServer?.Dispose();
+            _accountManager.Dispose();
+            GC.SuppressFinalize(this);
         }
     }
 
@@ -1204,7 +1279,7 @@ namespace SteamSwitcher.ViewModels
 
         private void LoadAvatar()
         {
-            Avatar = AccountManager.LoadImage(Account.AvatarPath);
+            Avatar = AccountManager.LoadImage(Account.AvatarPath, 64);
         }
     }
 }

@@ -516,7 +516,10 @@
                                         <ListBox x:Name="GameListBox" ItemsSource="{Binding GameList}" SelectedItem="{Binding SelectedGame}"
                                                  Background="Transparent" BorderThickness="0" Padding="8" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                                  ItemContainerStyle="{StaticResource GameListItemStyle}"
-                                                 ItemTemplate="{StaticResource GameItemTemplate}"/>
+                                                 ItemTemplate="{StaticResource GameItemTemplate}"
+                                                 VirtualizingStackPanel.IsVirtualizing="True"
+                                                 VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                 ScrollViewer.CanContentScroll="True"/>
                                         <TextBlock x:Name="GameEmptyHint" Text="点击 [扫描] 加载本地 Steam 游戏" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="13"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding ShowEmptyHint, Converter={StaticResource BoolToVis}}"/>
                                     </Grid>
@@ -741,6 +744,45 @@
                                                             <TextBlock Text="⚠️ 开启将启用 CEF 调试端口，存在账号封禁风险" Foreground="#FF9500" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding EnableLibraryInjection}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="显示与通知" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="14,2,14,6"/>
+                                        <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="0"
+                                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                            <StackPanel>
+                                                <Border Padding="14,12">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="静默关闭 Steam" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="切换账号时隐藏 Steam 窗口，直接在后台完成关闭" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                        </StackPanel>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding SilentCloseSteam}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
+                                                <Border Padding="14,12">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="启动时检查更新" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="打开应用时自动检查是否有新版本" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                        </StackPanel>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding CheckUpdateOnStartup}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
+                                                <Border Padding="14,12">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="关闭 Steam 时显示通知" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="成功关闭 Steam 后弹出系统通知" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                        </StackPanel>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding ShowNotificationOnSteamClose}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                             </StackPanel>
@@ -1009,6 +1051,7 @@
 
                     <WrapPanel Margin="0,0,0,6">
                         <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}" Style="{StaticResource AppCheckBox}"/>
+                        <CheckBox Content="静默关闭Steam" IsChecked="{Binding SilentCloseSteam}" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}" Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="桌面悬浮窗" IsChecked="{Binding DesktopFloatingEnabled}" Checked="DesktopFloating_Checked" Unchecked="DesktopFloating_Unchecked" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
@@ -1036,9 +1079,26 @@
             </Border>
 
             <!-- 调整大小手柄 -->
-            <ResizeGrip Grid.Row="2" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                        Width="20" Height="20" Margin="0,0,4,4" Opacity="0.4"
-                        Cursor="SizeNWSE"/>
+            <Thumb Grid.Row="2" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                   Width="20" Height="20" Margin="0,0,2,2" Cursor="SizeNWSE"
+                   DragStarted="ResizeGrip_DragStarted"
+                   DragDelta="ResizeGrip_DragDelta"
+                   Background="Transparent">
+                <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                        <Grid>
+                            <Path Data="M4,16 L16,4 M10,16 L16,10 M16,16 L16,16" 
+                                  Stroke="{DynamicResource TextTertiaryBrush}" 
+                                  StrokeThickness="1.5" 
+                                  StrokeStartLineCap="Round" 
+                                  StrokeEndLineCap="Round"
+                                  HorizontalAlignment="Right" 
+                                  VerticalAlignment="Bottom"
+                                  Margin="0,0,2,2"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Thumb.Template>
+            </Thumb>
         </Grid>
     </Border>
 </Window>

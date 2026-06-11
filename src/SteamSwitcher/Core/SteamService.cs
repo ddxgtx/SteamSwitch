@@ -17,7 +17,20 @@ namespace SteamSwitcher.Core
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        private const int SW_HIDE = 0;
         private const int SW_MINIMIZE = 6;
+        private const int SW_SHOW = 5;
 
         public string? SteamPath { get; private set; }
         public string? SteamExePath { get; private set; }
@@ -59,11 +72,20 @@ namespace SteamSwitcher.Core
 
         public bool IsSteamRunning()
         {
-            return Process.GetProcessesByName("steam").Length > 0 ||
-                   Process.GetProcessesByName("steamwebhelper").Length > 0;
+            var steamProcs = Process.GetProcessesByName("steam");
+            var webProcs = Process.GetProcessesByName("steamwebhelper");
+            try
+            {
+                return steamProcs.Length > 0 || webProcs.Length > 0;
+            }
+            finally
+            {
+                foreach (var p in steamProcs) p.Dispose();
+                foreach (var p in webProcs) p.Dispose();
+            }
         }
 
-        public async Task<bool> CloseSteamAsync()
+        public async Task<bool> CloseSteamAsync(bool silent = false)
         {
             if (!IsSteamRunning())
             {
@@ -73,40 +95,112 @@ namespace SteamSwitcher.Core
 
             try
             {
-                AppLogger.Info("Closing Steam.");
+                AppLogger.Info($"Closing Steam. Silent={silent}");
 
-                try
+                if (silent)
                 {
-                    if (!string.IsNullOrEmpty(SteamExePath) && File.Exists(SteamExePath))
-                    {
-                        AppLogger.Info($"Starting shutdown command: {SteamExePath} -shutdown");
-                        Process.Start(SteamExePath, "-shutdown");
-                        await Task.Delay(3000);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Error("Steam -shutdown failed.", ex);
-                }
+                    // Silent mode: hide windows first, then force kill
+                    AppLogger.Info("Silent mode: hiding windows and force killing processes.");
 
-                if (IsSteamRunning())
-                {
-                    var processes = Process.GetProcessesByName("steam")
-                        .Concat(Process.GetProcessesByName("steamwebhelper"));
+                    // Hide windows FIRST before killing
+                    HideSteamWindows();
+                    await Task.Delay(50);
+                    HideSteamWindows();
+
+                    // Force kill using Process.Kill with WaitForExitAsync
+                    var steamProcs = Process.GetProcessesByName("steam");
+                    var webProcs = Process.GetProcessesByName("steamwebhelper");
+                    var processes = steamProcs.Concat(webProcs).ToList();
+
                     foreach (var process in processes)
                     {
                         try
                         {
                             AppLogger.Info($"Killing Steam process: {process.Id}");
                             process.Kill();
-                            await process.WaitForExitAsync();
                         }
                         catch (Exception ex)
                         {
                             AppLogger.Error($"Failed to kill Steam process {process.Id}.", ex);
                         }
                     }
-                    await Task.Delay(2000);
+
+                    // Wait for all processes to exit
+                    foreach (var process in processes)
+                    {
+                        try { await process.WaitForExitAsync(); } catch { }
+                    }
+
+                    // Dispose all process objects
+                    foreach (var process in processes) process.Dispose();
+
+                    // Hide any remaining windows
+                    HideSteamWindows();
+                    await Task.Delay(100);
+                    HideSteamWindows();
+
+                    // Kill any remaining processes
+                    var remainingSteam = Process.GetProcessesByName("steam");
+                    var remainingWeb = Process.GetProcessesByName("steamwebhelper");
+                    var remaining = remainingSteam.Concat(remainingWeb).ToList();
+                    foreach (var process in remaining)
+                    {
+                        try
+                        {
+                            process.Kill();
+                            await process.WaitForExitAsync();
+                        }
+                        catch { }
+                        finally { process.Dispose(); }
+                    }
+
+                    // Final hide
+                    HideSteamWindows();
+                }
+                else
+                {
+                    // Graceful mode: hide, try -shutdown, then force kill if needed
+                    HideSteamWindows();
+                    await Task.Delay(200);
+
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(SteamExePath) && File.Exists(SteamExePath))
+                        {
+                            AppLogger.Info($"Starting shutdown command: {SteamExePath} -shutdown");
+                            var shutdownProc = Process.Start(SteamExePath, "-shutdown");
+                            shutdownProc?.Dispose();
+                            await Task.Delay(3000);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Error("Steam -shutdown failed.", ex);
+                    }
+
+                    if (IsSteamRunning())
+                    {
+                        HideSteamWindows();
+                        var steamProcs = Process.GetProcessesByName("steam");
+                        var webProcs = Process.GetProcessesByName("steamwebhelper");
+                        var processes = steamProcs.Concat(webProcs).ToList();
+                        foreach (var process in processes)
+                        {
+                            try
+                            {
+                                AppLogger.Info($"Killing Steam process: {process.Id}");
+                                process.Kill();
+                                await process.WaitForExitAsync();
+                            }
+                            catch (Exception ex)
+                            {
+                                AppLogger.Error($"Failed to kill Steam process {process.Id}.", ex);
+                            }
+                            finally { process.Dispose(); }
+                        }
+                        HideSteamWindows();
+                        await Task.Delay(2000);
+                    }
                 }
 
                 var closed = !IsSteamRunning();
@@ -117,6 +211,58 @@ namespace SteamSwitcher.Core
             {
                 AppLogger.Error("CloseSteamAsync failed.", ex);
                 return false;
+            }
+        }
+
+        private void HideSteamWindows()
+        {
+            var steamProcesses = Process.GetProcessesByName("steam");
+            var steamWebHelperProcesses = Process.GetProcessesByName("steamwebhelper");
+            try
+            {
+                var allProcesses = steamProcesses.Concat(steamWebHelperProcesses).ToList();
+
+                if (allProcesses.Count == 0)
+                    return;
+
+                var processIds = new HashSet<uint>();
+                foreach (var proc in allProcesses)
+                {
+                    try
+                    {
+                        processIds.Add((uint)proc.Id);
+                    }
+                    catch { }
+                }
+
+                EnumWindows((hWnd, lParam) =>
+                {
+                    try
+                    {
+                        if (!IsWindowVisible(hWnd))
+                            return true;
+
+                        GetWindowThreadProcessId(hWnd, out uint processId);
+                        if (processIds.Contains(processId))
+                        {
+                            // Minimize first, then hide - more reliable
+                            ShowWindow(hWnd, SW_MINIMIZE);
+                            ShowWindow(hWnd, SW_HIDE);
+                            AppLogger.Info($"Hidden Steam window: hWnd={hWnd}, processId={processId}");
+                        }
+                    }
+                    catch { }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("HideSteamWindows failed.", ex);
+            }
+            finally
+            {
+                foreach (var p in steamProcesses) p.Dispose();
+                foreach (var p in steamWebHelperProcesses) p.Dispose();
             }
         }
 
@@ -147,7 +293,8 @@ namespace SteamSwitcher.Core
 
                 var args = string.Join(" ", argsList);
                 AppLogger.Info($"Starting Steam: {SteamExePath} {args}");
-                Process.Start(SteamExePath, args);
+                var proc = Process.Start(SteamExePath, args);
+                proc?.Dispose();
                 return true;
             }
             catch (Exception ex)
@@ -169,32 +316,29 @@ namespace SteamSwitcher.Core
 
             try
             {
+                // Use steam.exe -silent to start game without showing Steam window
+                if (!string.IsNullOrEmpty(SteamExePath) && File.Exists(SteamExePath))
+                {
+                    AppLogger.Info($"Starting game via steam.exe -silent: {appId}");
+                    var proc = Process.Start(SteamExePath, $"-silent steam://run/{appId}");
+                    proc?.Dispose();
+                    return true;
+                }
+
+                // Fallback to protocol (will show Steam window)
                 AppLogger.Info($"Starting game via protocol: steam://run/{appId}");
-                Process.Start(new ProcessStartInfo
+                var fallbackProc = Process.Start(new ProcessStartInfo
                 {
                     FileName = $"steam://run/{appId}",
                     UseShellExecute = true
                 });
+                fallbackProc?.Dispose();
                 return true;
             }
-            catch (Exception protocolEx)
+            catch (Exception ex)
             {
-                AppLogger.Error($"StartGame protocol launch failed for appId={appId}.", protocolEx);
-
-                if (string.IsNullOrEmpty(SteamExePath) || !File.Exists(SteamExePath))
-                    return false;
-
-                try
-                {
-                    AppLogger.Info($"Starting game via steam.exe fallback: {appId}");
-                    Process.Start(SteamExePath, $"-silent steam://run/{appId}");
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Error($"StartGame fallback failed for appId={appId}.", ex);
-                    return false;
-                }
+                AppLogger.Error($"StartGame failed for appId={appId}.", ex);
+                return false;
             }
         }
 

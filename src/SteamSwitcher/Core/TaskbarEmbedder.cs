@@ -135,7 +135,7 @@ namespace SteamSwitcher.Core
         private void StartPositionTimer()
         {
             _positionTimer = new System.Windows.Threading.DispatcherTimer();
-            _positionTimer.Interval = TimeSpan.FromSeconds(2);
+            _positionTimer.Interval = TimeSpan.FromSeconds(5);
             _positionTimer.Tick += (s, e) =>
             {
                 if (_isEmbedded)

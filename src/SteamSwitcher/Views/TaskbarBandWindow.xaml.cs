@@ -21,6 +21,8 @@ namespace SteamSwitcher.Views
         private List<GameListViewModel> _pinnedGames = new();
         private bool _isPinned;
         private bool _layoutRefreshQueued;
+        private EventHandler? _pinnedGamesChangedHandler;
+        private EventHandler? _pinnedAccountsChangedHandler;
 
         private int _glassPadding = 2;
         private int _iconSize = 38;
@@ -98,17 +100,31 @@ namespace SteamSwitcher.Views
 
         public void SetViewModel(MainViewModel vm)
         {
+            // Unsubscribe from old events if any
+            if (_viewModel != null)
+            {
+                if (_pinnedGamesChangedHandler != null)
+                    _viewModel.PinnedGamesChanged -= _pinnedGamesChangedHandler;
+                if (_pinnedAccountsChangedHandler != null)
+                    _viewModel.PinnedAccountsChanged -= _pinnedAccountsChangedHandler;
+            }
+
             _viewModel = vm;
-            _viewModel.PinnedGamesChanged += (s, e) => Application.Current.Dispatcher.Invoke(() =>
+
+            // Store event handler references for later unsubscription
+            _pinnedGamesChangedHandler = (s, e) => Application.Current.Dispatcher.Invoke(() =>
             {
                 _pinnedGames = _viewModel.GetPinnedGames();
                 Rebuild();
             });
-            _viewModel.PinnedAccountsChanged += (s, e) => Application.Current.Dispatcher.Invoke(() =>
+            _pinnedAccountsChangedHandler = (s, e) => Application.Current.Dispatcher.Invoke(() =>
             {
                 _pinnedAccounts = _viewModel.GetPinnedAccounts();
                 Rebuild();
             });
+
+            _viewModel.PinnedGamesChanged += _pinnedGamesChangedHandler;
+            _viewModel.PinnedAccountsChanged += _pinnedAccountsChangedHandler;
         }
 
         public void SetPinnedAccounts(List<SteamAccount> accounts)
@@ -178,9 +194,7 @@ namespace SteamSwitcher.Views
                 {
                     bool isCur = acc == current;
                     b.BorderThickness = isCur ? new Thickness(2.5) : new Thickness(1);
-                    b.BorderBrush = isCur
-                        ? new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF))
-                        : new SolidColorBrush(Color.FromArgb(120, 255, 255, 255));
+                    b.BorderBrush = isCur ? _currentBorderBrush : _normalBorderBrush;
                 }
             }
         }
@@ -262,31 +276,39 @@ namespace SteamSwitcher.Views
             }
         }
 
-        // --- Icon Brushes ---
+        // --- Icon Brushes (cached) ---
 
-        private static Brush BtnBrush() => new LinearGradientBrush(
-            new GradientStopCollection
-            {
-                new(Color.FromArgb(50, 255, 255, 255), 0),
-                new(Color.FromArgb(20, 230, 246, 255), 0.5),
-                new(Color.FromArgb(35, 255, 255, 255), 1)
-            }, new Point(0, 0), new Point(1, 1));
+        private static readonly Brush _btnBrush = CreateFrozenBrush(50, 20, 35);
+        private static readonly Brush _hoverBrush = CreateFrozenBrush(90, 45, 70);
+        private static readonly Brush _activeBrush = CreateFrozenBrush(80, 50, 60);
+        private static readonly Brush _currentBorderBrush = CreateFrozenSolidBrush(0x0A, 0x84, 0xFF, 255);
+        private static readonly Brush _normalBorderBrush = CreateFrozenSolidBrush(255, 255, 255, 120);
+        private static readonly Brush _hoverBorderBrush = CreateFrozenSolidBrush(255, 255, 255, 190);
+        private static readonly Brush _bindingBorderBrush = CreateFrozenSolidBrush(48, 209, 88, 140);
 
-        private static Brush HoverBrush() => new LinearGradientBrush(
-            new GradientStopCollection
-            {
-                new(Color.FromArgb(90, 255, 255, 255), 0),
-                new(Color.FromArgb(45, 210, 236, 255), 0.5),
-                new(Color.FromArgb(70, 255, 255, 255), 1)
-            }, new Point(0, 0), new Point(1, 1));
+        private static Brush CreateFrozenBrush(byte a1, byte a2, byte a3)
+        {
+            var brush = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new(Color.FromArgb(a1, 255, 255, 255), 0),
+                    new(Color.FromArgb(a2, 230, 246, 255), 0.5),
+                    new(Color.FromArgb(a3, 255, 255, 255), 1)
+                }, new Point(0, 0), new Point(1, 1));
+            brush.Freeze();
+            return brush;
+        }
 
-        private static Brush ActiveBrush() => new LinearGradientBrush(
-            new GradientStopCollection
-            {
-                new(Color.FromArgb(80, 255, 255, 255), 0),
-                new(Color.FromArgb(50, 80, 160, 220), 0.5),
-                new(Color.FromArgb(60, 255, 255, 255), 1)
-            }, new Point(0, 0), new Point(1, 1));
+        private static Brush CreateFrozenSolidBrush(byte r, byte g, byte b, byte a)
+        {
+            var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
+            brush.Freeze();
+            return brush;
+        }
+
+        private static Brush BtnBrush() => _btnBrush;
+        private static Brush HoverBrush() => _hoverBrush;
+        private static Brush ActiveBrush() => _activeBrush;
 
         // --- Create Buttons ---
 
@@ -340,15 +362,13 @@ namespace SteamSwitcher.Views
             border.MouseEnter += (s, e) =>
             {
                 overlay.Background = game.HasBinding ? ActiveBrush() : HoverBrush();
-                border.BorderBrush = new SolidColorBrush(Color.FromArgb(190, 255, 255, 255));
+                border.BorderBrush = _hoverBorderBrush;
                 if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1.08; sc.ScaleY = 1.08; }
             };
             border.MouseLeave += (s, e) =>
             {
                 overlay.Background = Brushes.Transparent;
-                border.BorderBrush = new SolidColorBrush(game.HasBinding
-                    ? Color.FromArgb(140, 48, 209, 88)
-                    : Color.FromArgb(120, 255, 255, 255));
+                border.BorderBrush = game.HasBinding ? _bindingBorderBrush : _normalBorderBrush;
                 if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1; sc.ScaleY = 1; }
             };
             border.MouseRightButtonDown += (s, e) =>
@@ -370,9 +390,7 @@ namespace SteamSwitcher.Views
             {
                 Width = sz, Height = sz,
                 CornerRadius = new CornerRadius(r),
-                BorderBrush = isCur
-                    ? new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF))
-                    : new SolidColorBrush(Color.FromArgb(120, 255, 255, 255)),
+                BorderBrush = isCur ? _currentBorderBrush : _normalBorderBrush,
                 BorderThickness = isCur ? new Thickness(2.5) : new Thickness(1),
                 Margin = new Thickness(2, 0, 2, 0),
                 Cursor = Cursors.Hand,
@@ -415,7 +433,7 @@ namespace SteamSwitcher.Views
                 if (!isCur)
                 {
                     overlay.Background = HoverBrush();
-                    border.BorderBrush = new SolidColorBrush(Color.FromArgb(190, 255, 255, 255));
+                    border.BorderBrush = _hoverBorderBrush;
                     if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1.08; sc.ScaleY = 1.08; }
                 }
             };
@@ -424,7 +442,7 @@ namespace SteamSwitcher.Views
                 if (!isCur)
                 {
                     overlay.Background = Brushes.Transparent;
-                    border.BorderBrush = new SolidColorBrush(Color.FromArgb(120, 255, 255, 255));
+                    border.BorderBrush = _normalBorderBrush;
                     if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1; sc.ScaleY = 1; }
                 }
             };

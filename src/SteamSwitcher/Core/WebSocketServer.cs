@@ -131,7 +131,8 @@ namespace SteamSwitcher.Core
                 if (root.TryGetProperty("action", out var actionElement))
                 {
                     var action = actionElement.GetString() ?? "";
-                    MessageReceived?.Invoke(this, (action, root));
+                    var dataCopy = root.Clone();
+                    MessageReceived?.Invoke(this, (action, dataCopy));
                 }
             }
             catch (Exception ex)

@@ -21,14 +21,30 @@ namespace SteamSwitcher.Services
 
         public static LogLevel MinimumLevel { get; set; } = LogLevel.Info;
 
-        public static string LogDirectory => Path.Combine(
+        private static string? _cachedLogDirectory;
+        private static string? _cachedLogPath;
+        private static DateTime _currentDate;
+        private static int _writeCount;
+        private static bool _directoryCreated;
+
+        public static string LogDirectory => _cachedLogDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SteamSwitch",
             "logs");
 
-        public static string CurrentLogPath => Path.Combine(
-            LogDirectory,
-            $"steamswitch-{DateTime.Now:yyyyMMdd}.log");
+        public static string CurrentLogPath
+        {
+            get
+            {
+                var today = DateTime.Now.Date;
+                if (_cachedLogPath == null || today != _currentDate)
+                {
+                    _currentDate = today;
+                    _cachedLogPath = Path.Combine(LogDirectory, $"steamswitch-{today:yyyyMMdd}.log");
+                }
+                return _cachedLogPath;
+            }
+        }
 
         public static void Debug(string message)
         {
@@ -60,9 +76,18 @@ namespace SteamSwitcher.Services
             {
                 lock (SyncRoot)
                 {
-                    Directory.CreateDirectory(LogDirectory);
-                    CleanupOldLogs();
-                    CheckLogRotation();
+                    if (!_directoryCreated)
+                    {
+                        Directory.CreateDirectory(LogDirectory);
+                        _directoryCreated = true;
+                    }
+
+                    // Only run cleanup/rotation every 100 writes
+                    if (_writeCount++ % 100 == 0)
+                    {
+                        CleanupOldLogs();
+                        CheckLogRotation();
+                    }
 
                     var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
                     File.AppendAllText(CurrentLogPath, line, Encoding.UTF8);

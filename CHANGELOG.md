@@ -5,7 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.0] - 2026-06-10
+## [2.4.0] - 2026-06-11
+
+### Added
+- 新增静默关闭 Steam 功能，切换账号时隐藏所有 Steam 窗口
+- 新增「显示与通知」设置分组：静默关闭、启动时检查更新、关闭 Steam 时通知
+- 新增窗口边缘拖拽调整大小支持（WindowChrome + Thumb 手柄）
+- 新增注入按钮改为方形 Split Button 设计（「切换启动」+ 下拉箭头）
+- 新增启动时自动检查 GitHub 新版本
+- 新增 CEF 注入 cleanup 机制，停止注入时清除定时器和 WebSocket
+
+### Changed
+- 启动游戏时使用 `steam.exe -silent` 静默启动，不显示 Steam 窗口
+- 关闭窗口时不再弹出系统通知
+- 头像图片使用 64px 解码宽度，减少内存占用
+- 头像下载改为后台异步，不阻塞启动
+- GameListBox 启用虚拟化和 Recycling 模式
+- 游戏搜索使用 OrdinalIgnoreCase 替代 ToLower()
+- AppLogger 缓存路径，每 100 次写入才执行清理
+- 任务栏定位定时器间隔从 2 秒改为 5 秒
+- 缓存所有 Brush 对象为静态冻结字段，消除 GC 压力
+
+### Fixed
+- 修复 Process 对象句柄泄漏（IsSteamRunning、CloseSteamAsync、HideSteamWindows）
+- 修复 GDI 区域句柄泄漏（SetWindowRgn 失败时释放）
+- 修复 AccountViewModel PropertyChanged 事件处理器泄漏
+- 修复 DesktopFloatingWindow/TaskbarBandWindow 事件订阅泄漏
+- 修复 JsonElement 生命周期竞态条件（传递前 Clone）
+- 修复 ContinueWith 未观察异常可能导致崩溃
+- 修复 CEF 注入 JavaScript setInterval 永不停止的问题
+- 修复 CEF 注入 WebSocket 重连无限循环（添加最大重试次数）
+- 修复 HttpClient 在循环中重复创建的问题
+- 修复 MainViewModel 未实现 IDisposable 的资源泄漏
+- 修复安装程序版本号未更新的问题
+
+## [2.3.0] - 2026-06-10
 
 ### Added
 - 新增暗黑/白色双主题切换，所有界面元素跟随主题自动变化

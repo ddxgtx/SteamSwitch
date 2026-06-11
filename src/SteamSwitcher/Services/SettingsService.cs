@@ -34,6 +34,9 @@ namespace SteamSwitcher.Services
         public bool EnableLibraryInjection { get; set; }
         public bool AutoScanGamesOnStartup { get; set; }
         public bool ConfirmBeforeGameLaunch { get; set; } = true;
+        public bool SilentCloseSteam { get; set; } = true;
+        public bool CheckUpdateOnStartup { get; set; } = true;
+        public bool ShowNotificationOnSteamClose { get; set; }
         public string Theme { get; set; } = "Dark";
         public List<string> PinnedAccountIds { get; set; } = new();
         public List<int> PinnedGameIds { get; set; } = new();

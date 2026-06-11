@@ -28,6 +28,8 @@ namespace SteamSwitcher.Views
         private bool _glassEnabled = true;
         private bool _roundedMode = true;
         private string _glassColor = "#4A90D9";
+        private EventHandler? _pinnedGamesChangedHandler;
+        private EventHandler? _pinnedAccountsChangedHandler;
 
         private const int WS_EX_TOOLWINDOW = 0x00000080;
 
@@ -74,17 +76,31 @@ namespace SteamSwitcher.Views
 
         public void SetViewModel(MainViewModel viewModel)
         {
+            // Unsubscribe from old events if any
+            if (_viewModel != null)
+            {
+                if (_pinnedGamesChangedHandler != null)
+                    _viewModel.PinnedGamesChanged -= _pinnedGamesChangedHandler;
+                if (_pinnedAccountsChangedHandler != null)
+                    _viewModel.PinnedAccountsChanged -= _pinnedAccountsChangedHandler;
+            }
+
             _viewModel = viewModel;
-            _viewModel.PinnedGamesChanged += (s, e) => Dispatcher.Invoke(() =>
+
+            // Store event handler references for later unsubscription
+            _pinnedGamesChangedHandler = (s, e) => Dispatcher.Invoke(() =>
             {
                 _pinnedGames = _viewModel.GetPinnedGames();
                 RefreshGameIcons();
             });
-            _viewModel.PinnedAccountsChanged += (s, e) => Dispatcher.Invoke(() =>
+            _pinnedAccountsChangedHandler = (s, e) => Dispatcher.Invoke(() =>
             {
                 _pinnedAccounts = _viewModel.GetPinnedAccounts();
                 RefreshAvatars();
             });
+
+            _viewModel.PinnedGamesChanged += _pinnedGamesChangedHandler;
+            _viewModel.PinnedAccountsChanged += _pinnedAccountsChangedHandler;
         }
 
         public void SetPinnedAccounts(List<SteamAccount> accounts)
@@ -269,28 +285,39 @@ namespace SteamSwitcher.Views
 
         private static Brush CreateLiquidButtonBrush()
         {
-            return new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new(Color.FromArgb(70, 255, 255, 255), 0),
-                    new(Color.FromArgb(26, 230, 246, 255), 0.55),
-                    new(Color.FromArgb(44, 255, 255, 255), 1)
-                },
-                new Point(0, 0),
-                new Point(1, 1));
+            return _liquidButtonBrush;
         }
 
         private static Brush CreateLiquidHoverBrush()
         {
-            return new LinearGradientBrush(
+            return _liquidHoverBrush;
+        }
+
+        private static readonly Brush _liquidButtonBrush = CreateFrozenLiquidBrush(70, 26, 44);
+        private static readonly Brush _liquidHoverBrush = CreateFrozenLiquidBrush(112, 52, 82);
+        private static readonly Brush _currentBorderBrush = CreateFrozenSolidBrush(0x0A, 0x84, 0xFF, 255);
+        private static readonly Brush _normalBorderBrush = CreateFrozenSolidBrush(255, 255, 255, 120);
+        private static readonly Brush _hoverBorderBrush = CreateFrozenSolidBrush(255, 255, 255, 190);
+        private static readonly Brush _bindingBorderBrush = CreateFrozenSolidBrush(48, 209, 88, 140);
+
+        private static Brush CreateFrozenLiquidBrush(byte a1, byte a2, byte a3)
+        {
+            var brush = new LinearGradientBrush(
                 new GradientStopCollection
                 {
-                    new(Color.FromArgb(112, 255, 255, 255), 0),
-                    new(Color.FromArgb(52, 206, 234, 255), 0.55),
-                    new(Color.FromArgb(82, 255, 255, 255), 1)
-                },
-                new Point(0, 0),
-                new Point(1, 1));
+                    new(Color.FromArgb(a1, 255, 255, 255), 0),
+                    new(Color.FromArgb(a2, 230, 246, 255), 0.55),
+                    new(Color.FromArgb(a3, 255, 255, 255), 1)
+                }, new Point(0, 0), new Point(1, 1));
+            brush.Freeze();
+            return brush;
+        }
+
+        private static Brush CreateFrozenSolidBrush(byte r, byte g, byte b, byte a)
+        {
+            var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
+            brush.Freeze();
+            return brush;
         }
 
         private void RefreshAll()
@@ -335,9 +362,7 @@ namespace SteamSwitcher.Views
             var border = CreateIconShell(size, radius);
             border.ToolTip = $"{game.GameName}\n点击启动 (账号: {game.BindingAccountName ?? "未绑定"})";
             border.Tag = game;
-            border.BorderBrush = new SolidColorBrush(game.HasBinding
-                ? Color.FromArgb(142, 48, 209, 88)
-                : Color.FromArgb(148, 255, 255, 255));
+            border.BorderBrush = game.HasBinding ? _bindingBorderBrush : _normalBorderBrush;
 
             var iconPath = !string.IsNullOrEmpty(game.IconPath)
                 ? game.IconPath
@@ -519,9 +544,7 @@ namespace SteamSwitcher.Views
                 {
                     bool isCurrent = account == current;
                     border.BorderThickness = isCurrent ? new Thickness(2.5) : new Thickness(1);
-                    border.BorderBrush = new SolidColorBrush(isCurrent
-                        ? Color.FromRgb(0x0A, 0x84, 0xFF)
-                        : Color.FromArgb(148, 255, 255, 255));
+                    border.BorderBrush = isCurrent ? _currentBorderBrush : _normalBorderBrush;
                 }
             }
         }

@@ -113,13 +113,13 @@
 
 ### 方式一：安装程序（推荐）
 
-1. 下载 [SteamSwitch-v2.3.0-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.3.0/SteamSwitch-v2.3.0-win-x64-setup.exe)
+1. 下载 [SteamSwitch-v2.4.0-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.4.0/SteamSwitch-v2.4.0-win-x64-setup.exe)
 2. 运行安装程序，支持中文界面
 3. 可选创建桌面快捷方式、开机自启
 
 ### 方式二：便携版
 
-1. 下载 [SteamSwitch-v2.3.0-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.3.0/SteamSwitch-v2.3.0-win-x64-portable.zip)
+1. 下载 [SteamSwitch-v2.4.0-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.4.0/SteamSwitch-v2.4.0-win-x64-portable.zip)
 2. 解压到任意目录
 3. 运行 `SteamSwitch.exe`
 

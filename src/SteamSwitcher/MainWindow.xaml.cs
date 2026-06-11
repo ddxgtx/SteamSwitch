@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -28,6 +29,9 @@ namespace SteamSwitcher
 
         [DllImport("gdi32.dll")]
         private static extern IntPtr CreateRoundRectRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect, int nWidthEllipse, int nHeightEllipse);
+
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr hObject);
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS margins);
@@ -82,7 +86,10 @@ namespace SteamSwitcher
                 if (width <= 0 || height <= 0) return;
 
                 var rgn = CreateRoundRectRgn(0, 0, width, height, radius, radius);
-                SetWindowRgn(hwnd, rgn, true);
+                if (SetWindowRgn(hwnd, rgn, true) == 0)
+                {
+                    DeleteObject(rgn);
+                }
             }
             catch { }
         }
@@ -165,7 +172,6 @@ namespace SteamSwitcher
             {
                 e.Cancel = true;
                 Hide();
-                _trayIcon.ShowNotification("Steam Switch", "已最小化到系统托盘");
             }
             else
             {
@@ -173,6 +179,7 @@ namespace SteamSwitcher
                 _taskbarBand?.Close();
                 _desktopFloatingWindow?.Close();
                 _trayIcon.Dispose();
+                _viewModel.Dispose();
                 Application.Current.Shutdown();
             }
         }
@@ -210,6 +217,22 @@ namespace SteamSwitcher
             WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
         }
 
+        private void ResizeGrip_DragStarted(object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
+        {
+            // Handled by DragDelta
+        }
+
+        private void ResizeGrip_DragDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
+        {
+            var newWidth = ActualWidth + e.HorizontalChange;
+            var newHeight = ActualHeight + e.VerticalChange;
+
+            if (newWidth >= MinWidth)
+                Width = newWidth;
+            if (newHeight >= MinHeight)
+                Height = newHeight;
+        }
+
         private void Close_Click(object sender, RoutedEventArgs e)
         {
             Close();
@@ -230,6 +253,13 @@ namespace SteamSwitcher
 
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            // Let WindowChrome handle resize when clicking near edges
+            var pos = e.GetPosition(this);
+            const int resizeBorder = 6;
+            if (pos.X < resizeBorder || pos.X > ActualWidth - resizeBorder ||
+                pos.Y < resizeBorder || pos.Y > ActualHeight - resizeBorder)
+                return;
+
             if (e.ClickCount == 2)
             {
                 Maximize_Click(sender, e);
@@ -283,13 +313,18 @@ namespace SteamSwitcher
             {
                 _ = _viewModel.ScanGamesAsync().ContinueWith(t =>
                 {
+                    if (t.IsFaulted)
+                    {
+                        AppLogger.Error("ScanGamesAsync failed", t.Exception);
+                        return;
+                    }
                     Dispatcher.Invoke(() =>
                     {
                         GameScanStatus.Text = _viewModel.GameList.Count > 0
                             ? $"已安装游戏 — {_viewModel.GameList.Count} 款"
                             : "未找到已安装的游戏";
                     });
-                });
+                }, TaskContinuationOptions.NotOnCanceled);
             }
             else
             {
@@ -365,7 +400,7 @@ namespace SteamSwitcher
                 ? Visibility.Collapsed
                 : Visibility.Visible;
 
-            var search = GameSearchBox.Text.Trim().ToLower();
+            var search = GameSearchBox.Text.Trim();
             if (string.IsNullOrEmpty(search))
             {
                 GameListBox.ItemsSource = _viewModel.GameList;
@@ -373,8 +408,8 @@ namespace SteamSwitcher
             else
             {
                 var filtered = _viewModel.GameList
-                    .Where(g => g.GameName.ToLower().Contains(search) ||
-                                g.AppId.ToString().Contains(search));
+                    .Where(g => g.GameName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                g.AppId.ToString().Contains(search, StringComparison.OrdinalIgnoreCase));
                 GameListBox.ItemsSource = new System.Collections.ObjectModel.ObservableCollection<GameListViewModel>(filtered);
             }
         }
@@ -902,7 +937,7 @@ namespace SteamSwitcher
             _viewModel.StatusText = "正在切换账号...";
 
             var accountManager = _viewModel.GetAccountManager();
-            var success = await accountManager.SwitchAccountAsync(account);
+            var success = await accountManager.SwitchAccountAsync(account, _viewModel.SilentCloseSteam);
 
             if (success)
             {
@@ -913,7 +948,7 @@ namespace SteamSwitcher
                 if (_viewModel.AutoStartSteam)
                 {
                     _viewModel.StatusText = "正在启动Steam...";
-                    accountManager.LaunchSteam();
+                    accountManager.LaunchSteam(silent: true);
                 }
             }
             else
@@ -929,20 +964,6 @@ namespace SteamSwitcher
 
         private async void OnTaskbarGameLaunch(object? sender, int appId)
         {
-            if (_viewModel.ConfirmBeforeGameLaunch)
-            {
-                var game = _viewModel.GameList.FirstOrDefault(g => g.AppId == appId);
-                var gameName = game?.GameName ?? $"AppID {appId}";
-                var result = MessageBox.Show(
-                    $"确定要切换账号并启动 {gameName} 吗？",
-                    "确认启动游戏",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-
-                if (result != MessageBoxResult.Yes)
-                    return;
-            }
-
             await _viewModel.LaunchPinnedGameAsync(appId);
             _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
         }

@@ -76,11 +76,6 @@ namespace SteamSwitcher.Core
 
                             account.AvatarPath = GetAvatarPath(account.SteamId);
 
-                            if (string.IsNullOrEmpty(account.AvatarPath))
-                            {
-                                account.AvatarPath = await DownloadAvatarAsync(account.SteamId);
-                            }
-
                             if (account.AccountName == autoLoginUser || account.MostRecent)
                             {
                                 CurrentAccount = account;
@@ -99,13 +94,34 @@ namespace SteamSwitcher.Core
             }
 
             AccountsChanged?.Invoke(this, EventArgs.Empty);
+
+            // Download missing avatars in background
+            _ = Task.Run(async () =>
+            {
+                foreach (var account in Accounts.Where(a => string.IsNullOrEmpty(a.AvatarPath)).ToList())
+                {
+                    try
+                    {
+                        var avatarPath = await DownloadAvatarAsync(account.SteamId);
+                        if (!string.IsNullOrEmpty(avatarPath))
+                        {
+                            account.AvatarPath = avatarPath;
+                            AppLogger.Info($"Downloaded avatar for {account.AccountName}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Error($"Failed to download avatar for {account.AccountName}", ex);
+                    }
+                }
+            });
         }
 
-        public async Task<bool> SwitchAccountAsync(SteamAccount account)
+        public async Task<bool> SwitchAccountAsync(SteamAccount account, bool silentClose = false)
         {
             if (_steamService.IsSteamRunning())
             {
-                var closed = await _steamService.CloseSteamAsync();
+                var closed = await _steamService.CloseSteamAsync(silent: silentClose);
                 if (!closed)
                     return false;
             }
@@ -227,7 +243,7 @@ namespace SteamSwitcher.Core
             return null;
         }
 
-        public static BitmapImage? LoadImage(string? path)
+        public static BitmapImage? LoadImage(string? path, int decodePixelWidth = 0)
         {
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
                 return null;
@@ -238,6 +254,8 @@ namespace SteamSwitcher.Core
                 image.BeginInit();
                 image.CacheOption = BitmapCacheOption.OnLoad;
                 image.UriSource = new Uri(path);
+                if (decodePixelWidth > 0)
+                    image.DecodePixelWidth = decodePixelWidth;
                 image.EndInit();
                 image.Freeze();
                 return image;

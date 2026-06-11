@@ -87,13 +87,13 @@ namespace SteamSwitcher.Core
 
             AppLogger.Info("Steam CEF target rescan loop started.");
 
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
             for (var i = 0; i < 40 && !cancellationToken.IsCancellationRequested; i++)
             {
                 try
                 {
                     var delay = i < 10 ? 500 : 2500;
                     await Task.Delay(delay, cancellationToken);
-                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
                     var injectedCount = await InjectIntoTargetsAsync(http, _script);
                     if (injectedCount > 0)
                     {
@@ -355,6 +355,7 @@ namespace SteamSwitcher.Core
     window.__steamswitch_injected_v12 = true;
 
     const WS_URL = 'ws://localhost:8081';
+    const WS_MAX_RETRIES = 10;
     const ACCOUNTS = __ACCOUNTS__;
     const BINDINGS = __BINDINGS__;
     const STYLE_TEXT = __STYLE__;
@@ -366,6 +367,10 @@ namespace SteamSwitcher.Core
     let missingDetailLogAt = 0;
     let injectScheduled = false;
     let bindingMap = new Map(BINDINGS.map(function(item) { return [String(item.appId), item]; }));
+    let __steamswitch_cleanup = false;
+    let wsRetryCount = 0;
+    let wsReconnectTimer = null;
+    let injectIntervalTimer = null;
 
     function log(message) {
         console.log('[SteamSwitch] ' + message);
@@ -383,10 +388,12 @@ namespace SteamSwitcher.Core
     }
 
     function connectWS() {
+        if (__steamswitch_cleanup) return;
         try {
             ws = new WebSocket(WS_URL);
             ws.onopen = function() {
                 console.log('[SteamSwitch] WebSocket connected');
+                wsRetryCount = 0;
                 const queued = pendingMessages;
                 pendingMessages = [];
                 sendToApp('log', { message: 'WebSocket connected' });
@@ -396,15 +403,25 @@ namespace SteamSwitcher.Core
             };
             ws.onmessage = function(e) { console.log('[SteamSwitch] Received:', e.data); };
             ws.onclose = function() {
-                console.log('[SteamSwitch] WebSocket closed, retrying');
-                setTimeout(connectWS, 3000);
+                if (__steamswitch_cleanup) return;
+                wsRetryCount++;
+                if (wsRetryCount <= WS_MAX_RETRIES) {
+                    console.log('[SteamSwitch] WebSocket closed, retry ' + wsRetryCount + '/' + WS_MAX_RETRIES);
+                    wsReconnectTimer = setTimeout(connectWS, 3000);
+                } else {
+                    console.log('[SteamSwitch] WebSocket max retries reached, giving up');
+                }
             };
             ws.onerror = function() {
                 console.log('[SteamSwitch] WebSocket error');
             };
         } catch(e) {
-            console.log('[SteamSwitch] WebSocket connect failed:', e);
-            setTimeout(connectWS, 3000);
+            if (__steamswitch_cleanup) return;
+            wsRetryCount++;
+            if (wsRetryCount <= WS_MAX_RETRIES) {
+                console.log('[SteamSwitch] WebSocket connect failed:', e, 'retry ' + wsRetryCount + '/' + WS_MAX_RETRIES);
+                wsReconnectTimer = setTimeout(connectWS, 3000);
+            }
         }
     }
 
@@ -950,10 +967,18 @@ namespace SteamSwitcher.Core
 
     window.__steamswitch_forceInjectGameDetail = injectGameDetail;
 
+    window.__steamswitch_cleanup = function() {
+        __steamswitch_cleanup = true;
+        if (injectIntervalTimer) { clearInterval(injectIntervalTimer); injectIntervalTimer = null; }
+        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        if (ws) { try { ws.close(); } catch(e) {} ws = null; }
+        console.log('[SteamSwitch] Cleanup completed');
+    };
+
     ensureStyles();
     injectGameDetail();
     startFastDomWatch();
-    setInterval(scheduleInjectGameDetail, 1500);
+    injectIntervalTimer = setInterval(scheduleInjectGameDetail, 1500);
     connectWS();
     log('Script loaded at ' + window.location.href);
 })();
