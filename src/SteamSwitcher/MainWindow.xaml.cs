@@ -62,6 +62,17 @@ namespace SteamSwitcher
                 _trayIcon.ShowNotification("Steam Switch", message, 1000);
             };
 
+            _viewModel.UpdateAvailable += (s, updateInfo) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    var updateService = new UpdateService();
+                    var dialog = new Views.UpdateDialog(updateService, updateInfo);
+                    dialog.Owner = this;
+                    dialog.ShowDialog();
+                });
+            };
+
             Loaded += MainWindow_Loaded;
             Closing += Window_Closing;
             StateChanged += Window_StateChanged;

@@ -159,6 +159,7 @@ namespace SteamSwitcher.ViewModels
         public event EventHandler? PinnedGamesChanged;
         public event EventHandler? PinnedAccountsChanged;
         public event EventHandler<string>? NotificationRequested;
+        public event EventHandler<UpdateInfo>? UpdateAvailable;
 
         public string AccountCountText => Accounts.Count.ToString();
         public string BindingCountText => GameBindings.Count.ToString();
@@ -747,24 +748,13 @@ namespace SteamSwitcher.ViewModels
         {
             try
             {
-                using var http = new System.Net.Http.HttpClient();
-                http.DefaultRequestHeaders.Add("User-Agent", "SteamSwitch");
-                var response = await http.GetAsync("https://api.github.com/repos/ddxgtx/SteamSwitch/releases/latest");
-                if (response.IsSuccessStatusCode)
+                using var updateService = new UpdateService();
+                var updateInfo = await updateService.CheckForUpdateAsync();
+                if (updateInfo != null)
                 {
-                    var json = await response.Content.ReadAsStringAsync();
-                    using var doc = System.Text.Json.JsonDocument.Parse(json);
-                    var tagName = doc.RootElement.GetProperty("tag_name").GetString();
-                    if (!string.IsNullOrEmpty(tagName))
-                    {
-                        var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
-                        var latestVersion = tagName.TrimStart('v', 'V');
-                        if (Version.TryParse(latestVersion, out var latest) && Version.TryParse(currentVersion, out var current) && latest > current)
-                        {
-                            StatusText = $"发现新版本 v{latestVersion}";
-                            AppLogger.Info($"New version available: v{latestVersion} (current: v{currentVersion})");
-                        }
-                    }
+                    StatusText = $"发现新版本 v{updateInfo.Version}";
+                    AppLogger.Info($"New version available: v{updateInfo.Version}");
+                    UpdateAvailable?.Invoke(this, updateInfo);
                 }
             }
             catch (Exception ex)

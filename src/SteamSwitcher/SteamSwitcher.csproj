@@ -8,7 +8,7 @@
     <ApplicationIcon>Resources\steam.ico</ApplicationIcon>
     <AssemblyName>SteamSwitch</AssemblyName>
     <RootNamespace>SteamSwitcher</RootNamespace>
-    <Version>2.4.0</Version>
+    <Version>2.4.1</Version>
     <Authors>Steam Switch</Authors>
     <Description>快速切换Steam账号工具</Description>
     <PackageTags>Steam;Switch;Account</PackageTags>
