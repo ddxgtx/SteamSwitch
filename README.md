@@ -11,11 +11,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)]()
-[![Release](https://img.shields.io/github/v/release/ddxgtx/SteamSwitch)](https://github.com/ddxgtx/SteamSwitch/releases)
-[![Downloads](https://img.shields.io/github/downloads/ddxgtx/SteamSwitch/total)](https://github.com/ddxgtx/SteamSwitch/releases)
-
-[![GitHub Stars](https://img.shields.io/github/stars/ddxgtx/SteamSwitch?style=social)](https://github.com/ddxgtx/SteamSwitch/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/ddxgtx/SteamSwitch?style=social)](https://github.com/ddxgtx/SteamSwitch/network/members)
+[![Release](https://img.shields.io/badge/Release-v2.4.1-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
+[![Status](https://img.shields.io/badge/Status-Stable-brightgreen.svg)]()
 
 </div>
 
