@@ -158,6 +158,7 @@ namespace SteamSwitcher.ViewModels
 
         public event EventHandler? PinnedGamesChanged;
         public event EventHandler? PinnedAccountsChanged;
+        public event EventHandler<string>? NotificationRequested;
 
         public string AccountCountText => Accounts.Count.ToString();
         public string BindingCountText => GameBindings.Count.ToString();
@@ -237,22 +238,39 @@ namespace SteamSwitcher.ViewModels
                 return;
             }
 
-            var isCurrentAccount = _accountManager.CurrentAccount?.SteamId == account.SteamId;
+            var currentSteamId = _accountManager.CurrentAccount?.SteamId;
+            var currentAccountName = _accountManager.CurrentAccount?.AccountName;
+            var targetSteamId = account.SteamId;
+            var targetAccountName = account.AccountName;
+
+            var isCurrentAccount = false;
+            if (!string.IsNullOrEmpty(currentSteamId) && !string.IsNullOrEmpty(targetSteamId))
+            {
+                isCurrentAccount = string.Equals(currentSteamId, targetSteamId, StringComparison.OrdinalIgnoreCase);
+            }
+            if (!isCurrentAccount && !string.IsNullOrEmpty(currentAccountName) && !string.IsNullOrEmpty(targetAccountName))
+            {
+                isCurrentAccount = string.Equals(currentAccountName, targetAccountName, StringComparison.OrdinalIgnoreCase);
+            }
+
+            AppLogger.Info($"LaunchPinnedGame: appId={appId}, current=[{currentSteamId}|{currentAccountName}], target=[{targetSteamId}|{targetAccountName}], isCurrent={isCurrentAccount}");
 
             if (isCurrentAccount)
             {
                 StatusText = $"当前已是 {account.PersonaName}，直接启动 {game.GameName}...";
+                NotificationRequested?.Invoke(this, $"当前已是 {account.PersonaName}，直接启动 {game.GameName}");
                 var launched = _accountManager.LaunchGame(appId);
                 if (launched)
                 {
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
                     game.BindingLastPlayed = DateTime.Now.ToString("MM-dd HH:mm");
-                    StatusText = $"已启动 {game.GameName}";
+                    StatusText = $"当前已是 {account.PersonaName}，正在启动 {game.GameName}";
                 }
                 else
                 {
                     StatusText = $"启动 {game.GameName} 失败";
                 }
+                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
                 return;
             }
 
@@ -265,6 +283,7 @@ namespace SteamSwitcher.ViewModels
                 if (!success)
                 {
                     StatusText = "切换失败，请确保 Steam 已关闭";
+                    NotificationRequested?.Invoke(this, "切换失败，请确保 Steam 已关闭");
                     return;
                 }
 
@@ -276,11 +295,13 @@ namespace SteamSwitcher.ViewModels
                 {
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
                     game.BindingLastPlayed = DateTime.Now.ToString("MM-dd HH:mm");
-                    StatusText = $"已启动 {game.GameName}";
+                    StatusText = $"已切换到 {account.PersonaName}，正在启动 {game.GameName}";
+                    NotificationRequested?.Invoke(this, $"已切换到 {account.PersonaName}，正在启动 {game.GameName}");
                 }
                 else
                 {
                     StatusText = $"已切换到 {account.PersonaName}，但启动 {game.GameName} 失败";
+                    NotificationRequested?.Invoke(this, $"已切换到 {account.PersonaName}，但启动 {game.GameName} 失败");
                 }
             }
             catch (Exception ex)
@@ -834,16 +855,36 @@ namespace SteamSwitcher.ViewModels
         {
             if (SelectedAccount == null) return;
 
-            var isCurrentAccount = _accountManager.CurrentAccount?.SteamId == SelectedAccount.Account.SteamId;
+            var currentSteamId = _accountManager.CurrentAccount?.SteamId;
+            var currentAccountName = _accountManager.CurrentAccount?.AccountName;
+            var selectedSteamId = SelectedAccount.Account.SteamId;
+            var selectedAccountName = SelectedAccount.Account.AccountName;
+
+            AppLogger.Info($"SwitchAccount: current=[{currentSteamId}|{currentAccountName}], selected=[{selectedSteamId}|{selectedAccountName}]");
+
+            // 比较 SteamId 或 AccountName
+            var isCurrentAccount = false;
+            if (!string.IsNullOrEmpty(currentSteamId) && !string.IsNullOrEmpty(selectedSteamId))
+            {
+                isCurrentAccount = string.Equals(currentSteamId, selectedSteamId, StringComparison.OrdinalIgnoreCase);
+            }
+            if (!isCurrentAccount && !string.IsNullOrEmpty(currentAccountName) && !string.IsNullOrEmpty(selectedAccountName))
+            {
+                isCurrentAccount = string.Equals(currentAccountName, selectedAccountName, StringComparison.OrdinalIgnoreCase);
+            }
+
+            AppLogger.Info($"SwitchAccount: isCurrent={isCurrentAccount}");
 
             if (isCurrentAccount)
             {
-                StatusText = $"{SelectedAccount.Account.PersonaName} 已是当前账号";
+                StatusText = $"{SelectedAccount.DisplayName} 已是当前账号";
+                NotificationRequested?.Invoke(this, $"{SelectedAccount.DisplayName} 已是当前账号");
                 if (launchSteam && AutoStartSteam)
                 {
-                    StatusText = "正在启动 Steam...";
                     _accountManager.LaunchSteam(silent: true);
+                    StatusText = $"当前已是 {SelectedAccount.DisplayName}，已启动 Steam";
                 }
+                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
                 return;
             }
 
@@ -856,6 +897,7 @@ namespace SteamSwitcher.ViewModels
                 if (success)
                 {
                     StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
+                    NotificationRequested?.Invoke(this, $"已切换到 {SelectedAccount.Account.PersonaName}");
                     UpdateCurrentAccount();
 
                     if (launchSteam && AutoStartSteam)
@@ -867,6 +909,7 @@ namespace SteamSwitcher.ViewModels
                 else
                 {
                     StatusText = "切换失败，请确保 Steam 已关闭";
+                    NotificationRequested?.Invoke(this, "切换失败，请确保 Steam 已关闭");
                 }
             }
             catch (Exception ex)
@@ -1161,11 +1204,27 @@ namespace SteamSwitcher.ViewModels
                 return;
             }
 
-            var isCurrentAccount = _accountManager.CurrentAccount?.SteamId == account.SteamId;
+            var currentSteamId = _accountManager.CurrentAccount?.SteamId;
+            var currentAccountName = _accountManager.CurrentAccount?.AccountName;
+            var targetSteamId = account.SteamId;
+            var targetAccountName = account.AccountName;
+
+            var isCurrentAccount = false;
+            if (!string.IsNullOrEmpty(currentSteamId) && !string.IsNullOrEmpty(targetSteamId))
+            {
+                isCurrentAccount = string.Equals(currentSteamId, targetSteamId, StringComparison.OrdinalIgnoreCase);
+            }
+            if (!isCurrentAccount && !string.IsNullOrEmpty(currentAccountName) && !string.IsNullOrEmpty(targetAccountName))
+            {
+                isCurrentAccount = string.Equals(currentAccountName, targetAccountName, StringComparison.OrdinalIgnoreCase);
+            }
+
+            AppLogger.Info($"SwitchAndLaunch: appId={appId}, current=[{currentSteamId}|{currentAccountName}], target=[{targetSteamId}|{targetAccountName}], isCurrent={isCurrentAccount}");
 
             if (isCurrentAccount)
             {
                 StatusText = $"当前已是 {account.PersonaName}，直接启动游戏...";
+                NotificationRequested?.Invoke(this, $"当前已是 {account.PersonaName}，直接启动游戏");
                 if (!string.IsNullOrWhiteSpace(gameName))
                 {
                     await _gameBinding.SetBindingAsync(appId, gameName, account.SteamId, account.AccountName);
@@ -1176,7 +1235,7 @@ namespace SteamSwitcher.ViewModels
                 }
                 var launched = _accountManager.LaunchGame(appId);
                 StatusText = launched
-                    ? $"正在启动游戏"
+                    ? $"当前已是 {account.PersonaName}，正在启动游戏"
                     : "启动游戏失败";
                 IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
                 return;
@@ -1191,6 +1250,7 @@ namespace SteamSwitcher.ViewModels
                 if (!success)
                 {
                     StatusText = "切换失败，请确保 Steam 已关闭";
+                    NotificationRequested?.Invoke(this, "切换失败，请确保 Steam 已关闭");
                     AppLogger.Info($"SwitchAccountAsync returned false for account={account.AccountName}, appId={appId}");
                     return;
                 }
@@ -1208,9 +1268,16 @@ namespace SteamSwitcher.ViewModels
                 }
 
                 var launched = _accountManager.LaunchGame(appId);
-                StatusText = launched
-                    ? $"已切换到 {account.PersonaName}，正在启动游戏"
-                    : $"已切换到 {account.PersonaName}，但启动游戏失败";
+                if (launched)
+                {
+                    StatusText = $"已切换到 {account.PersonaName}，正在启动游戏";
+                    NotificationRequested?.Invoke(this, $"已切换到 {account.PersonaName}，正在启动游戏");
+                }
+                else
+                {
+                    StatusText = $"已切换到 {account.PersonaName}，但启动游戏失败";
+                    NotificationRequested?.Invoke(this, $"已切换到 {account.PersonaName}，但启动游戏失败");
+                }
                 AppLogger.Info($"Switch and launch result: appId={appId}, account={account.AccountName}, launched={launched}");
             }
             catch (Exception ex)

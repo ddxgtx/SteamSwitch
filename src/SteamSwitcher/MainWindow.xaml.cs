@@ -57,6 +57,11 @@ namespace SteamSwitcher
             _trayIcon.LaunchSteamRequested += OnTrayLaunchSteamRequested;
             _trayIcon.ExitRequested += (s, e) => RequestExit();
 
+            _viewModel.NotificationRequested += (s, message) =>
+            {
+                _trayIcon.ShowNotification("Steam Switch", message, 1000);
+            };
+
             Loaded += MainWindow_Loaded;
             Closing += Window_Closing;
             StateChanged += Window_StateChanged;
@@ -933,15 +938,33 @@ namespace SteamSwitcher
 
         private async void OnTaskbarAccountSwitch(object? sender, Models.SteamAccount account)
         {
+            var accountManager = _viewModel.GetAccountManager();
+            var currentSteamId = accountManager.CurrentAccount?.SteamId;
+            var currentAccountName = accountManager.CurrentAccount?.AccountName;
+
+            var isCurrent = false;
+            if (!string.IsNullOrEmpty(currentSteamId) && !string.IsNullOrEmpty(account.SteamId))
+                isCurrent = string.Equals(currentSteamId, account.SteamId, StringComparison.OrdinalIgnoreCase);
+            if (!isCurrent && !string.IsNullOrEmpty(currentAccountName) && !string.IsNullOrEmpty(account.AccountName))
+                isCurrent = string.Equals(currentAccountName, account.AccountName, StringComparison.OrdinalIgnoreCase);
+
+            if (isCurrent)
+            {
+                _viewModel.StatusText = $"{account.PersonaName} 已是当前账号";
+                _trayIcon.ShowNotification("Steam Switch", $"{account.PersonaName} 已是当前账号", 1000);
+                _viewModel.IsSteamRunning = accountManager.GetSteamService().IsSteamRunning();
+                return;
+            }
+
             _viewModel.IsLoading = true;
             _viewModel.StatusText = "正在切换账号...";
 
-            var accountManager = _viewModel.GetAccountManager();
             var success = await accountManager.SwitchAccountAsync(account, _viewModel.SilentCloseSteam);
 
             if (success)
             {
                 _viewModel.StatusText = $"已切换到 {account.PersonaName}";
+                _trayIcon.ShowNotification("Steam Switch", $"已切换到 {account.PersonaName}", 1000);
                 _taskbarBand?.UpdateCurrentAccount(account);
                 _desktopFloatingWindow?.UpdateCurrentAccount(account);
 
@@ -954,6 +977,7 @@ namespace SteamSwitcher
             else
             {
                 _viewModel.StatusText = "切换失败，请确保Steam已关闭";
+                _trayIcon.ShowNotification("Steam Switch", "切换失败，请确保Steam已关闭", 1000);
             }
 
             _viewModel.IsSteamRunning = accountManager.GetSteamService().IsSteamRunning();

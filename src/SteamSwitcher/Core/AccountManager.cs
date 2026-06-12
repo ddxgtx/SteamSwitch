@@ -43,14 +43,14 @@ namespace SteamSwitcher.Core
             return true;
         }
 
-        public async Task LoadAccountsAsync()
+        public Task LoadAccountsAsync()
         {
             Accounts.Clear();
             CurrentAccount = null;
 
             var loginUsersPath = _steamService.GetLoginUsersPath();
             if (!File.Exists(loginUsersPath))
-                return;
+                return Task.CompletedTask;
 
             try
             {
@@ -115,6 +115,8 @@ namespace SteamSwitcher.Core
                     }
                 }
             });
+
+            return Task.CompletedTask;
         }
 
         public async Task<bool> SwitchAccountAsync(SteamAccount account, bool silentClose = false)
