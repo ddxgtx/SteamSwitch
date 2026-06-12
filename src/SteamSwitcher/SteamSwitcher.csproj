@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon>Resources\steam.ico</ApplicationIcon>
+    <AssemblyName>SteamSwitch</AssemblyName>
+    <RootNamespace>SteamSwitcher</RootNamespace>
+    <Version>2.4.0</Version>
+    <Authors>Steam Switch</Authors>
+    <Description>快速切换Steam账号工具</Description>
+    <PackageTags>Steam;Switch;Account</PackageTags>
+    <RepositoryUrl>https://github.com/ddxgtx/SteamSwitch</RepositoryUrl>
+    <Company>Steam Switch</Company>
+    <Product>Steam Switch</Product>
+    <NeutralLanguage>zh-CN</NeutralLanguage>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\steam.ico" />
+    <Content Include="Resources\icon.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

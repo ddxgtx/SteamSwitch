@@ -1,0 +1,298 @@
+<Window x:Class="SteamSwitcher.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="设置"
+        Height="520" Width="360"
+        WindowStartupLocation="CenterOwner"
+        Background="#000000"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
+    
+    <Window.Resources>
+        <Style x:Key="BtnClose" TargetType="Button">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#98989D"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" x:Name="bg">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#E81123"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsCheckBox" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="20" Height="20" CornerRadius="6"
+                                    Background="#1C1C1E" BorderBrush="#48484A"
+                                    BorderThickness="1.5" x:Name="cb">
+                                <TextBlock Text="✓" Foreground="White" FontSize="12" FontWeight="Bold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Visibility="Collapsed" x:Name="ck"/>
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center" Margin="12,0,0,0"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="cb" Property="Background" Value="#0A84FF"/>
+                                <Setter TargetName="cb" Property="BorderBrush" Value="#0A84FF"/>
+                                <Setter TargetName="ck" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsRadioButton" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="18" Height="18" CornerRadius="9"
+                                    Background="#1C1C1E" BorderBrush="#48484A"
+                                    BorderThickness="1.5" x:Name="rb">
+                                <Ellipse Width="8" Height="8" Fill="White" 
+                                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                                         Visibility="Collapsed" x:Name="dot"/>
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="rb" Property="Background" Value="#0A84FF"/>
+                                <Setter TargetName="rb" Property="BorderBrush" Value="#0A84FF"/>
+                                <Setter TargetName="dot" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    
+    <Border Background="#1C1C1E" CornerRadius="10" BorderBrush="#2C2C2E" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 自定义标题栏 -->
+            <Border Grid.Row="0" Background="#1C1C1E" CornerRadius="10,10,0,0">
+                <Grid Height="40">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="设置" FontSize="15" FontWeight="SemiBold" 
+                               Foreground="White" VerticalAlignment="Center" Margin="16,0,0,0"/>
+
+                    <Button Grid.Column="1" Content="✕" 
+                            Style="{StaticResource BtnClose}" 
+                            Click="Close_Click" Margin="0,0,8,0"/>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="0" Height="0.5" VerticalAlignment="Bottom" Background="#2C2C2E"/>
+
+            <!-- 内容 -->
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,12">
+                <StackPanel>
+                    <!-- 常规 -->
+                    <TextBlock Text="常规" FontSize="12" FontWeight="Medium" 
+                               Foreground="#636366" Margin="20,0,20,8"/>
+                    
+                    <Border Background="#2C2C2E" CornerRadius="12" Margin="16,0,16,8" Padding="0">
+                        <StackPanel>
+                            <Border Padding="16,14">
+                                <CheckBox Content="切换后自动启动Steam" 
+                                          IsChecked="{Binding AutoStartSteam}"
+                                          Style="{StaticResource SettingsCheckBox}"/>
+                            </Border>
+                            <Border Background="#38383A" Height="0.5" Margin="16,0"/>
+                            <Border Padding="16,14">
+                                <CheckBox Content="关闭窗口时最小化到托盘" 
+                                          IsChecked="{Binding MinimizeToTray}"
+                                          Style="{StaticResource SettingsCheckBox}"/>
+                            </Border>
+                            <Border Background="#38383A" Height="0.5" Margin="16,0"/>
+                            <Border Padding="16,14">
+                                <CheckBox Content="开机自动启动" 
+                                          IsChecked="{Binding StartWithWindows}"
+                                          Style="{StaticResource SettingsCheckBox}"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 任务栏 -->
+                    <TextBlock Text="任务栏常驻" FontSize="12" FontWeight="Medium" 
+                               Foreground="#636366" Margin="20,16,20,8"/>
+                    
+                    <Border Background="#2C2C2E" CornerRadius="12" Margin="16,0,16,8" Padding="0">
+                        <StackPanel>
+                            <Border Padding="16,14">
+                                <CheckBox Content="启用任务栏常驻" 
+                                          IsChecked="{Binding IsTaskbarPinned}"
+                                          Style="{StaticResource SettingsCheckBox}"/>
+                            </Border>
+                            <Border Background="#38383A" Height="0.5" Margin="16,0"/>
+                            
+                            <Border Padding="16,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="显示位置" 
+                                               Foreground="#98989D" FontSize="13" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <RadioButton Content="自动" IsChecked="True" Margin="0,0,10,0"
+                                                     GroupName="TaskbarPos" Checked="Position_Changed"
+                                                     x:Name="PosAuto"
+                                                     Style="{StaticResource SettingsRadioButton}"/>
+                                        <RadioButton Content="左" Margin="0,0,10,0"
+                                                     GroupName="TaskbarPos" Checked="Position_Changed"
+                                                     x:Name="PosLeft"
+                                                     Style="{StaticResource SettingsRadioButton}"/>
+                                        <RadioButton Content="中" Margin="0,0,10,0"
+                                                     GroupName="TaskbarPos" Checked="Position_Changed"
+                                                     x:Name="PosCenter"
+                                                     Style="{StaticResource SettingsRadioButton}"/>
+                                        <RadioButton Content="右"
+                                                     GroupName="TaskbarPos" Checked="Position_Changed"
+                                                     x:Name="PosRight"
+                                                     Style="{StaticResource SettingsRadioButton}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Background="#38383A" Height="0.5" Margin="16,0"/>
+                            
+                            <Border Padding="16,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="位置偏移" 
+                                               Foreground="#98989D" FontSize="13" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Slider x:Name="OffsetSlider" Width="120"
+                                                Minimum="-1000" Maximum="1000" Value="0" 
+                                                TickFrequency="10" IsSnapToTickEnabled="True"
+                                                ValueChanged="OffsetSlider_ValueChanged"
+                                                VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="OffsetText" Text="0" 
+                                                   Foreground="#636366" FontSize="12" Width="40" 
+                                                   TextAlignment="Right" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 头像 -->
+                    <TextBlock Text="头像" FontSize="12" FontWeight="Medium" 
+                               Foreground="#636366" Margin="20,16,20,8"/>
+                    
+                    <Border Background="#2C2C2E" CornerRadius="12" Margin="16,0,16,8" Padding="0">
+                        <StackPanel>
+                            <Border Padding="16,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="头像大小" 
+                                               Foreground="#98989D" FontSize="13" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Slider x:Name="AvatarSizeSlider" Width="120"
+                                                Minimum="32" Maximum="56" Value="40" 
+                                                TickFrequency="2" IsSnapToTickEnabled="True"
+                                                ValueChanged="AvatarSizeSlider_ValueChanged"
+                                                VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="AvatarSizeText" Text="40" 
+                                                   Foreground="#636366" FontSize="12" Width="40" 
+                                                   TextAlignment="Right" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Background="#38383A" Height="0.5" Margin="16,0"/>
+                            <Border Padding="16,14">
+                                <CheckBox Content="液态玻璃效果" 
+                                          IsChecked="{Binding GlassEnabled}"
+                                          Checked="Glass_Checked" Unchecked="Glass_Unchecked"
+                                          Style="{StaticResource SettingsCheckBox}"/>
+                            </Border>
+                            <Border Background="#38383A" Height="0.5" Margin="16,0"/>
+                            <Border Padding="16,14">
+                                <CheckBox Content="圆角模式" 
+                                          IsChecked="{Binding RoundedMode}"
+                                          Checked="Rounded_Checked" Unchecked="Rounded_Unchecked"
+                                          Style="{StaticResource SettingsCheckBox}"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Height="8"/>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 底部 -->
+            <Border Grid.Row="2" Background="#19FFFFFF" CornerRadius="0,0,10,10" Padding="16,14">
+                <Button Content="完成" Width="80" Click="Close_Click">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Height" Value="36"/>
+                            <Setter Property="Background" Value="#0A84FF"/>
+                            <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="FontWeight" Value="Medium"/>
+                            <Setter Property="FontSize" Value="13"/>
+                            <Setter Property="Cursor" Value="Hand"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="b">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="b" Property="Background" Value="#409CFF"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
