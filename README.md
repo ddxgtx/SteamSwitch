@@ -14,7 +14,7 @@
 [![Release](https://img.shields.io/badge/Release-v2.4.1-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
 [![Status](https://img.shields.io/badge/Status-Stable-brightgreen.svg)]()
 
-**[官方网站](https://ddxgtx.github.io/SteamSwitch)** · **[下载最新版](https://github.com/ddxgtx/SteamSwitch/releases/latest)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)**
+**[官方网站](http://ddxgtx.fun/SteamSwitch)** · **[下载最新版](https://github.com/ddxgtx/SteamSwitch/releases/latest)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)**
 
 </div>
 
@@ -24,17 +24,20 @@
 
 <div align="center">
 
-| 主界面 | 游戏绑定 |
-|:---:|:---:|
-| ![主界面](docs/screenshots/screenshot_1.png) | ![游戏绑定](docs/screenshots/screenshot_2.png) |
+**主界面**
+![主界面](docs/screenshots/screenshot_1.png)
 
-| 设置与快捷入口 | 系统托盘 |
-|:---:|:---:|
-| ![设置](docs/screenshots/screenshot_3.png) | ![托盘](docs/screenshots/screenshot_4.png) |
+**游戏绑定**
+![游戏绑定](docs/screenshots/screenshot_2.png)
 
-| Steam 库注入 |
-|:---:|
-| ![注入](docs/screenshots/注入.png) |
+**设置与快捷入口**
+![设置](docs/screenshots/screenshot_3.png)
+
+**系统托盘**
+![托盘](docs/screenshots/screenshot_4.png)
+
+**Steam 库注入**
+![注入](docs/screenshots/注入.png)
 
 </div>
 
@@ -250,7 +253,7 @@ dotnet build SteamSwitch.sln -c Release
 
 <div align="center">
 
-**[官方网站](https://ddxgtx.github.io/SteamSwitch)** · **[下载](https://github.com/ddxgtx/SteamSwitch/releases)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)** · **[功能建议](https://github.com/ddxgtx/SteamSwitch/discussions)**
+**[官方网站](http://ddxgtx.fun/SteamSwitch)** · **[下载](https://github.com/ddxgtx/SteamSwitch/releases)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)** · **[功能建议](https://github.com/ddxgtx/SteamSwitch/discussions)**
 
 如果觉得有用，请给个 ⭐ Star 支持一下！
 
