@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam Switch - Steam 多账号管理工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            max-width: 900px;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .logo {
+            width: 120px;
+            height: 120px;
+            border-radius: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 8px;
+            background: linear-gradient(90deg, #0A84FF, #5AC8FA);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle {
+            font-size: 1.1em;
+            color: #98989D;
+            margin-bottom: 32px;
+        }
+        .badges {
+            margin-bottom: 40px;
+        }
+        .badges img {
+            margin: 4px;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin-bottom: 40px;
+            text-align: left;
+        }
+        .feature-card {
+            background: rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .feature-card h3 {
+            color: #0A84FF;
+            margin-bottom: 8px;
+            font-size: 1em;
+        }
+        .feature-card p {
+            color: #98989D;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        .download-section {
+            margin: 40px 0;
+        }
+        .download-btn {
+            display: inline-block;
+            padding: 14px 32px;
+            background: #0A84FF;
+            color: white;
+            text-decoration: none;
+            border-radius: 10px;
+            font-weight: 600;
+            margin: 8px;
+            transition: background 0.2s;
+        }
+        .download-btn:hover {
+            background: #409CFF;
+        }
+        .download-btn.secondary {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .download-btn.secondary:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .screenshots {
+            margin: 40px 0;
+        }
+        .screenshots img {
+            width: 100%;
+            max-width: 700px;
+            border-radius: 12px;
+            margin: 16px 0;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+        }
+        .screenshots h2 {
+            margin-bottom: 16px;
+        }
+        .footer {
+            margin-top: 40px;
+            padding: 20px;
+            color: #636366;
+            font-size: 0.85em;
+        }
+        .footer a {
+            color: #0A84FF;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="https://raw.githubusercontent.com/ddxgtx/SteamSwitch/main/icon.png" alt="Steam Switch" class="logo">
+        <h1>Steam Switch</h1>
+        <p class="subtitle">一站式 Steam 多账号管理工具</p>
+
+        <div class="badges">
+            <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
+            <img src="https://img.shields.io/badge/.NET-8.0-512BD4.svg" alt=".NET">
+            <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg" alt="Platform">
+            <img src="https://img.shields.io/badge/Release-v2.4.1-green.svg" alt="Release">
+        </div>
+
+        <div class="features">
+            <div class="feature-card">
+                <h3>账号切换</h3>
+                <p>自动读取 Steam 登录账号，一键切换并启动 Steam，支持系统托盘快速切换</p>
+            </div>
+            <div class="feature-card">
+                <h3>游戏绑定</h3>
+                <p>扫描本机游戏，为游戏绑定默认账号，固定到快捷入口一键启动</p>
+            </div>
+            <div class="feature-card">
+                <h3>任务栏常驻</h3>
+                <p>将账号和游戏嵌入 Windows 任务栏，支持液态玻璃效果和圆角模式</p>
+            </div>
+            <div class="feature-card">
+                <h3>桌面悬浮窗</h3>
+                <p>可拖动的快捷入口，支持 6 种玻璃颜色、透明度调节、始终置顶</p>
+            </div>
+            <div class="feature-card">
+                <h3>Steam 库注入</h3>
+                <p>在游戏详情页注入「切换启动」按钮，直接使用绑定账号启动游戏</p>
+            </div>
+            <div class="feature-card">
+                <h3>自动更新</h3>
+                <p>启动时自动检查 GitHub 最新版本，发现新版本支持一键更新</p>
+            </div>
+        </div>
+
+        <div class="download-section">
+            <h2>下载安装</h2>
+            <p style="color: #98989D; margin-bottom: 16px;">v2.4.1 | Windows 10/11 | 需要 .NET 8.0 Runtime</p>
+            <a href="https://github.com/ddxgtx/SteamSwitch/releases/download/v2.4.1/SteamSwitch-v2.4.1-win-x64-setup.exe" class="download-btn">
+                下载安装包
+            </a>
+            <a href="https://github.com/ddxgtx/SteamSwitch/releases/download/v2.4.1/SteamSwitch-v2.4.1-win-x64-portable.zip" class="download-btn secondary">
+                下载便携版
+            </a>
+        </div>
+
+        <div class="screenshots">
+            <h2>界面预览</h2>
+            <img src="screenshots/screenshot_1.png" alt="主界面">
+            <img src="screenshots/screenshot_2.png" alt="游戏绑定">
+            <img src="screenshots/screenshot_3.png" alt="设置">
+            <img src="screenshots/screenshot_4.png" alt="系统托盘">
+        </div>
+
+        <div class="footer">
+            <p>
+                <a href="https://github.com/ddxgtx/SteamSwitch">GitHub</a> · 
+                <a href="https://github.com/ddxgtx/SteamSwitch/releases">下载</a> · 
+                <a href="https://github.com/ddxgtx/SteamSwitch/issues">问题反馈</a>
+            </p>
+            <p style="margin-top: 8px;">MIT License © ddxgtx</p>
+        </div>
+    </div>
+</body>
+</html>
