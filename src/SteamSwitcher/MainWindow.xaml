@@ -870,8 +870,8 @@
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
-                                                            <TextBlock Text="静默关闭 Steam" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
-                                                            <TextBlock Text="切换账号时隐藏 Steam 窗口，直接在后台完成关闭" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                            <TextBlock Text="静默模式" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="切换账号时后台关闭 Steam，并用后台方式启动 Steam 和游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding SilentCloseSteam}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
@@ -1190,7 +1190,7 @@
 
                     <WrapPanel Margin="0,0,0,6">
                         <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}" Style="{StaticResource AppCheckBox}"/>
-                        <CheckBox Content="静默关闭Steam" IsChecked="{Binding SilentCloseSteam}" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
+                        <CheckBox Content="静默模式" IsChecked="{Binding SilentCloseSteam}" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}" Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="桌面悬浮窗" IsChecked="{Binding DesktopFloatingEnabled}" Checked="DesktopFloating_Checked" Unchecked="DesktopFloating_Unchecked" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.2] - 2026-06-14
+
+### Changed
+- 将“静默关闭 Steam”开关调整为“静默模式”，语义覆盖 Steam 关闭、Steam 启动和游戏启动。
+- Steam 启动、托盘启动、任务栏/悬浮窗右键启动均改为读取静默模式开关，不再固定后台启动。
+- Steam 游戏启动现在按静默模式决定是否使用 `steam.exe -silent steam://run/...`。
+
+### Fixed
+- 修复关闭静默模式后，启动 Steam 或游戏仍会默认隐藏 Steam 窗口的问题。
+- 修复快捷菜单“后台启动 Steam”文案与实际开关状态不一致的问题。
+
 ## [2.5.1] - 2026-06-14
 
 ### Fixed

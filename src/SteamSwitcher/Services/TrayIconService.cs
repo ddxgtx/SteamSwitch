@@ -118,7 +118,7 @@ namespace SteamSwitcher.Services
             showItem.Click += (s, e) => ShowOwnerWindow();
             _contextMenu.Items.Add(showItem);
 
-            var launchItem = CreateMenuItem("启动 Steam", "后台启动 Steam");
+            var launchItem = CreateMenuItem("启动 Steam", "按静默模式设置启动");
             launchItem.Click += (s, e) => LaunchSteamRequested?.Invoke(this, EventArgs.Empty);
             _contextMenu.Items.Add(launchItem);
 

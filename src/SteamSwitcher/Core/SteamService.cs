@@ -309,23 +309,22 @@ namespace SteamSwitcher.Core
             return StartSteam(username, enableDebugging: true, debugPort: debugPort);
         }
 
-        public bool StartGame(int appId)
+        public bool StartGame(int appId, bool silent = false)
         {
             if (appId <= 0)
                 return false;
 
             try
             {
-                // Use steam.exe -silent to start game without showing Steam window
                 if (!string.IsNullOrEmpty(SteamExePath) && File.Exists(SteamExePath))
                 {
-                    AppLogger.Info($"Starting game via steam.exe -silent: {appId}");
-                    var proc = Process.Start(SteamExePath, $"-silent steam://run/{appId}");
+                    var args = silent ? $"-silent steam://run/{appId}" : $"steam://run/{appId}";
+                    AppLogger.Info($"Starting game via steam.exe. Silent={silent}, appId={appId}");
+                    var proc = Process.Start(SteamExePath, args);
                     proc?.Dispose();
                     return true;
                 }
 
-                // Fallback to protocol (will show Steam window)
                 AppLogger.Info($"Starting game via protocol: steam://run/{appId}");
                 var fallbackProc = Process.Start(new ProcessStartInfo
                 {

@@ -190,7 +190,7 @@ namespace SteamSwitcher.Views
                     if (account != null)
                         AccountSwitchRequested?.Invoke(this, account);
                 },
-                launchSteam: () => _accountManager.LaunchSteam(silent: true),
+                launchSteam: () => _accountManager.LaunchSteam(silent: _viewModel?.SilentCloseSteam ?? true),
                 refresh: () => Rebuild(),
                 detach: () => DetachRequested?.Invoke(this, EventArgs.Empty),
                 showDetach: true,

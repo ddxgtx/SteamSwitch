@@ -52,7 +52,7 @@ namespace SteamSwitcher.Services
                 stack.Children.Add(CreateRow(
                     menu,
                     "启动 Steam",
-                    "后台启动 Steam",
+                    "按静默模式设置启动",
                     null,
                     palette,
                     launchSteam));

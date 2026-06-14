@@ -465,7 +465,7 @@ namespace SteamSwitcher.ViewModels
             {
                 StatusText = $"当前已是 {account.PersonaName}，直接启动 {game.GameName}...";
                 NotificationRequested?.Invoke(this, $"当前已是 {account.PersonaName}，直接启动 {game.GameName}");
-                var launched = _accountManager.LaunchGame(appId);
+                var launched = _accountManager.LaunchGame(appId, SilentCloseSteam);
                 if (launched)
                 {
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
@@ -496,7 +496,7 @@ namespace SteamSwitcher.ViewModels
                 SelectedAccount = Accounts.FirstOrDefault(a => a.SteamId == account.SteamId);
                 UpdateCurrentAccount();
 
-                var launched = _accountManager.LaunchGame(appId);
+                var launched = _accountManager.LaunchGame(appId, SilentCloseSteam);
                 if (launched)
                 {
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
@@ -1345,7 +1345,7 @@ namespace SteamSwitcher.ViewModels
                 NotificationRequested?.Invoke(this, $"{SelectedAccount.DisplayName} 已是当前账号");
                 if (launchSteam && AutoStartSteam)
                 {
-                    _accountManager.LaunchSteam(silent: true);
+                    _accountManager.LaunchSteam(silent: SilentCloseSteam);
                     StatusText = $"当前已是 {SelectedAccount.DisplayName}，已启动 Steam";
                 }
                 IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
@@ -1367,7 +1367,7 @@ namespace SteamSwitcher.ViewModels
                     if (launchSteam && AutoStartSteam)
                     {
                         StatusText = "正在启动 Steam...";
-                        _accountManager.LaunchSteam(silent: true);
+                        _accountManager.LaunchSteam(silent: SilentCloseSteam);
                     }
                 }
                 else
@@ -1403,7 +1403,7 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private void LaunchSteam()
         {
-            _accountManager.LaunchSteam(silent: true);
+            _accountManager.LaunchSteam(silent: SilentCloseSteam);
             IsSteamRunning = true;
             StatusText = "Steam 已启动";
         }
@@ -1697,7 +1697,7 @@ namespace SteamSwitcher.ViewModels
                 {
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
                 }
-                var launched = _accountManager.LaunchGame(appId);
+                var launched = _accountManager.LaunchGame(appId, SilentCloseSteam);
                 StatusText = launched
                     ? $"当前已是 {account.PersonaName}，正在启动游戏"
                     : "启动游戏失败";
@@ -1731,7 +1731,7 @@ namespace SteamSwitcher.ViewModels
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
                 }
 
-                var launched = _accountManager.LaunchGame(appId);
+                var launched = _accountManager.LaunchGame(appId, SilentCloseSteam);
                 if (launched)
                 {
                     StatusText = $"已切换到 {account.PersonaName}，正在启动游戏";

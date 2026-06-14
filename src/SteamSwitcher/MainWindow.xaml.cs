@@ -182,7 +182,7 @@ namespace SteamSwitcher
         private void OnTrayLaunchSteamRequested(object? sender, EventArgs e)
         {
             var accountManager = _viewModel.GetAccountManager();
-            accountManager.LaunchSteam(silent: true);
+            accountManager.LaunchSteam(silent: _viewModel.SilentCloseSteam);
         }
 
         private void Window_Closing(object? sender, CancelEventArgs e)
@@ -1018,7 +1018,7 @@ namespace SteamSwitcher
                 if (_viewModel.AutoStartSteam)
                 {
                     _viewModel.StatusText = "正在启动Steam...";
-                    accountManager.LaunchSteam(silent: true);
+                    accountManager.LaunchSteam(silent: _viewModel.SilentCloseSteam);
                 }
             }
             else

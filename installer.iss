@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Steam Switch"
-#define MyAppVersion "2.5.1"
+#define MyAppVersion "2.5.2"
 #define MyAppPublisher "ddxgtx"
 #define MyAppURL "https://github.com/ddxgtx/SteamSwitch"
 #define MyAppExeName "SteamSwitch.exe"
