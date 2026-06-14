@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - 修复关闭静默模式后，启动 Steam 或游戏仍会默认隐藏 Steam 窗口的问题。
 - 修复快捷菜单“后台启动 Steam”文案与实际开关状态不一致的问题。
+- 修复检查更新弹窗引用主窗口私有按钮样式，导致 `StaticResourceExtension` 异常的问题。
 
 ## [2.5.1] - 2026-06-14
 
