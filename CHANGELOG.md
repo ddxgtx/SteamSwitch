@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5] - 2026-06-14
+
+### Major Update
+- 新增程序快速启动，作为 2.5 版本的重要更新：可把常用应用加入 Steam Switch 快捷入口，一键启动。
+
+### Added
+- 新增快速启动项管理，支持添加、编辑、删除本地程序快捷入口。
+- 快速启动项支持固定到任务栏常驻和桌面悬浮窗，并可与固定游戏混合排序。
+- 设置页新增当前版本号、手动检查 GitHub 更新、打开 GitHub Release 和自动更新开关。
+
+### Changed
+- 优化任务栏常驻和桌面悬浮窗的拖拽排序动画与命中判定。
+- 固定游戏与快速启动项改为统一顺序保存，拖动后位置会持久化。
+- 系统托盘和快捷菜单中的启动说明改为“后台启动 Steam”，文案更贴近实际功能。
+
+### Fixed
+- 修复快速启动项无法拖入游戏快捷入口顺序中的问题。
+- 修复悬浮窗/任务栏拖拽排序时误判为拖出边界并删除的问题。
+- 修复安装器勾选开机自启后首次启动可能被应用设置覆盖的问题。
+- 修复托盘退出路径清理不完整导致程序退出后仍留在后台的问题。
+- 修复 Inno Setup 脚本发布目录与 `dotnet publish` 实际输出目录不一致的问题。
+
 ## [2.4.0] - 2026-06-11
 
 ### Added

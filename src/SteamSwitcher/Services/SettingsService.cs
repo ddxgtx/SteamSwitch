@@ -36,10 +36,12 @@ namespace SteamSwitcher.Services
         public bool ConfirmBeforeGameLaunch { get; set; } = true;
         public bool SilentCloseSteam { get; set; } = true;
         public bool CheckUpdateOnStartup { get; set; } = true;
+        public bool AutoInstallUpdates { get; set; }
         public bool ShowNotificationOnSteamClose { get; set; }
         public string Theme { get; set; } = "Dark";
         public List<string> PinnedAccountIds { get; set; } = new();
         public List<int> PinnedGameIds { get; set; } = new();
+        public List<string> PinnedPanelItemOrder { get; set; } = new();
     }
 
     public static class SettingsService
@@ -113,6 +115,22 @@ namespace SteamSwitcher.Services
             catch (Exception ex)
             {
                 AppLogger.Error("Failed to set start with Windows.", ex);
+            }
+        }
+
+        public static bool IsStartWithWindowsEnabled()
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Run", false);
+                return key?.GetValue("SteamSwitch") is string value &&
+                       !string.IsNullOrWhiteSpace(value);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Failed to read start with Windows setting.", ex);
+                return false;
             }
         }
     }

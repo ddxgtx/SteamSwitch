@@ -275,6 +275,65 @@
                             </Border>
                         </DataTemplate>
 
+                        <!-- QuickLaunch Item Template -->
+                        <DataTemplate x:Key="QuickLaunchItemTemplate">
+                            <Border Background="{DynamicResource CardBgBrush}" CornerRadius="10" Padding="12,10" Margin="0,3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Width="42" Height="42" CornerRadius="10" Background="{DynamicResource AccentBgBrush}" Margin="0,0,12,0">
+                                        <Grid>
+                                            <Image Source="{Binding IconPath}" Stretch="UniformToFill" Width="42" Height="42">
+                                                <Image.Style>
+                                                    <Style TargetType="Image">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IconPath}" Value="{x:Null}">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IconPath}" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Image.Style>
+                                            </Image>
+                                            <TextBlock Text="⚡" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IconPath}" Value="{x:Null}">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IconPath}" Value="">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding ExecutablePath}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    <ToggleButton Grid.Column="2" IsChecked="{Binding IsPinned}" Click="QuickLaunchPinToggle_Click" Tag="{Binding Id}" Width="30" Height="30" Cursor="Hand" Margin="4,0">
+                                        <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="Transparent" CornerRadius="6" Width="30" Height="30" x:Name="pb">
+                                                <TextBlock Text="📌" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.5" x:Name="pi"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="pi" Property="Opacity" Value="0.8"/></Trigger>
+                                                <Trigger Property="IsChecked" Value="True"><Setter TargetName="pi" Property="Opacity" Value="1"/><Setter TargetName="pi" Property="Text" Value="📍"/></Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate></ToggleButton.Template>
+                                    </ToggleButton>
+                                    <Button Grid.Column="3" Content="🗑️" Width="30" Height="30" Click="QuickLaunchRemove_Click" Tag="{Binding Id}" Background="Transparent" BorderThickness="0" Cursor="Hand" FontSize="14"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+
         <Style x:Key="GameListItemStyle" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="0"/>
             <Setter Property="Padding" Value="0"/>
@@ -442,6 +501,24 @@
                                         </Style></Button.Style>
                                     </Button>
                                 </Grid>
+                                <Grid Margin="0,0,0,6">
+                                    <Border x:Name="SideAccentQuickLaunch" Width="3" CornerRadius="2" Background="Transparent" HorizontalAlignment="Left" Margin="-10,0,0,0"/>
+                                    <Button x:Name="SideQuickLaunch" Width="48" Height="48" Cursor="Hand" Click="SideQuickLaunch_Click">
+                                        <Button.Style><Style TargetType="Button">
+                                            <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#8E8E96"/>
+                                            <Setter Property="FontWeight" Value="Normal"/><Setter Property="BorderThickness" Value="0"/><Setter Property="ToolTip" Value="快速启动"/>
+                                            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+                                                <Border Background="{TemplateBinding Background}" CornerRadius="12" x:Name="b">
+                                                    <StackPanel>
+                                                        <TextBlock Text="🚀" FontSize="17" HorizontalAlignment="Center"/>
+                                                        <TextBlock Text="快启" FontSize="10" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                                    </StackPanel>
+                                                </Border>
+                                                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger></ControlTemplate.Triggers>
+                                            </ControlTemplate></Setter.Value></Setter>
+                                        </Style></Button.Style>
+                                    </Button>
+                                </Grid>
                             </StackPanel>
 
                             <Grid DockPanel.Dock="Bottom">
@@ -507,7 +584,7 @@
 
                                 <Grid Grid.Row="1" Margin="2,0,2,8">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock x:Name="GameScanStatus" Text="已安装游戏" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="GameScanStatus" Text="已安装游戏" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="1" Text="选择游戏后绑定启动账号" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11" VerticalAlignment="Center"/>
                                 </Grid>
 
@@ -524,6 +601,7 @@
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding ShowEmptyHint, Converter={StaticResource BoolToVis}}"/>
                                     </Grid>
                                 </Border>
+
 
                                 <Button Grid.Row="3" Content="+ 手动添加游戏" Click="ManualAddToggle_Click" Margin="0,8,0,0" Height="34" FontSize="12"
                                         Background="{DynamicResource CardBgBrush}" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="Medium" Cursor="Hand" BorderThickness="0">
@@ -630,6 +708,41 @@
                                             </ControlTemplate></ToggleButton.Template>
                                         </ToggleButton>
                                     </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <!-- 快速启动视图 -->
+                        <Grid x:Name="QuickLaunchView" Visibility="Collapsed">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+                            <!-- 顶部：添加按钮 -->
+                            <Grid Grid.Row="0" Margin="16,0,16,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="快速启动项" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" Content="+ 添加程序" Click="QuickLaunchAdd_Click" Width="90" Height="34" FontSize="12"
+                                        Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Medium" Cursor="Hand" BorderThickness="0">
+                                    <Button.Template><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="qla"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="qla" Property="Background" Value="#409CFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
+                                </Button>
+                            </Grid>
+
+                            <!-- 删除区域 -->
+                            <Border x:Name="QuickLaunchDeleteZone" Grid.Row="0" Background="#CCFF453A" CornerRadius="8" Margin="16,0,16,4" Padding="12,8"
+                                    Visibility="Collapsed" HorizontalAlignment="Stretch" Height="48">
+                                <TextBlock Text="🗑️ 拖到此处删除" Foreground="White" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+
+                            <!-- 列表 -->
+                            <Border Grid.Row="1" Background="{DynamicResource CardBgAltBrush}" CornerRadius="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="16,0,16,8">
+                                <Grid>
+                                    <ListBox x:Name="QuickLaunchListBox" ItemsSource="{Binding QuickLaunchList}"
+                                             Background="Transparent" BorderThickness="0" Padding="8" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             ItemTemplate="{DynamicResource QuickLaunchItemTemplate}"
+                                             VirtualizingStackPanel.IsVirtualizing="True"
+                                             VirtualizingStackPanel.VirtualizationMode="Recycling"/>
+                                    <TextBlock x:Name="QuickLaunchEmptyHint" Text="点击上方 [+ 添加程序] 添加快速启动项" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="13"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Grid>
                             </Border>
                         </Grid>
@@ -772,6 +885,32 @@
                                                             <TextBlock Text="打开应用时自动检查是否有新版本" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding CheckUpdateOnStartup}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
+                                                <Border Padding="14,12">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="软件更新" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="{Binding CurrentVersionText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                            <TextBlock Text="{Binding GitHubReleasesUrl}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                                                        </StackPanel>
+                                                        <WrapPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                                            <Button Content="检查更新" Command="{Binding CheckForUpdatesManuallyCommand}" Style="{StaticResource SecondaryBtn}" Width="86" Height="32" Margin="0,0,8,0"/>
+                                                            <Button Content="打开 GitHub" Command="{Binding OpenGitHubReleasesCommand}" Style="{StaticResource SecondaryBtn}" Width="96" Height="32"/>
+                                                        </WrapPanel>
+                                                    </Grid>
+                                                </Border>
+                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
+                                                <Border Padding="14,12">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="自动更新" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="发现新版本后自动下载并启动安装器" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                        </StackPanel>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding AutoInstallUpdates}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>

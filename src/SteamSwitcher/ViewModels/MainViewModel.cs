@@ -26,6 +26,7 @@ namespace SteamSwitcher.ViewModels
         private readonly AccountManager _accountManager;
         private readonly AppSettings _settings;
         private readonly GameAccountBinding _gameBinding;
+        private readonly QuickLaunchService _quickLaunch;
         private SteamCEFInjector? _injector;
         private WebSocketServer? _wsServer;
         private readonly DispatcherTimer _settingsSaveTimer;
@@ -39,6 +40,9 @@ namespace SteamSwitcher.ViewModels
 
         [ObservableProperty]
         private ObservableCollection<GameListViewModel> _gameList = new();
+
+        [ObservableProperty]
+        private ObservableCollection<QuickLaunchViewModel> _quickLaunchList = new();
 
         [ObservableProperty]
         private GameListViewModel? _selectedGame;
@@ -150,6 +154,9 @@ namespace SteamSwitcher.ViewModels
         private bool _checkUpdateOnStartup = true;
 
         [ObservableProperty]
+        private bool _autoInstallUpdates;
+
+        [ObservableProperty]
         private bool _showNotificationOnSteamClose;
 
         public AccountManager GetAccountManager() => _accountManager;
@@ -158,12 +165,17 @@ namespace SteamSwitcher.ViewModels
 
         public event EventHandler? PinnedGamesChanged;
         public event EventHandler? PinnedAccountsChanged;
+        public event EventHandler? QuickLaunchChanged;
         public event EventHandler<string>? NotificationRequested;
         public event EventHandler<UpdateInfo>? UpdateAvailable;
 
         public string AccountCountText => Accounts.Count.ToString();
         public string BindingCountText => GameBindings.Count.ToString();
         public string GameCountText => GameList.Count.ToString();
+        public string QuickLaunchCountText => QuickLaunchList.Count.ToString();
+        public string CurrentVersionText => $"当前版本：v{UpdateService.GetCurrentVersion()}";
+        public string GitHubReleasesUrl => UpdateService.ReleasesUrl;
+
         public string PinnedCountText => (Accounts.Count(a => a.IsPinned) + GameList.Count(g => g.IsPinned)).ToString();
         public string CurrentAccountName =>
             _accountManager.CurrentAccount?.PersonaName ??
@@ -190,15 +202,70 @@ namespace SteamSwitcher.ViewModels
         public string LogDirectory => AppLogger.LogDirectory;
         public string SettingsPath => SettingsService.SettingsPath;
         public string GameBindingsPath => _gameBinding.ConfigPath;
+        private const string PanelGamePrefix = "game:";
+        private const string PanelQuickLaunchPrefix = "quick:";
+
+        public static string CreatePanelGameKey(int appId) => $"{PanelGamePrefix}{appId}";
+        public static string CreatePanelQuickLaunchKey(string id) => $"{PanelQuickLaunchPrefix}{id}";
 
         public List<SteamAccount> GetPinnedAccounts()
         {
-            return Accounts.Where(a => a.IsPinned).Select(a => a.Account).ToList();
+            var accountsById = Accounts
+                .Where(a => a.IsPinned)
+                .Select(a => a.Account)
+                .ToDictionary(a => a.SteamId);
+
+            var ordered = new List<SteamAccount>();
+            foreach (var steamId in _settings.PinnedAccountIds)
+            {
+                if (accountsById.TryGetValue(steamId, out var account))
+                    ordered.Add(account);
+            }
+
+            return ordered;
         }
 
         public List<GameListViewModel> GetPinnedGames()
         {
-            return GameList.Where(g => g.IsPinned).ToList();
+            var gamesById = GameList
+                .Where(g => g.IsPinned)
+                .ToDictionary(g => g.AppId);
+
+            var ordered = new List<GameListViewModel>();
+            foreach (var appId in _settings.PinnedGameIds)
+            {
+                if (gamesById.TryGetValue(appId, out var game))
+                    ordered.Add(game);
+            }
+
+            return ordered;
+        }
+
+        public List<object> GetPinnedPanelItems()
+        {
+            var games = GetPinnedGames();
+            var quickLaunchItems = GetPinnedQuickLaunchItems();
+            var itemsByKey = new Dictionary<string, object>();
+            var availableKeys = new List<string>();
+
+            foreach (var game in games)
+            {
+                var key = CreatePanelGameKey(game.AppId);
+                itemsByKey[key] = game;
+                availableKeys.Add(key);
+            }
+
+            foreach (var item in quickLaunchItems)
+            {
+                var key = CreatePanelQuickLaunchKey(item.Id);
+                itemsByKey[key] = item;
+                availableKeys.Add(key);
+            }
+
+            return NormalizePanelItemOrder(availableKeys)
+                .Where(itemsByKey.ContainsKey)
+                .Select(key => itemsByKey[key])
+                .ToList();
         }
 
         public bool IsGamePinned(int appId)
@@ -221,6 +288,144 @@ namespace SteamSwitcher.ViewModels
 
             OnPropertyChanged(nameof(PinnedCountText));
             PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void ToggleAccountPin(string steamId)
+        {
+            if (_settings.PinnedAccountIds.Contains(steamId))
+                _settings.PinnedAccountIds.Remove(steamId);
+            else
+                _settings.PinnedAccountIds.Add(steamId);
+
+            SettingsService.Save(_settings);
+
+            var account = Accounts.FirstOrDefault(a => a.SteamId == steamId);
+            if (account != null)
+                account.IsPinned = _settings.PinnedAccountIds.Contains(steamId);
+
+            OnPropertyChanged(nameof(PinnedCountText));
+            PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void ReorderPinnedGames(int fromIndex, int toIndex)
+        {
+            var pinnedIds = _settings.PinnedGameIds;
+            if (fromIndex < 0 || fromIndex >= pinnedIds.Count || toIndex < 0 || toIndex > pinnedIds.Count)
+                return;
+
+            var item = pinnedIds[fromIndex];
+            pinnedIds.RemoveAt(fromIndex);
+            if (toIndex > fromIndex) toIndex--;
+            pinnedIds.Insert(toIndex, item);
+
+            SettingsService.Save(_settings);
+            PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void SetPinnedGameOrder(IEnumerable<int> orderedAppIds)
+        {
+            var ordered = orderedAppIds
+                .Where(id => _settings.PinnedGameIds.Contains(id))
+                .Distinct()
+                .ToList();
+            ordered.AddRange(_settings.PinnedGameIds.Where(id => !ordered.Contains(id)));
+
+            _settings.PinnedGameIds = ordered;
+            SettingsService.Save(_settings);
+            PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public async Task SetPinnedPanelItemOrderAsync(IEnumerable<string> orderedKeys)
+        {
+            var availableKeys = GetCurrentPanelItemKeys();
+            var available = availableKeys.ToHashSet();
+            var ordered = orderedKeys
+                .Where(available.Contains)
+                .Distinct()
+                .ToList();
+            ordered.AddRange(availableKeys.Where(key => !ordered.Contains(key)));
+
+            _settings.PinnedPanelItemOrder = ordered;
+            _settings.PinnedGameIds = ordered
+                .Select(TryParsePanelGameKey)
+                .Where(appId => appId.HasValue)
+                .Select(appId => appId!.Value)
+                .ToList();
+
+            SettingsService.Save(_settings);
+
+            var quickLaunchIds = ordered
+                .Select(TryParsePanelQuickLaunchKey)
+                .Where(id => id != null)
+                .Select(id => id!)
+                .ToList();
+
+            await SetPinnedQuickLaunchOrderAsync(quickLaunchIds);
+            PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void ReorderPinnedAccounts(int fromIndex, int toIndex)
+        {
+            var pinnedIds = _settings.PinnedAccountIds;
+            if (fromIndex < 0 || fromIndex >= pinnedIds.Count || toIndex < 0 || toIndex > pinnedIds.Count)
+                return;
+
+            var item = pinnedIds[fromIndex];
+            pinnedIds.RemoveAt(fromIndex);
+            if (toIndex > fromIndex) toIndex--;
+            pinnedIds.Insert(toIndex, item);
+
+            SettingsService.Save(_settings);
+            PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void SetPinnedAccountOrder(IEnumerable<string> orderedSteamIds)
+        {
+            var ordered = orderedSteamIds
+                .Where(id => _settings.PinnedAccountIds.Contains(id))
+                .Distinct()
+                .ToList();
+            ordered.AddRange(_settings.PinnedAccountIds.Where(id => !ordered.Contains(id)));
+
+            _settings.PinnedAccountIds = ordered;
+            SettingsService.Save(_settings);
+            PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void RemovePinnedGame(int index)
+        {
+            var pinnedIds = _settings.PinnedGameIds;
+            if (index >= 0 && index < pinnedIds.Count)
+            {
+                var appId = pinnedIds[index];
+                pinnedIds.RemoveAt(index);
+                SettingsService.Save(_settings);
+
+                var game = GameList.FirstOrDefault(g => g.AppId == appId);
+                if (game != null)
+                    game.IsPinned = false;
+
+                OnPropertyChanged(nameof(PinnedCountText));
+                PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        public void RemovePinnedAccount(int index)
+        {
+            var pinnedIds = _settings.PinnedAccountIds;
+            if (index >= 0 && index < pinnedIds.Count)
+            {
+                var steamId = pinnedIds[index];
+                pinnedIds.RemoveAt(index);
+                SettingsService.Save(_settings);
+
+                var account = Accounts.FirstOrDefault(a => a.SteamId == steamId);
+                if (account != null)
+                    account.IsPinned = false;
+
+                OnPropertyChanged(nameof(PinnedCountText));
+                PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
 
         public async Task LaunchPinnedGameAsync(int appId)
@@ -325,7 +530,17 @@ namespace SteamSwitcher.ViewModels
             _gameBinding = new GameAccountBinding();
             _gameBinding.BindingsChanged += OnGameBindingsChanged;
 
+            _quickLaunch = new QuickLaunchService();
+            _quickLaunch.ItemsChanged += (s, e) => Application.Current.Dispatcher.Invoke(UpdateQuickLaunchList);
+
             _settings = SettingsService.Load();
+            var registryStartWithWindows = SettingsService.IsStartWithWindowsEnabled();
+            if (registryStartWithWindows && !_settings.StartWithWindows)
+            {
+                _settings.StartWithWindows = true;
+                SettingsService.Save(_settings);
+            }
+
             _autoStartSteam = _settings.AutoStartSteam;
             _minimizeToTray = _settings.MinimizeToTray;
             _startWithWindows = _settings.StartWithWindows;
@@ -351,8 +566,10 @@ namespace SteamSwitcher.ViewModels
             _confirmBeforeGameLaunch = _settings.ConfirmBeforeGameLaunch;
             _silentCloseSteam = _settings.SilentCloseSteam;
             _checkUpdateOnStartup = _settings.CheckUpdateOnStartup;
+            _autoInstallUpdates = _settings.AutoInstallUpdates;
             _showNotificationOnSteamClose = _settings.ShowNotificationOnSteamClose;
-            SettingsService.SetStartWithWindows(_startWithWindows);
+            if (_startWithWindows && !registryStartWithWindows)
+                SettingsService.SetStartWithWindows(true);
 
             _settingsSaveTimer = new DispatcherTimer
             {
@@ -374,6 +591,25 @@ namespace SteamSwitcher.ViewModels
         private void OnGameBindingsChanged(object? sender, EventArgs e)
         {
             Application.Current.Dispatcher.Invoke(UpdateGameBindingsList);
+        }
+
+        private void UpdateQuickLaunchList()
+        {
+            QuickLaunchList.Clear();
+            foreach (var item in _quickLaunch.GetAll())
+            {
+                QuickLaunchList.Add(new QuickLaunchViewModel
+                {
+                    Id = item.Id,
+                    Name = item.Name,
+                    ExecutablePath = item.ExecutablePath,
+                    IconPath = item.IconPath,
+                    IsPinned = item.IsPinned,
+                    SortOrder = item.SortOrder
+                });
+            }
+            OnPropertyChanged(nameof(QuickLaunchCountText));
+            QuickLaunchChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private void UpdateGameBindingsList()
@@ -689,6 +925,9 @@ namespace SteamSwitcher.ViewModels
                 case nameof(CheckUpdateOnStartup):
                     _settings.CheckUpdateOnStartup = CheckUpdateOnStartup;
                     break;
+                case nameof(AutoInstallUpdates):
+                    _settings.AutoInstallUpdates = AutoInstallUpdates;
+                    break;
                 case nameof(ShowNotificationOnSteamClose):
                     _settings.ShowNotificationOnSteamClose = ShowNotificationOnSteamClose;
                     break;
@@ -723,6 +962,8 @@ namespace SteamSwitcher.ViewModels
             UpdateAccountsList();
 
             await _gameBinding.LoadAsync();
+            await _quickLaunch.LoadAsync();
+            UpdateQuickLaunchList();
             UpdateGameBindingsList();
 
             if (AutoScanGamesOnStartup)
@@ -740,7 +981,240 @@ namespace SteamSwitcher.ViewModels
 
             if (CheckUpdateOnStartup)
             {
-                _ = CheckForUpdatesAsync();
+                _ = CheckForUpdatesAsync(isManual: false);
+            }
+        }
+
+        public async Task AddQuickLaunchItemAsync(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath) || !System.IO.File.Exists(exePath))
+            {
+                StatusText = "Invalid file path";
+                return;
+            }
+            var name = System.IO.Path.GetFileNameWithoutExtension(exePath);
+            await _quickLaunch.AddAsync(name, exePath);
+            StatusText = $"已添加快速启动: {name}";
+            NotificationRequested?.Invoke(this, $"已添加: {name}");
+        }
+
+        public async Task RemoveQuickLaunchItemAsync(string id)
+        {
+            await _quickLaunch.RemoveAsync(id);
+            StatusText = "Removed quick launch item";
+        }
+
+        public async Task ToggleQuickLaunchPinAsync(string id)
+        {
+            await _quickLaunch.TogglePinAsync(id);
+            QuickLaunchChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void LaunchQuickLaunchItem(string id)
+        {
+            var item = _quickLaunch.GetById(id);
+            if (item != null)
+            {
+                var launched = _quickLaunch.Launch(item);
+                StatusText = launched ? "Launching " + item.Name : "Failed to launch " + item.Name;
+            }
+        }
+
+        public List<QuickLaunchItem> GetPinnedQuickLaunchItems()
+        {
+            return _quickLaunch.GetPinned();
+        }
+
+        public async Task ReorderQuickLaunchItemAsync(int fromIndex, int toIndex)
+        {
+            var items = _quickLaunch.GetAll();
+            if (fromIndex < 0 || fromIndex >= items.Count || toIndex < 0 || toIndex > items.Count)
+                return;
+
+            var item = items[fromIndex];
+            items.RemoveAt(fromIndex);
+            if (toIndex > fromIndex) toIndex--;
+            items.Insert(toIndex, item);
+
+            var orderedIds = items.Select(x => x.Id).ToList();
+            await _quickLaunch.ReorderAsync(orderedIds);
+        }
+
+        public async Task ReorderPinnedQuickLaunchItemAsync(int fromIndex, int toIndex)
+        {
+            var allItems = _quickLaunch.GetAll();
+            var pinnedItems = allItems.Where(x => x.IsPinned).ToList();
+            if (fromIndex < 0 || fromIndex >= pinnedItems.Count || toIndex < 0 || toIndex > pinnedItems.Count)
+                return;
+
+            var item = pinnedItems[fromIndex];
+            pinnedItems.RemoveAt(fromIndex);
+            if (toIndex > fromIndex) toIndex--;
+            pinnedItems.Insert(toIndex, item);
+
+            int pinnedIndex = 0;
+            var orderedIds = allItems.Select(x =>
+                x.IsPinned ? pinnedItems[pinnedIndex++].Id : x.Id).ToList();
+            await _quickLaunch.ReorderAsync(orderedIds);
+        }
+
+        public async Task SetPinnedQuickLaunchOrderAsync(IEnumerable<string> orderedPinnedIds)
+        {
+            var allItems = _quickLaunch.GetAll();
+            var pinnedIds = allItems.Where(x => x.IsPinned).Select(x => x.Id).ToList();
+            var ordered = orderedPinnedIds
+                .Where(id => pinnedIds.Contains(id))
+                .Distinct()
+                .ToList();
+            ordered.AddRange(pinnedIds.Where(id => !ordered.Contains(id)));
+
+            int pinnedIndex = 0;
+            var orderedIds = allItems.Select(x =>
+                x.IsPinned ? ordered[pinnedIndex++] : x.Id).ToList();
+            await _quickLaunch.ReorderAsync(orderedIds);
+        }
+
+        private List<string> GetCurrentPanelItemKeys()
+        {
+            var keys = new List<string>();
+            keys.AddRange(_settings.PinnedGameIds.Select(CreatePanelGameKey));
+            keys.AddRange(GetPinnedQuickLaunchItems().Select(item => CreatePanelQuickLaunchKey(item.Id)));
+            return keys;
+        }
+
+        private List<string> NormalizePanelItemOrder(List<string> availableKeys)
+        {
+            var available = availableKeys.ToHashSet();
+            var ordered = _settings.PinnedPanelItemOrder
+                .Where(available.Contains)
+                .Distinct()
+                .ToList();
+            ordered.AddRange(availableKeys.Where(key => !ordered.Contains(key)));
+            return ordered;
+        }
+
+        private static int? TryParsePanelGameKey(string key)
+        {
+            return key.StartsWith(PanelGamePrefix, StringComparison.Ordinal) &&
+                   int.TryParse(key[PanelGamePrefix.Length..], out var appId)
+                ? appId
+                : null;
+        }
+
+        private static string? TryParsePanelQuickLaunchKey(string key)
+        {
+            return key.StartsWith(PanelQuickLaunchPrefix, StringComparison.Ordinal)
+                ? key[PanelQuickLaunchPrefix.Length..]
+                : null;
+        }
+
+        public async Task DeleteQuickLaunchItemAsync(int index)
+        {
+            var items = _quickLaunch.GetAll();
+            if (index >= 0 && index < items.Count)
+            {
+                await _quickLaunch.RemoveAsync(items[index].Id);
+                StatusText = $"已删除: {items[index].Name}";
+            }
+        }
+
+        public async Task DeletePinnedQuickLaunchItemAsync(int index)
+        {
+            var items = _quickLaunch.GetPinned();
+            if (index >= 0 && index < items.Count)
+            {
+                await _quickLaunch.RemoveAsync(items[index].Id);
+                StatusText = $"已删除: {items[index].Name}";
+            }
+        }
+
+        [RelayCommand]
+        private async Task CheckForUpdatesManually()
+        {
+            await CheckForUpdatesAsync(isManual: true);
+        }
+
+        [RelayCommand]
+        private void OpenGitHubReleases()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = GitHubReleasesUrl,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Open GitHub releases failed.", ex);
+                StatusText = $"无法打开 GitHub Releases: {ex.Message}";
+            }
+        }
+
+        private async Task CheckForUpdatesAsync(bool isManual)
+        {
+            try
+            {
+                if (isManual)
+                    StatusText = "正在检查 GitHub 更新...";
+
+                using var updateService = new UpdateService();
+                var updateInfo = await updateService.CheckForUpdateAsync();
+                if (updateInfo != null)
+                {
+                    StatusText = $"发现新版本 v{updateInfo.Version}";
+                    AppLogger.Info($"New version available: v{updateInfo.Version}");
+
+                    if (AutoInstallUpdates)
+                    {
+                        await DownloadAndInstallUpdateAsync(updateService, updateInfo);
+                        return;
+                    }
+
+                    UpdateAvailable?.Invoke(this, updateInfo);
+                }
+                else if (isManual)
+                {
+                    StatusText = $"当前已是最新版本 v{UpdateService.GetCurrentVersion()}";
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Check for updates failed.", ex);
+                if (isManual)
+                    StatusText = $"检查更新失败: {ex.Message}";
+            }
+        }
+
+        private async Task DownloadAndInstallUpdateAsync(UpdateService updateService, UpdateInfo updateInfo)
+        {
+            if (string.IsNullOrEmpty(updateInfo.DownloadUrl))
+            {
+                StatusText = "发现新版本，但没有可用的安装包下载链接";
+                UpdateAvailable?.Invoke(this, updateInfo);
+                return;
+            }
+
+            if (!updateInfo.FileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                StatusText = "发现新版本，但自动更新需要 setup 安装包";
+                UpdateAvailable?.Invoke(this, updateInfo);
+                return;
+            }
+
+            try
+            {
+                StatusText = $"正在下载 v{updateInfo.Version} 更新...";
+                var filePath = await updateService.DownloadUpdateToFileAsync(updateInfo);
+                StatusText = "更新下载完成，正在启动安装器...";
+                UpdateService.LaunchInstaller(filePath);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Auto update failed.", ex);
+                StatusText = $"自动更新失败: {ex.Message}";
+                UpdateAvailable?.Invoke(this, updateInfo);
             }
         }
 

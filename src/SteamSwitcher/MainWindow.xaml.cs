@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using SteamSwitcher.Core;
 using SteamSwitcher.Services;
 using SteamSwitcher.ViewModels;
 using SteamSwitcher.Views;
@@ -22,6 +23,7 @@ namespace SteamSwitcher
         private DesktopFloatingWindow? _desktopFloatingWindow;
         private bool _gameSearchPlaceholder = true;
         private bool _exitRequested;
+        private bool _shutdownStarted;
         private const string GameSearchHint = "搜索游戏名称或 AppID...";
 
         [DllImport("user32.dll")]
@@ -66,7 +68,7 @@ namespace SteamSwitcher
             {
                 Dispatcher.Invoke(() =>
                 {
-                    var updateService = new UpdateService();
+                    using var updateService = new UpdateService();
                     var dialog = new Views.UpdateDialog(updateService, updateInfo);
                     dialog.Owner = this;
                     dialog.ShowDialog();
@@ -191,18 +193,26 @@ namespace SteamSwitcher
             }
             else
             {
-                _taskbarBand?.Detach();
-                _taskbarBand?.Close();
-                _desktopFloatingWindow?.Close();
-                _trayIcon.Dispose();
-                _viewModel.Dispose();
-                Application.Current.Shutdown();
+                CleanupForExit();
             }
         }
 
         private void RequestExit()
         {
             _exitRequested = true;
+            CleanupForExit();
+            Close();
+            Application.Current.Shutdown();
+        }
+
+        private void CleanupForExit()
+        {
+            if (_shutdownStarted)
+                return;
+
+            _shutdownStarted = true;
+            _exitRequested = true;
+
             var taskbarBand = _taskbarBand;
             var desktopFloatingWindow = _desktopFloatingWindow;
             _taskbarBand = null;
@@ -212,7 +222,7 @@ namespace SteamSwitcher
             taskbarBand?.Close();
             desktopFloatingWindow?.Close();
             _trayIcon.Dispose();
-            Application.Current.Shutdown();
+            _viewModel.Dispose();
         }
 
         private void Window_StateChanged(object? sender, EventArgs e)
@@ -310,9 +320,11 @@ namespace SteamSwitcher
         {
             AccountView.Visibility = Visibility.Visible;
             GameView.Visibility = Visibility.Collapsed;
+            QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Collapsed;
             SetSidebarActive(SideAccounts, SideAccentAccount,
                              SideGames, SideAccentGame,
+                             SideQuickLaunch, SideAccentQuickLaunch,
                              SideSettings, SideAccentSettings);
         }
 
@@ -320,9 +332,11 @@ namespace SteamSwitcher
         {
             AccountView.Visibility = Visibility.Collapsed;
             GameView.Visibility = Visibility.Visible;
+            QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Collapsed;
             SetSidebarActive(SideGames, SideAccentGame,
                              SideAccounts, SideAccentAccount,
+                             SideQuickLaunch, SideAccentQuickLaunch,
                              SideSettings, SideAccentSettings);
 
             if (_viewModel.GameList.Count == 0)
@@ -355,13 +369,15 @@ namespace SteamSwitcher
             SettingsView.Visibility = Visibility.Visible;
             SetSidebarActive(SideSettings, SideAccentSettings,
                              SideAccounts, SideAccentAccount,
-                             SideGames, SideAccentGame);
+                             SideGames, SideAccentGame,
+                             SideQuickLaunch, SideAccentQuickLaunch);
         }
 
         private void SetSidebarActive(
             Button active, Border activeAccent,
             Button inactive1, Border inactiveAccent1,
-            Button inactive2, Border inactiveAccent2)
+            Button inactive2, Border inactiveAccent2,
+            Button inactive3, Border inactiveAccent3)
         {
             var res = Application.Current.Resources;
             active.Background = (Brush)res["SidebarActiveBgBrush"];
@@ -378,6 +394,11 @@ namespace SteamSwitcher
             inactive2.Foreground = (Brush)res["SidebarInactiveFgBrush"];
             inactive2.FontWeight = FontWeights.Normal;
             inactiveAccent2.Background = Brushes.Transparent;
+
+            inactive3.Background = Brushes.Transparent;
+            inactive3.Foreground = (Brush)res["SidebarInactiveFgBrush"];
+            inactive3.FontWeight = FontWeights.Normal;
+            inactiveAccent3.Background = Brushes.Transparent;
         }
 
         private async void GameScan_Click(object sender, RoutedEventArgs e)
@@ -842,9 +863,16 @@ namespace SteamSwitcher
                     DetachFromTaskbar();
             };
             _taskbarBand.ExitRequested += (s, e) => RequestExit();
+            _taskbarBand.QuickLaunchRequested += (s, id) => _viewModel.LaunchQuickLaunchItem(id);
+            _taskbarBand.PanelItemOrderChanged += async (s, keys) => await _viewModel.SetPinnedPanelItemOrderAsync(keys);
+            _taskbarBand.AccountOrderChanged += (s, ids) => _viewModel.SetPinnedAccountOrder(ids);
+            _taskbarBand.GameDeleteRequested += (s, index) => _viewModel.RemovePinnedGame(index);
+            _taskbarBand.QuickLaunchDeleteRequested += async (s, index) => await _viewModel.DeletePinnedQuickLaunchItemAsync(index);
+            _taskbarBand.AccountDeleteRequested += (s, index) => _viewModel.RemovePinnedAccount(index);
             _taskbarBand.SetViewModel(_viewModel);
             _taskbarBand.SetPinnedAccounts(pinnedAccounts);
             _taskbarBand.SetPinnedGames(pinnedGames);
+            _taskbarBand.SetPinnedQuickLaunchItems(_viewModel.GetPinnedQuickLaunchItems());
             
             _taskbarBand.SetPosition(_viewModel.TaskbarPosition);
             _taskbarBand.SetOffset(_viewModel.TaskbarOffsetX, _viewModel.TaskbarOffsetY);
@@ -911,6 +939,12 @@ namespace SteamSwitcher
                     DetachFromTaskbar();
             };
             _desktopFloatingWindow.ExitRequested += (s, e) => RequestExit();
+            _desktopFloatingWindow.QuickLaunchRequested += (s, id) => _viewModel.LaunchQuickLaunchItem(id);
+            _desktopFloatingWindow.PanelItemOrderChanged += async (s, keys) => await _viewModel.SetPinnedPanelItemOrderAsync(keys);
+            _desktopFloatingWindow.AccountOrderChanged += (s, ids) => _viewModel.SetPinnedAccountOrder(ids);
+            _desktopFloatingWindow.GameDeleteRequested += (s, index) => _viewModel.RemovePinnedGame(index);
+            _desktopFloatingWindow.QuickLaunchDeleteRequested += async (s, index) => await _viewModel.DeletePinnedQuickLaunchItemAsync(index);
+            _desktopFloatingWindow.AccountDeleteRequested += (s, index) => _viewModel.RemovePinnedAccount(index);
             _desktopFloatingWindow.PositionChanged += (s, pos) =>
             {
                 settings.DesktopFloatingLeft = pos.left;
@@ -921,6 +955,7 @@ namespace SteamSwitcher
             _desktopFloatingWindow.SetViewModel(_viewModel);
             _desktopFloatingWindow.SetPinnedAccounts(pinnedAccounts);
             _desktopFloatingWindow.SetPinnedGames(pinnedGames);
+            _desktopFloatingWindow.SetPinnedQuickLaunchItems(_viewModel.GetPinnedQuickLaunchItems());
             _desktopFloatingWindow.SetAvatarSize(_viewModel.DesktopFloatingAvatarSize);
             _desktopFloatingWindow.SetGlassEnabled(_viewModel.DesktopFloatingGlassEnabled);
             _desktopFloatingWindow.SetGlassColor(_viewModel.DesktopFloatingGlassColor);
@@ -1002,5 +1037,83 @@ namespace SteamSwitcher
             await _viewModel.LaunchPinnedGameAsync(appId);
             _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
         }
-    }
+
+        // Quick Launch event handlers
+        private DragDropHelper? _quickLaunchDragDrop;
+
+        private void SideQuickLaunch_Click(object sender, RoutedEventArgs e)
+        {
+            SwitchToQuickLaunch();
+        }
+
+        private void SwitchToQuickLaunch()
+        {
+            AccountView.Visibility = Visibility.Collapsed;
+            GameView.Visibility = Visibility.Collapsed;
+            QuickLaunchView.Visibility = Visibility.Visible;
+            SettingsView.Visibility = Visibility.Collapsed;
+            SetSidebarActive(SideQuickLaunch, SideAccentQuickLaunch,
+                             SideAccounts, SideAccentAccount,
+                             SideGames, SideAccentGame,
+                             SideSettings, SideAccentSettings);
+            QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            // Initialize drag-drop if not already done
+            if (_quickLaunchDragDrop == null)
+            {
+                _quickLaunchDragDrop = new DragDropHelper(QuickLaunchListBox, QuickLaunchDeleteZone);
+                _quickLaunchDragDrop.ItemDeleted += async (s, index) =>
+                {
+                    await _viewModel.DeleteQuickLaunchItemAsync(index);
+                    QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                };
+                _quickLaunchDragDrop.ItemMoved += async (s, args) =>
+                {
+                    await _viewModel.ReorderQuickLaunchItemAsync(args.fromIndex, args.toIndex);
+                };
+                _quickLaunchDragDrop.ItemClicked += (s, index) =>
+                {
+                    var items = _viewModel.QuickLaunchList;
+                    if (index >= 0 && index < items.Count)
+                    {
+                        _viewModel.LaunchQuickLaunchItem(items[index].Id);
+                    }
+                };
+                _quickLaunchDragDrop.Attach();
+            }
+        }
+
+        private async void QuickLaunchAdd_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "Executable files (*.exe)|*.exe|All files (*.*)|*.*",
+                Title = "Select a program to add to Quick Launch"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                await _viewModel.AddQuickLaunchItemAsync(dialog.FileName);
+                QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+
+        private async void QuickLaunchRemove_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.Tag is string id)
+            {
+                await _viewModel.RemoveQuickLaunchItemAsync(id);
+                QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+
+        private async void QuickLaunchPinToggle_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.Tag is string id)
+            {
+                await _viewModel.ToggleQuickLaunchPinAsync(id);
+            }
+        }
+
+}
 }

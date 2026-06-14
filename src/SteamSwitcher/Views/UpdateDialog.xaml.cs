@@ -18,7 +18,7 @@ namespace SteamSwitcher.Views
             _updateInfo = updateInfo;
 
             VersionText.Text = $"v{updateInfo.Version}";
-            CurrentVersionText.Text = $"当前版本: v{UpdateService.GetCurrentVersion()}";
+            CurrentVersionText.Text = $"当前版本：v{UpdateService.GetCurrentVersion()}";
             ChangelogText.Text = string.IsNullOrWhiteSpace(updateInfo.Changelog)
                 ? "暂无更新说明"
                 : updateInfo.Changelog;
@@ -53,7 +53,7 @@ namespace SteamSwitcher.Views
             Dispatcher.Invoke(() =>
             {
                 _downloadedFilePath = filePath;
-                DownloadStatusText.Text = "下载完成！";
+                DownloadStatusText.Text = "下载完成";
                 DownloadPercentText.Text = "100%";
                 DownloadProgressBar.Value = 100;
 

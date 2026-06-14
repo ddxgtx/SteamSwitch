@@ -6,12 +6,12 @@
 
 **一站式 Steam 多账号管理工具**
 
-快速切换账号 · 游戏账号绑定 · 任务栏常驻 · 桌面悬浮窗 · Steam 库注入 · 自动更新
+快速切换账号 · 游戏账号绑定 · 程序快速启动 · 任务栏常驻 · 桌面悬浮窗 · Steam 库注入 · 自动更新
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)]()
-[![Release](https://img.shields.io/badge/Release-v2.4.1-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
+[![Release](https://img.shields.io/badge/Release-v2.5-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
 [![Status](https://img.shields.io/badge/Status-Stable-brightgreen.svg)]()
 
 **[官方网站](http://ddxgtx.fun/SteamSwitch)** · **[下载最新版](https://github.com/ddxgtx/SteamSwitch/releases/latest)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)**
@@ -45,6 +45,12 @@
 
 ## 功能特性
 
+### 2.5 重大更新：程序快速启动
+
+- 新增程序快速启动，可把常用应用加入 Steam Switch。
+- 快速启动项可固定到任务栏常驻和桌面悬浮窗。
+- 快速启动项可与固定游戏混合拖拽排序，顺序自动保存。
+
 <table>
 <tr>
 <td width="50%">
@@ -62,7 +68,7 @@
 ### 游戏绑定与启动
 - 扫描本机已安装 Steam 游戏
 - 为游戏绑定默认启动账号
-- 固定常用游戏到任务栏/悬浮窗
+- 固定常用游戏和快速启动项到任务栏/悬浮窗
 - 启动前二次确认，避免误操作
 - 高清游戏图标显示
 
@@ -118,20 +124,27 @@
 
 ### 方式一：安装程序（推荐）
 
-下载 **[SteamSwitch-v2.4.1-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.4.1/SteamSwitch-v2.4.1-win-x64-setup.exe)**
+下载 **[SteamSwitch-v2.5-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5/SteamSwitch-v2.5-win-x64-setup.exe)**
 
 - 支持中文安装向导
 - 可选创建桌面快捷方式
 - 可选开机自启动
 - 自动请求管理员权限
 
-### 方式二：便携版
+### 方式二：解压版
 
-下载 **[SteamSwitch-v2.4.1-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.4.1/SteamSwitch-v2.4.1-win-x64-portable.zip)**
+下载 **[SteamSwitch-v2.5-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5/SteamSwitch-v2.5-win-x64-portable.zip)**
 
 - 解压到任意目录
 - 运行 `SteamSwitch.exe`
 - 无需安装，即开即用
+
+### 方式三：便携单文件版
+
+下载 **[SteamSwitch-v2.5-win-x64-portable.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5/SteamSwitch-v2.5-win-x64-portable.exe)**
+
+- 单个 exe 文件，适合放入工具目录或移动设备
+- 无需安装，运行后配置仍保存在用户目录
 
 ### 系统要求
 

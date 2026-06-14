@@ -435,7 +435,9 @@ namespace SteamSwitcher.Core
             if (!Directory.Exists(mainLibrary))
                 return folders;
 
-            folders.Add(SteamPath);
+            // 规范化主路径
+            var normalizedMainPath = Path.GetFullPath(SteamPath).TrimEnd(Path.DirectorySeparatorChar);
+            folders.Add(normalizedMainPath);
 
             var vdfPath = Path.Combine(mainLibrary, "libraryfolders.vdf");
             if (!File.Exists(vdfPath))
@@ -456,8 +458,10 @@ namespace SteamSwitcher.Core
                             pathObj is string path &&
                             Directory.Exists(path))
                         {
-                            if (!folders.Contains(path, StringComparer.OrdinalIgnoreCase))
-                                folders.Add(path);
+                            // 规范化路径并检查是否已存在
+                            var normalizedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+                            if (!folders.Any(f => string.Equals(f, normalizedPath, StringComparison.OrdinalIgnoreCase)))
+                                folders.Add(normalizedPath);
                         }
                     }
                 }

@@ -29,6 +29,8 @@ namespace SteamSwitcher.Services
     public class UpdateService : IDisposable
     {
         private const string RepoApiUrl = "https://api.github.com/repos/ddxgtx/SteamSwitch/releases/latest";
+        public const string ReleasesUrl = "https://github.com/ddxgtx/SteamSwitch/releases";
+
         private readonly HttpClient _http;
         private CancellationTokenSource? _downloadCts;
 
@@ -56,7 +58,7 @@ namespace SteamSwitcher.Services
 
                 var tagName = root.GetProperty("tag_name").GetString() ?? "";
                 var body = root.GetProperty("body").GetString() ?? "";
-                var htmlUrl = root.GetProperty("html_url").GetString() ?? "";
+                var htmlUrl = root.GetProperty("html_url").GetString() ?? ReleasesUrl;
 
                 var latestVersion = tagName.TrimStart('v', 'V');
                 var currentVersion = GetCurrentVersion();
@@ -122,54 +124,11 @@ namespace SteamSwitcher.Services
 
         public async Task DownloadUpdateAsync(UpdateInfo update)
         {
-            if (string.IsNullOrEmpty(update.DownloadUrl))
-            {
-                DownloadFailed?.Invoke(this, "没有可用的下载链接");
-                return;
-            }
-
             _downloadCts = new CancellationTokenSource();
 
             try
             {
-                var downloadDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SteamSwitch", "updates");
-                Directory.CreateDirectory(downloadDir);
-
-                var filePath = Path.Combine(downloadDir, update.FileName);
-                if (File.Exists(filePath))
-                    File.Delete(filePath);
-
-                using var response = await _http.GetAsync(update.DownloadUrl,
-                    HttpCompletionOption.ResponseHeadersRead,
-                    _downloadCts.Token);
-
-                response.EnsureSuccessStatusCode();
-
-                var totalBytes = response.Content.Headers.ContentLength ?? update.FileSize;
-                var buffer = new byte[81920];
-                var totalRead = 0L;
-
-                using var contentStream = await response.Content.ReadAsStreamAsync(_downloadCts.Token);
-                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
-
-                int bytesRead;
-                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, _downloadCts.Token)) > 0)
-                {
-                    await fileStream.WriteAsync(buffer, 0, bytesRead, _downloadCts.Token);
-                    totalRead += bytesRead;
-
-                    var percent = totalBytes > 0 ? (int)(totalRead * 100 / totalBytes) : 0;
-                    DownloadProgress?.Invoke(this, new UpdateProgressEventArgs
-                    {
-                        BytesReceived = totalRead,
-                        TotalBytes = totalBytes,
-                        PercentComplete = percent
-                    });
-                }
-
-                await fileStream.FlushAsync(_downloadCts.Token);
+                var filePath = await DownloadUpdateToFileAsync(update, _downloadCts.Token);
                 DownloadCompleted?.Invoke(this, filePath);
             }
             catch (OperationCanceledException)
@@ -181,6 +140,55 @@ namespace SteamSwitcher.Services
                 AppLogger.Error("Download update failed.", ex);
                 DownloadFailed?.Invoke(this, $"下载失败: {ex.Message}");
             }
+        }
+
+        public async Task<string> DownloadUpdateToFileAsync(UpdateInfo update, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(update.DownloadUrl))
+                throw new InvalidOperationException("没有可用的下载链接");
+
+            var downloadDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SteamSwitch", "updates");
+            Directory.CreateDirectory(downloadDir);
+
+            var fileName = string.IsNullOrWhiteSpace(update.FileName)
+                ? $"SteamSwitch-v{update.Version}-setup.exe"
+                : update.FileName;
+            var filePath = Path.Combine(downloadDir, fileName);
+            if (File.Exists(filePath))
+                File.Delete(filePath);
+
+            using var response = await _http.GetAsync(update.DownloadUrl,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+
+            response.EnsureSuccessStatusCode();
+
+            var totalBytes = response.Content.Headers.ContentLength ?? update.FileSize;
+            var buffer = new byte[81920];
+            var totalRead = 0L;
+
+            using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
+
+            int bytesRead;
+            while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+            {
+                await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
+                totalRead += bytesRead;
+
+                var percent = totalBytes > 0 ? (int)(totalRead * 100 / totalBytes) : 0;
+                DownloadProgress?.Invoke(this, new UpdateProgressEventArgs
+                {
+                    BytesReceived = totalRead,
+                    TotalBytes = totalBytes,
+                    PercentComplete = percent
+                });
+            }
+
+            await fileStream.FlushAsync(cancellationToken);
+            return filePath;
         }
 
         public void CancelDownload()
@@ -213,7 +221,7 @@ namespace SteamSwitcher.Services
         public void Dispose()
         {
             _downloadCts?.Dispose();
-            _http?.Dispose();
+            _http.Dispose();
         }
     }
 }

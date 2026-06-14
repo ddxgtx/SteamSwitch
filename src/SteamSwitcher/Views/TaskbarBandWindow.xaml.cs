@@ -19,10 +19,14 @@ namespace SteamSwitcher.Views
         private MainViewModel? _viewModel;
         private List<SteamAccount> _pinnedAccounts = new();
         private List<GameListViewModel> _pinnedGames = new();
+        private List<QuickLaunchItem> _pinnedQuickLaunchItems = new();
         private bool _isPinned;
         private bool _layoutRefreshQueued;
         private EventHandler? _pinnedGamesChangedHandler;
         private EventHandler? _pinnedAccountsChangedHandler;
+        private EventHandler? _quickLaunchChangedHandler;
+        private PanelDragHelper? _gameDragHelper;
+        private PanelDragHelper? _avatarDragHelper;
 
         private int _glassPadding = 2;
         private int _iconSize = 38;
@@ -33,12 +37,18 @@ namespace SteamSwitcher.Views
 
         public event EventHandler<SteamAccount>? AccountSwitchRequested;
         public event EventHandler<int>? GameLaunchRequested;
+        public event EventHandler<string>? QuickLaunchRequested;
         public event EventHandler? ShowMainWindowRequested;
         public event EventHandler? DetachRequested;
         public event EventHandler<bool>? ToggleDesktopFloatingRequested;
         public event EventHandler<bool>? ToggleDesktopFloatingTopmostRequested;
         public event EventHandler<bool>? ToggleTaskbarPinnedRequested;
         public event EventHandler? ExitRequested;
+        public event EventHandler<IReadOnlyList<string>>? PanelItemOrderChanged;
+        public event EventHandler<IReadOnlyList<string>>? AccountOrderChanged;
+        public event EventHandler<int>? GameDeleteRequested;
+        public event EventHandler<int>? QuickLaunchDeleteRequested;
+        public event EventHandler<int>? AccountDeleteRequested;
 
         public TaskbarBandWindow(AccountManager accountManager)
         {
@@ -46,10 +56,111 @@ namespace SteamSwitcher.Views
             _accountManager = accountManager;
             _embedder = new TaskbarEmbedder();
             _embedder.TaskbarCreated += (s, e) => Application.Current.Dispatcher.Invoke(Rebuild);
-            Loaded += (s, e) => UpdateGlass();
+            Loaded += (s, e) => { UpdateGlass(); SetupDragDrop(); };
             Closing += (s, e) => Detach();
             MouseLeftButtonDown += TaskbarBandWindow_MouseLeftButtonDown;
             MouseRightButtonDown += TaskbarBandWindow_MouseRightButtonDown;
+        }
+
+        private void SetupDragDrop()
+        {
+            _gameDragHelper = new PanelDragHelper(GamePanel);
+            _gameDragHelper.ItemClicked += (s, index) =>
+            {
+                if (TryGetGamePanelElement(index, out var element))
+                    LaunchGamePanelElement(element);
+            };
+            _gameDragHelper.ItemDeleted += (s, index) =>
+            {
+                if (TryGetGamePanelElement(index, out var element))
+                    DeleteGamePanelElement(element);
+            };
+            _gameDragHelper.ItemMoved += (s, args) => ApplyGamePanelOrder();
+            _gameDragHelper.Attach();
+
+            _avatarDragHelper = new PanelDragHelper(AvatarPanel);
+            _avatarDragHelper.ItemClicked += (s, index) =>
+            {
+                if (index < _pinnedAccounts.Count)
+                    AccountSwitchRequested?.Invoke(this, _pinnedAccounts[index]);
+            };
+            _avatarDragHelper.ItemDeleted += (s, index) => AccountDeleteRequested?.Invoke(this, index);
+            _avatarDragHelper.ItemMoved += (s, args) => ApplyAvatarPanelOrder();
+            _avatarDragHelper.Attach();
+        }
+
+        private void ApplyGamePanelOrder()
+        {
+            var keys = new List<string>();
+
+            foreach (var child in GamePanel.Children)
+            {
+                if (child is not FrameworkElement element)
+                    continue;
+
+                if (element.Tag is GameListViewModel game)
+                    keys.Add(MainViewModel.CreatePanelGameKey(game.AppId));
+                else if (element.Tag is QuickLaunchItem item)
+                    keys.Add(MainViewModel.CreatePanelQuickLaunchKey(item.Id));
+            }
+
+            if (keys.Count == _pinnedGames.Count + _pinnedQuickLaunchItems.Count)
+                PanelItemOrderChanged?.Invoke(this, keys);
+        }
+
+        private bool TryGetGamePanelElement(int index, out FrameworkElement element)
+        {
+            element = null!;
+            if (index < 0 || index >= GamePanel.Children.Count)
+                return false;
+
+            if (GamePanel.Children[index] is not FrameworkElement panelElement)
+                return false;
+
+            element = panelElement;
+            return true;
+        }
+
+        private void LaunchGamePanelElement(FrameworkElement element)
+        {
+            if (element.Tag is GameListViewModel game)
+                GameLaunchRequested?.Invoke(this, game.AppId);
+            else if (element.Tag is QuickLaunchItem item)
+                QuickLaunchRequested?.Invoke(this, item.Id);
+        }
+
+        private void DeleteGamePanelElement(FrameworkElement element)
+        {
+            if (element.Tag is GameListViewModel game)
+            {
+                var index = _pinnedGames.FindIndex(x => x.AppId == game.AppId);
+                if (index >= 0)
+                    GameDeleteRequested?.Invoke(this, index);
+            }
+            else if (element.Tag is QuickLaunchItem item)
+            {
+                var index = _pinnedQuickLaunchItems.FindIndex(x => x.Id == item.Id);
+                if (index >= 0)
+                    QuickLaunchDeleteRequested?.Invoke(this, index);
+            }
+        }
+
+        private void ApplyAvatarPanelOrder()
+        {
+            var accountIds = new List<string>();
+            foreach (var child in AvatarPanel.Children)
+            {
+                if (child is FrameworkElement element && element.Tag is SteamAccount account)
+                    accountIds.Add(account.SteamId);
+            }
+
+            if (accountIds.Count == _pinnedAccounts.Count)
+                AccountOrderChanged?.Invoke(this, accountIds);
+        }
+
+        private void UpdateLayoutForDrag(bool isDragging)
+        {
+            // No longer needed
         }
 
         private void TaskbarBandWindow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -107,6 +218,8 @@ namespace SteamSwitcher.Views
                     _viewModel.PinnedGamesChanged -= _pinnedGamesChangedHandler;
                 if (_pinnedAccountsChangedHandler != null)
                     _viewModel.PinnedAccountsChanged -= _pinnedAccountsChangedHandler;
+                if (_quickLaunchChangedHandler != null)
+                    _viewModel.QuickLaunchChanged -= _quickLaunchChangedHandler;
             }
 
             _viewModel = vm;
@@ -122,9 +235,15 @@ namespace SteamSwitcher.Views
                 _pinnedAccounts = _viewModel.GetPinnedAccounts();
                 Rebuild();
             });
+            _quickLaunchChangedHandler = (s, e) => Application.Current.Dispatcher.Invoke(() =>
+            {
+                _pinnedQuickLaunchItems = _viewModel.GetPinnedQuickLaunchItems();
+                Rebuild();
+            });
 
             _viewModel.PinnedGamesChanged += _pinnedGamesChangedHandler;
             _viewModel.PinnedAccountsChanged += _pinnedAccountsChangedHandler;
+            _viewModel.QuickLaunchChanged += _quickLaunchChangedHandler;
         }
 
         public void SetPinnedAccounts(List<SteamAccount> accounts)
@@ -136,6 +255,12 @@ namespace SteamSwitcher.Views
         public void SetPinnedGames(List<GameListViewModel> games)
         {
             _pinnedGames = games ?? new();
+            Rebuild();
+        }
+
+        public void SetPinnedQuickLaunchItems(List<QuickLaunchItem> items)
+        {
+            _pinnedQuickLaunchItems = items ?? new();
             Rebuild();
         }
 
@@ -208,15 +333,32 @@ namespace SteamSwitcher.Views
             _glassRadius = h / 2;
 
             GamePanel.Children.Clear();
-            foreach (var g in _pinnedGames)
-                GamePanel.Children.Add(MakeGameBtn(g));
+            var items = _viewModel?.GetPinnedPanelItems();
+            if (items != null)
+            {
+                foreach (var item in items)
+                {
+                    if (item is GameListViewModel game)
+                        GamePanel.Children.Add(MakeGameBtn(game));
+                    else if (item is QuickLaunchItem quickLaunchItem)
+                        GamePanel.Children.Add(MakeQuickLaunchBtn(quickLaunchItem));
+                }
+            }
+            else
+            {
+                foreach (var g in _pinnedGames)
+                    GamePanel.Children.Add(MakeGameBtn(g));
+                foreach (var q in _pinnedQuickLaunchItems)
+                    GamePanel.Children.Add(MakeQuickLaunchBtn(q));
+            }
 
             AvatarPanel.Children.Clear();
             foreach (var a in _pinnedAccounts)
                 AvatarPanel.Children.Add(MakeAvatarBtn(a));
 
+            bool hasGames = _pinnedGames.Count > 0 || _pinnedQuickLaunchItems.Count > 0;
             GameAvatarSeparator.Visibility =
-                _pinnedGames.Count > 0 && _pinnedAccounts.Count > 0
+                hasGames && _pinnedAccounts.Count > 0
                     ? Visibility.Visible : Visibility.Collapsed;
 
             ApplyLayout();
@@ -242,7 +384,7 @@ namespace SteamSwitcher.Views
 
         private int CalcWidth()
         {
-            int gc = _pinnedGames.Count;
+            int gc = _pinnedGames.Count + _pinnedQuickLaunchItems.Count;
             int ac = _pinnedAccounts.Count;
             if (gc == 0 && ac == 0) ac = 1;
 
@@ -355,10 +497,6 @@ namespace SteamSwitcher.Views
             };
             border.Child = overlay;
 
-            border.MouseLeftButtonDown += (s, e) =>
-            {
-                if (e.ClickCount == 1) GameLaunchRequested?.Invoke(this, game.AppId);
-            };
             border.MouseEnter += (s, e) =>
             {
                 overlay.Background = game.HasBinding ? ActiveBrush() : HoverBrush();
@@ -369,6 +507,64 @@ namespace SteamSwitcher.Views
             {
                 overlay.Background = Brushes.Transparent;
                 border.BorderBrush = game.HasBinding ? _bindingBorderBrush : _normalBorderBrush;
+                if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1; sc.ScaleY = 1; }
+            };
+            border.MouseRightButtonDown += (s, e) =>
+            {
+                e.Handled = true;
+                ShowContextMenu();
+            };
+
+            return border;
+        }
+
+        private Border MakeQuickLaunchBtn(QuickLaunchItem item)
+        {
+            int sz = _iconSize;
+            int r = _iconRadius;
+
+            var border = new Border
+            {
+                Width = sz, Height = sz,
+                CornerRadius = new CornerRadius(r),
+                BorderBrush = _normalBorderBrush,
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(2, 0, 2, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = $"{item.Name}\n{item.ExecutablePath}",
+                Tag = item,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = new ScaleTransform(1, 1)
+            };
+
+            var imgBrush = LoadImageBrush(item.IconPath, sz);
+            if (imgBrush != null)
+            {
+                border.Background = imgBrush;
+            }
+            else
+            {
+                border.Background = BtnBrush();
+                border.Child = FallbackIcon(sz, "⚡");
+            }
+
+            var overlay = new Border
+            {
+                CornerRadius = new CornerRadius(r),
+                Background = Brushes.Transparent
+            };
+            border.Child = overlay;
+
+            border.MouseEnter += (s, e) =>
+            {
+                overlay.Background = HoverBrush();
+                border.BorderBrush = _hoverBorderBrush;
+                if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1.08; sc.ScaleY = 1.08; }
+            };
+            border.MouseLeave += (s, e) =>
+            {
+                overlay.Background = Brushes.Transparent;
+                border.BorderBrush = _normalBorderBrush;
                 if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1; sc.ScaleY = 1; }
             };
             border.MouseRightButtonDown += (s, e) =>
@@ -418,11 +614,6 @@ namespace SteamSwitcher.Views
             };
             border.Child = overlay;
 
-            border.MouseLeftButtonDown += (s, e) =>
-            {
-                AccountSwitchRequested?.Invoke(this, account);
-                e.Handled = true;
-            };
             border.MouseRightButtonDown += (s, e) =>
             {
                 e.Handled = true;
@@ -470,9 +661,9 @@ namespace SteamSwitcher.Views
             catch { return null; }
         }
 
-        private static UIElement FallbackIcon(int sz) => new TextBlock()
+        private static UIElement FallbackIcon(int sz, string icon = "🎮") => new TextBlock()
         {
-            Text = "🎮",
+            Text = icon,
             FontSize = sz > 36 ? 16 : 14,
             Foreground = new SolidColorBrush(Color.FromRgb(0x25, 0x2A, 0x32)),
             HorizontalAlignment = HorizontalAlignment.Center,
