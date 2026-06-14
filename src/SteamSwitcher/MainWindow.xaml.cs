@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -1087,15 +1088,61 @@ namespace SteamSwitcher
         {
             var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                Filter = "Executable files (*.exe)|*.exe|All files (*.*)|*.*",
-                Title = "Select a program to add to Quick Launch"
+                Filter = "程序或快捷方式 (*.exe;*.lnk;*.url;*.appref-ms)|*.exe;*.lnk;*.url;*.appref-ms|程序 (*.exe)|*.exe|快捷方式 (*.lnk;*.url;*.appref-ms)|*.lnk;*.url;*.appref-ms|所有文件 (*.*)|*.*",
+                InitialDirectory = GetQuickLaunchInitialDirectory(),
+                Title = "选择要添加到快速启动的程序或快捷方式"
             };
+            AddQuickLaunchDesktopPlaces(dialog);
 
             if (dialog.ShowDialog() == true)
             {
                 await _viewModel.AddQuickLaunchItemAsync(dialog.FileName);
                 QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
+        }
+
+        private static string GetQuickLaunchInitialDirectory()
+        {
+            var commonDesktop = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+            if (Directory.Exists(commonDesktop) && ContainsQuickLaunchShortcut(commonDesktop))
+                return commonDesktop;
+
+            var userDesktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (Directory.Exists(userDesktop))
+                return userDesktop;
+
+            return Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        }
+
+        private static bool ContainsQuickLaunchShortcut(string directory)
+        {
+            try
+            {
+                return Directory.EnumerateFiles(directory)
+                    .Any(path =>
+                    {
+                        var extension = Path.GetExtension(path);
+                        return extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase) ||
+                               extension.Equals(".url", StringComparison.OrdinalIgnoreCase) ||
+                               extension.Equals(".appref-ms", StringComparison.OrdinalIgnoreCase);
+                    });
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void AddQuickLaunchDesktopPlaces(Microsoft.Win32.OpenFileDialog dialog)
+        {
+            var desktopPaths = new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory)
+            };
+
+            foreach (var path in desktopPaths.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
+                dialog.CustomPlaces.Add(new Microsoft.Win32.FileDialogCustomPlace(path));
         }
 
         private async void QuickLaunchRemove_Click(object sender, RoutedEventArgs e)

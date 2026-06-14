@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] - 2026-06-14
+
+### Fixed
+- 修复快速启动添加程序时只能看到 `.exe`，无法选择桌面快捷方式的问题。
+- 修复 WeGame、无畏契约等位于公共桌面的快捷方式在添加窗口中不易找到的问题。
+- 快速启动添加窗口现在会同时支持用户桌面和公共桌面，并支持 `.lnk`、`.url`、`.appref-ms` 快捷方式。
+- 添加 `.lnk` 快捷方式时会尽量读取真实目标、工作目录和图标，提升启动和显示稳定性。
+
 ## [2.5] - 2026-06-14
 
 ### Major Update

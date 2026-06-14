@@ -720,7 +720,7 @@
                             <Grid Grid.Row="0" Margin="16,0,16,8">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="快速启动项" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                <Button Grid.Column="1" Content="+ 添加程序" Click="QuickLaunchAdd_Click" Width="90" Height="34" FontSize="12"
+                                <Button Grid.Column="1" Content="+ 添加程序/快捷方式" Click="QuickLaunchAdd_Click" Width="128" Height="34" FontSize="12"
                                         Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Medium" Cursor="Hand" BorderThickness="0">
                                     <Button.Template><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="qla"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                     <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="qla" Property="Background" Value="#409CFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>

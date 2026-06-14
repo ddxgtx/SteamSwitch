@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading.Tasks;
 using SteamSwitcher.Models;
@@ -67,15 +68,15 @@ namespace SteamSwitcher.Core
             }
         }
 
-        public async Task<QuickLaunchItem> AddAsync(string name, string exePath, string? args = null, string? iconPath = null)
+        public async Task<QuickLaunchItem> AddAsync(string name, string launchPath, string? args = null, string? iconPath = null)
         {
             var item = new QuickLaunchItem
             {
                 Name = name,
-                ExecutablePath = exePath,
+                ExecutablePath = launchPath,
                 Arguments = args,
-                IconPath = iconPath ?? ExtractIconPath(exePath),
-                WorkingDirectory = Path.GetDirectoryName(exePath),
+                IconPath = iconPath ?? ExtractIconPath(launchPath),
+                WorkingDirectory = ResolveWorkingDirectory(launchPath),
                 SortOrder = _items.Count
             };
 
@@ -164,7 +165,8 @@ namespace SteamSwitcher.Core
             {
                 if (!File.Exists(exePath)) return null;
 
-                var icon = Icon.ExtractAssociatedIcon(exePath);
+                var iconSource = ResolveIconSource(exePath);
+                var icon = Icon.ExtractAssociatedIcon(iconSource);
                 if (icon == null) return null;
 
                 var iconDir = Path.Combine(
@@ -185,6 +187,125 @@ namespace SteamSwitcher.Core
                 return null;
             }
         }
+
+        private static string? ResolveWorkingDirectory(string launchPath)
+        {
+            var shortcut = TryReadShortcut(launchPath);
+            if (!string.IsNullOrWhiteSpace(shortcut?.WorkingDirectory) &&
+                Directory.Exists(shortcut.WorkingDirectory))
+            {
+                return shortcut.WorkingDirectory;
+            }
+
+            if (!string.IsNullOrWhiteSpace(shortcut?.TargetPath))
+            {
+                var targetDir = Path.GetDirectoryName(shortcut.TargetPath);
+                if (!string.IsNullOrWhiteSpace(targetDir) && Directory.Exists(targetDir))
+                    return targetDir;
+            }
+
+            return IsShellShortcut(launchPath) ? null : Path.GetDirectoryName(launchPath);
+        }
+
+        private static string ResolveIconSource(string launchPath)
+        {
+            var shortcut = TryReadShortcut(launchPath);
+            var iconSource = ParseIconLocation(shortcut?.IconLocation)
+                ?? shortcut?.TargetPath
+                ?? launchPath;
+
+            iconSource = Environment.ExpandEnvironmentVariables(iconSource).Trim().Trim('"');
+            return File.Exists(iconSource) ? iconSource : launchPath;
+        }
+
+        private static string? ParseIconLocation(string? iconLocation)
+        {
+            if (string.IsNullOrWhiteSpace(iconLocation))
+                return null;
+
+            var path = Environment.ExpandEnvironmentVariables(iconLocation).Trim().Trim('"');
+            var commaIndex = path.LastIndexOf(',');
+            if (commaIndex > 0)
+                path = path[..commaIndex].Trim().Trim('"');
+
+            return File.Exists(path) ? path : null;
+        }
+
+        private static bool IsShortcut(string path)
+        {
+            return Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsShellShortcut(string path)
+        {
+            var extension = Path.GetExtension(path);
+            return extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase) ||
+                   extension.Equals(".url", StringComparison.OrdinalIgnoreCase) ||
+                   extension.Equals(".appref-ms", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static ShortcutInfo? TryReadShortcut(string path)
+        {
+            if (!IsShortcut(path) || !File.Exists(path))
+                return null;
+
+            object? shell = null;
+            object? shortcut = null;
+            try
+            {
+                var shellType = Type.GetTypeFromProgID("WScript.Shell");
+                if (shellType == null)
+                    return null;
+
+                shell = Activator.CreateInstance(shellType);
+                if (shell == null)
+                    return null;
+
+                shortcut = shellType.InvokeMember(
+                    "CreateShortcut",
+                    System.Reflection.BindingFlags.InvokeMethod,
+                    null,
+                    shell,
+                    new object[] { path });
+
+                if (shortcut == null)
+                    return null;
+
+                var shortcutType = shortcut.GetType();
+                return new ShortcutInfo(
+                    ReadShortcutString(shortcutType, shortcut, "TargetPath"),
+                    ReadShortcutString(shortcutType, shortcut, "WorkingDirectory"),
+                    ReadShortcutString(shortcutType, shortcut, "IconLocation"));
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Failed to read shortcut: {path}, {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                ReleaseComObject(shortcut);
+                ReleaseComObject(shell);
+            }
+        }
+
+        private static string? ReadShortcutString(Type shortcutType, object shortcut, string propertyName)
+        {
+            return shortcutType.InvokeMember(
+                propertyName,
+                System.Reflection.BindingFlags.GetProperty,
+                null,
+                shortcut,
+                null) as string;
+        }
+
+        private static void ReleaseComObject(object? comObject)
+        {
+            if (comObject != null && Marshal.IsComObject(comObject))
+                Marshal.FinalReleaseComObject(comObject);
+        }
+
+        private sealed record ShortcutInfo(string? TargetPath, string? WorkingDirectory, string? IconLocation);
 
         public void Dispose()
         {

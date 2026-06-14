@@ -985,15 +985,15 @@ namespace SteamSwitcher.ViewModels
             }
         }
 
-        public async Task AddQuickLaunchItemAsync(string exePath)
+        public async Task AddQuickLaunchItemAsync(string launchPath)
         {
-            if (string.IsNullOrEmpty(exePath) || !System.IO.File.Exists(exePath))
+            if (string.IsNullOrEmpty(launchPath) || !System.IO.File.Exists(launchPath))
             {
-                StatusText = "Invalid file path";
+                StatusText = "无效的快速启动路径";
                 return;
             }
-            var name = System.IO.Path.GetFileNameWithoutExtension(exePath);
-            await _quickLaunch.AddAsync(name, exePath);
+            var name = System.IO.Path.GetFileNameWithoutExtension(launchPath);
+            await _quickLaunch.AddAsync(name, launchPath);
             StatusText = $"已添加快速启动: {name}";
             NotificationRequested?.Invoke(this, $"已添加: {name}");
         }

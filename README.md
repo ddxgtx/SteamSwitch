@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)]()
-[![Release](https://img.shields.io/badge/Release-v2.5-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
+[![Release](https://img.shields.io/badge/Release-v2.5.1-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
 [![Status](https://img.shields.io/badge/Status-Stable-brightgreen.svg)]()
 
 **[官方网站](http://ddxgtx.fun/SteamSwitch)** · **[下载最新版](https://github.com/ddxgtx/SteamSwitch/releases/latest)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)**
@@ -124,7 +124,7 @@
 
 ### 方式一：安装程序（推荐）
 
-下载 **[SteamSwitch-v2.5-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5/SteamSwitch-v2.5-win-x64-setup.exe)**
+下载 **[SteamSwitch-v2.5.1-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5.1/SteamSwitch-v2.5.1-win-x64-setup.exe)**
 
 - 支持中文安装向导
 - 可选创建桌面快捷方式
@@ -133,7 +133,7 @@
 
 ### 方式二：解压版
 
-下载 **[SteamSwitch-v2.5-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5/SteamSwitch-v2.5-win-x64-portable.zip)**
+下载 **[SteamSwitch-v2.5.1-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5.1/SteamSwitch-v2.5.1-win-x64-portable.zip)**
 
 - 解压到任意目录
 - 运行 `SteamSwitch.exe`
@@ -141,7 +141,7 @@
 
 ### 方式三：便携单文件版
 
-下载 **[SteamSwitch-v2.5-win-x64-portable.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5/SteamSwitch-v2.5-win-x64-portable.exe)**
+下载 **[SteamSwitch-v2.5.1-win-x64-portable.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5.1/SteamSwitch-v2.5.1-win-x64-portable.exe)**
 
 - 单个 exe 文件，适合放入工具目录或移动设备
 - 无需安装，运行后配置仍保存在用户目录
