@@ -212,11 +212,34 @@ namespace SteamSwitcher.Core
 
         private async Task<string?> DownloadAvatarAsync(string steamId)
         {
+            string? response = null;
+
+            // 1. 尝试直接请求官方接口
             try
             {
                 var url = $"https://steamcommunity.com/profiles/{steamId}/?xml=1";
-                var response = await _httpClient.GetStringAsync(url);
+                response = await _httpClient.GetStringAsync(url);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"直连 steamcommunity.com 获取头像失败: {ex.Message}。将尝试国内镜像反代重试...");
+                // 2. 备用降级方案，利用国内可靠的反代镜像重试
+                try
+                {
+                    var fallbackUrl = $"https://shared.steamcommunity.li-sub.cn/profiles/{steamId}/?xml=1";
+                    response = await _httpClient.GetStringAsync(fallbackUrl);
+                }
+                catch (Exception fallbackEx)
+                {
+                    AppLogger.Warn($"镜像重试失败: {fallbackEx.Message}。如果未开启代理，头像可能无法显示。");
+                }
+            }
 
+            if (string.IsNullOrEmpty(response))
+                return null;
+
+            try
+            {
                 var match = Regex.Match(response, @"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>");
                 if (!match.Success)
                     match = Regex.Match(response, @"<avatarMedium><!\[CDATA\[(.*?)\]\]></avatarMedium>");
@@ -226,20 +249,42 @@ namespace SteamSwitcher.Core
                 if (match.Success)
                 {
                     var avatarUrl = match.Groups[1].Value;
-                    var avatarBytes = await _httpClient.GetByteArrayAsync(avatarUrl);
+                    byte[]? avatarBytes = null;
 
-                    var avatarCachePath = _steamService.GetAvatarCachePath();
-                    if (!Directory.Exists(avatarCachePath))
-                        Directory.CreateDirectory(avatarCachePath);
+                    // 1. 尝试下载头像图片本身
+                    try
+                    {
+                        avatarBytes = await _httpClient.GetByteArrayAsync(avatarUrl);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Warn($"直连下载头像文件失败: {ex.Message}。将尝试通过镜像替换下载...");
+                        try
+                        {
+                            var fallbackAvatarUrl = avatarUrl.Replace("avatars.steamstatic.com", "shared.steamcommunity.li-sub.cn/avatars");
+                            avatarBytes = await _httpClient.GetByteArrayAsync(fallbackAvatarUrl);
+                        }
+                        catch (Exception fallbackEx)
+                        {
+                            AppLogger.Error($"镜像下载头像文件亦失败: {fallbackEx.Message}");
+                        }
+                    }
 
-                    var avatarFile = Path.Combine(avatarCachePath, $"{steamId}.png");
-                    await File.WriteAllBytesAsync(avatarFile, avatarBytes);
-                    return avatarFile;
+                    if (avatarBytes != null)
+                    {
+                        var avatarCachePath = _steamService.GetAvatarCachePath();
+                        if (!Directory.Exists(avatarCachePath))
+                            Directory.CreateDirectory(avatarCachePath);
+
+                        var avatarFile = Path.Combine(avatarCachePath, $"{steamId}.png");
+                        await File.WriteAllBytesAsync(avatarFile, avatarBytes);
+                        return avatarFile;
+                    }
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error downloading avatar: {ex.Message}");
+                AppLogger.Error($"解析头像数据时发生异常: {ex.Message}", ex);
             }
 
             return null;

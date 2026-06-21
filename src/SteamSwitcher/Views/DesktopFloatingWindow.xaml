@@ -16,17 +16,18 @@
 
     <Grid>
         <Border x:Name="RootGlass"
-                CornerRadius="16"
-                Padding="4"
-                BorderThickness="1">
+                CornerRadius="20"
+                Padding="6,5"
+                BorderThickness="1"
+                BorderBrush="#3FFFFFFF">
             <Border.Effect>
-                <DropShadowEffect Color="#4A90D9" BlurRadius="16" ShadowDepth="0" Opacity="0.20"/>
+                <DropShadowEffect Color="#000000" BlurRadius="25" ShadowDepth="2" Opacity="0.2"/>
             </Border.Effect>
             <Border.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#95FFFFFF" Offset="0"/>
-                    <GradientStop Color="#55E8F4FF" Offset="0.5"/>
-                    <GradientStop Color="#44D0EAFF" Offset="1"/>
+                    <GradientStop Color="#26FFFFFF" Offset="0"/>
+                    <GradientStop Color="#0FFFFFFF" Offset="0.5"/>
+                    <GradientStop Color="#1AFFFFFF" Offset="1"/>
                 </LinearGradientBrush>
             </Border.Background>
 

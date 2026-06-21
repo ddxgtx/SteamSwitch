@@ -14,18 +14,12 @@
 
     <Grid>
         <Border x:Name="GlassBorder"
+                Background="Transparent"
                 BorderThickness="1"
                 ClipToBounds="True">
             <Border.Effect>
-                <DropShadowEffect Color="#4A90D9" BlurRadius="12" ShadowDepth="0" Opacity="0.18"/>
+                <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="1" Opacity="0.15"/>
             </Border.Effect>
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#99FFFFFF" Offset="0"/>
-                    <GradientStop Color="#55E8F4FF" Offset="0.5"/>
-                    <GradientStop Color="#44D0EAFF" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.Background>
 
             <DockPanel x:Name="ContentPanel" LastChildFill="False">
                 <StackPanel DockPanel.Dock="Right" x:Name="AvatarPanel" Orientation="Horizontal"/>

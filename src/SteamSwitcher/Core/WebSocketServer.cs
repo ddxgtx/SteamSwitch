@@ -94,15 +94,26 @@ namespace SteamSwitcher.Core
 
                 while (ws.State == WebSocketState.Open)
                 {
-                    var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                    using var ms = new System.IO.MemoryStream();
+                    WebSocketReceiveResult result;
+                    do
+                    {
+                        result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            break;
+                        }
+                        ms.Write(buffer, 0, result.Count);
+                    }
+                    while (!result.EndOfMessage);
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
                         await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
                     }
-                    else
+                    else if (ms.Length > 0)
                     {
-                        var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                        var message = Encoding.UTF8.GetString(ms.ToArray());
                         ProcessMessage(message);
                     }
                 }

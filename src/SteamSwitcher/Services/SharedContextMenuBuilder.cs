@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using SteamSwitcher.ViewModels;
 
@@ -42,6 +43,7 @@ namespace SteamSwitcher.Services
                     menu,
                     "显示主窗口",
                     "恢复应用窗口",
+                    "\uE8A1",
                     null,
                     palette,
                     showMainWindow));
@@ -53,6 +55,7 @@ namespace SteamSwitcher.Services
                     menu,
                     "启动 Steam",
                     "按静默模式设置启动",
+                    "\uE768",
                     null,
                     palette,
                     launchSteam));
@@ -67,6 +70,7 @@ namespace SteamSwitcher.Services
                     menu,
                     "任务栏常驻",
                     "固定账号与游戏入口",
+                    "\uE840",
                     isTaskbarPinned ? "开启" : "关闭",
                     palette,
                     () => toggleTaskbarPinned(!isTaskbarPinned),
@@ -79,6 +83,7 @@ namespace SteamSwitcher.Services
                     menu,
                     "桌面悬浮窗",
                     "桌面快捷入口",
+                    "\uE7B5",
                     isDesktopFloatingEnabled ? "开启" : "关闭",
                     palette,
                     () => toggleDesktopFloating(!isDesktopFloatingEnabled),
@@ -91,6 +96,7 @@ namespace SteamSwitcher.Services
                     menu,
                     "悬浮窗置顶",
                     "保持在其他窗口上方",
+                    "\uE18A",
                     isDesktopFloatingTopmost ? "开启" : "关闭",
                     palette,
                     () => toggleDesktopFloatingTopmost(!isDesktopFloatingTopmost),
@@ -109,6 +115,7 @@ namespace SteamSwitcher.Services
                         menu,
                         account.DisplayName,
                         account.Username,
+                        "\uE77B",
                         isCurrent ? "当前" : null,
                         palette,
                         () => accountSelected?.Invoke(account.SteamId),
@@ -131,6 +138,7 @@ namespace SteamSwitcher.Services
                         menu,
                         "刷新",
                         "重新读取固定入口",
+                        "\uE72C",
                         null,
                         palette,
                         refresh));
@@ -142,6 +150,7 @@ namespace SteamSwitcher.Services
                         menu,
                         "分离任务栏",
                         "取消任务栏常驻",
+                        "\uE898",
                         null,
                         palette,
                         detach));
@@ -153,6 +162,7 @@ namespace SteamSwitcher.Services
                 menu,
                 "退出",
                 "关闭 Steam Switch",
+                "\uE7E7",
                 null,
                 palette,
                 () =>
@@ -288,6 +298,7 @@ namespace SteamSwitcher.Services
             ContextMenu menu,
             string title,
             string detail,
+            string icon,
             string? badge,
             MenuPalette palette,
             Action action,
@@ -304,8 +315,8 @@ namespace SteamSwitcher.Services
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
                 Focusable = false,
-                Style = CreateRowStyle(palette, active),
-                Content = CreateRowContent(title, detail, badge, palette, active, danger)
+                Style = CreateRowStyle(palette, active, danger),
+                Content = CreateRowContent(title, detail, icon, badge, palette, active, danger)
             };
 
             button.Click += (_, _) =>
@@ -320,6 +331,7 @@ namespace SteamSwitcher.Services
         private static Grid CreateRowContent(
             string title,
             string detail,
+            string icon,
             string? badge,
             MenuPalette palette,
             bool active,
@@ -330,6 +342,7 @@ namespace SteamSwitcher.Services
                 Margin = new Thickness(10, 0, 10, 0)
             };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = active ? new GridLength(5) : new GridLength(0) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -347,9 +360,22 @@ namespace SteamSwitcher.Services
                 grid.Children.Add(mark);
             }
 
+            var iconBlock = new TextBlock
+            {
+                Text = icon,
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontSize = 14,
+                Foreground = danger ? palette.Danger : palette.SecondaryText,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            Grid.SetColumn(iconBlock, 1);
+            grid.Children.Add(iconBlock);
+
             var text = new StackPanel
             {
-                Margin = new Thickness(active ? 8 : 0, 0, 10, 0),
+                Margin = new Thickness(active ? 4 : 0, 0, 10, 0),
                 VerticalAlignment = VerticalAlignment.Center
             };
 
@@ -374,7 +400,7 @@ namespace SteamSwitcher.Services
                 });
             }
 
-            Grid.SetColumn(text, 1);
+            Grid.SetColumn(text, 2);
             grid.Children.Add(text);
 
             if (!string.IsNullOrWhiteSpace(badge))
@@ -382,31 +408,34 @@ namespace SteamSwitcher.Services
                 var badgeElement = CreateBadge(
                     badge,
                     active ? palette.ActiveBadgeFill : palette.SubtleFill,
-                    active ? palette.Accent : palette.TertiaryText);
+                    active ? palette.Accent : palette.SecondaryText);
                 badgeElement.Margin = new Thickness(8, 0, 0, 0);
-                Grid.SetColumn(badgeElement, 2);
+                Grid.SetColumn(badgeElement, 3);
                 grid.Children.Add(badgeElement);
             }
 
             return grid;
         }
 
-        private static Style CreateRowStyle(MenuPalette palette, bool active)
+        private static Style CreateRowStyle(MenuPalette palette, bool active, bool danger)
         {
             var style = new Style(typeof(Button));
-            style.Setters.Add(new Setter(Control.ForegroundProperty, palette.Text));
-            style.Setters.Add(new Setter(Control.TemplateProperty, CreateRowTemplate(palette, active)));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, danger ? palette.Danger : palette.Text));
+            style.Setters.Add(new Setter(Control.TemplateProperty, CreateRowTemplate(palette, active, danger)));
             return style;
         }
 
-        private static ControlTemplate CreateRowTemplate(MenuPalette palette, bool active)
+        private static ControlTemplate CreateRowTemplate(MenuPalette palette, bool active, bool danger)
         {
             var template = new ControlTemplate(typeof(Button));
 
             var root = new FrameworkElementFactory(typeof(Border));
             root.Name = "Root";
-            root.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
-            root.SetValue(Border.CornerRadiusProperty, new CornerRadius(12));
+
+            var initColor = active ? ((SolidColorBrush)palette.ActiveFill).Color : Color.FromArgb(0, 0, 0, 0);
+            var rootBrush = new SolidColorBrush(initColor);
+            root.SetValue(Border.BackgroundProperty, rootBrush);
+            root.SetValue(Border.CornerRadiusProperty, new CornerRadius(10));
             root.SetValue(Border.SnapsToDevicePixelsProperty, true);
 
             var content = new FrameworkElementFactory(typeof(ContentPresenter));
@@ -416,13 +445,49 @@ namespace SteamSwitcher.Services
 
             template.VisualTree = root;
 
-            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
-            hover.Setters.Add(new Setter(Border.BackgroundProperty, palette.HoverFill, "Root"));
-            template.Triggers.Add(hover);
+            Color hoverTargetColor = danger 
+                ? Color.FromArgb(28, 255, 69, 58) 
+                : ((SolidColorBrush)palette.HoverFill).Color;
+            
+            Color pressedTargetColor = danger 
+                ? Color.FromArgb(44, 255, 69, 58) 
+                : ((SolidColorBrush)palette.PressedFill).Color;
 
-            var pressed = new Trigger { Property = ButtonBase.IsPressedProperty, Value = true };
-            pressed.Setters.Add(new Setter(Border.BackgroundProperty, palette.PressedFill, "Root"));
-            template.Triggers.Add(pressed);
+            var hoverTrigger = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            
+            var hoverEnterAnim = new ColorAnimation(hoverTargetColor, TimeSpan.FromMilliseconds(120));
+            var hoverEnterStory = new Storyboard();
+            Storyboard.SetTargetName(hoverEnterStory, "Root");
+            Storyboard.SetTargetProperty(hoverEnterStory, new PropertyPath("Background.Color"));
+            hoverEnterStory.Children.Add(hoverEnterAnim);
+            hoverTrigger.EnterActions.Add(new BeginStoryboard { Storyboard = hoverEnterStory });
+
+            var hoverExitAnim = new ColorAnimation(initColor, TimeSpan.FromMilliseconds(120));
+            var hoverExitStory = new Storyboard();
+            Storyboard.SetTargetName(hoverExitStory, "Root");
+            Storyboard.SetTargetProperty(hoverExitStory, new PropertyPath("Background.Color"));
+            hoverExitStory.Children.Add(hoverExitAnim);
+            hoverTrigger.ExitActions.Add(new BeginStoryboard { Storyboard = hoverExitStory });
+
+            template.Triggers.Add(hoverTrigger);
+
+            var pressedTrigger = new Trigger { Property = ButtonBase.IsPressedProperty, Value = true };
+            
+            var pressedEnterAnim = new ColorAnimation(pressedTargetColor, TimeSpan.FromMilliseconds(80));
+            var pressedEnterStory = new Storyboard();
+            Storyboard.SetTargetName(pressedEnterStory, "Root");
+            Storyboard.SetTargetProperty(pressedEnterStory, new PropertyPath("Background.Color"));
+            pressedEnterStory.Children.Add(pressedEnterAnim);
+            pressedTrigger.EnterActions.Add(new BeginStoryboard { Storyboard = pressedEnterStory });
+
+            var pressedExitAnim = new ColorAnimation(hoverTargetColor, TimeSpan.FromMilliseconds(80));
+            var pressedExitStory = new Storyboard();
+            Storyboard.SetTargetName(pressedExitStory, "Root");
+            Storyboard.SetTargetProperty(pressedExitStory, new PropertyPath("Background.Color"));
+            pressedExitStory.Children.Add(pressedExitAnim);
+            pressedTrigger.ExitActions.Add(new BeginStoryboard { Storyboard = pressedExitStory });
+
+            template.Triggers.Add(pressedTrigger);
 
             var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
             disabled.Setters.Add(new Setter(UIElement.OpacityProperty, 0.55));

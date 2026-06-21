@@ -48,7 +48,19 @@ namespace SteamSwitcher.Services
         {
             try
             {
-                var response = await _http.GetAsync(RepoApiUrl);
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _http.GetAsync(RepoApiUrl);
+                    response.EnsureSuccessStatusCode();
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Warn($"直连 GitHub API 获取更新失败: {ex.Message}。正在尝试国内镜像重试...");
+                    var fallbackApiUrl = "https://api.gitmirror.com/repos/ddxgtx/SteamSwitch/releases/latest";
+                    response = await _http.GetAsync(fallbackApiUrl);
+                }
+
                 if (!response.IsSuccessStatusCode)
                     return null;
 
@@ -159,11 +171,35 @@ namespace SteamSwitcher.Services
             if (File.Exists(filePath))
                 File.Delete(filePath);
 
-            using var response = await _http.GetAsync(update.DownloadUrl,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-
-            response.EnsureSuccessStatusCode();
+            HttpResponseMessage response;
+            try
+            {
+                response = await _http.GetAsync(update.DownloadUrl,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+                response.EnsureSuccessStatusCode();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"直连 GitHub 下载安装包失败: {ex.Message}。将尝试使用国内镜像代理下载...");
+                var fallbackDownloadUrl = $"https://ghproxy.net/{update.DownloadUrl}";
+                try
+                {
+                    response = await _http.GetAsync(fallbackDownloadUrl,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        cancellationToken);
+                    response.EnsureSuccessStatusCode();
+                }
+                catch (Exception fallbackEx)
+                {
+                    AppLogger.Warn($"国内第一镜像下载失败: {fallbackEx.Message}。尝试第二镜像下载...");
+                    var secondFallbackUrl = $"https://mirror.ghproxy.com/{update.DownloadUrl}";
+                    response = await _http.GetAsync(secondFallbackUrl,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        cancellationToken);
+                    response.EnsureSuccessStatusCode();
+                }
+            }
 
             var totalBytes = response.Content.Headers.ContentLength ?? update.FileSize;
             var buffer = new byte[81920];

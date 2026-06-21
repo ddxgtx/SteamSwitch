@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using SteamSwitcher.Core;
 using SteamSwitcher.Models;
@@ -329,7 +330,7 @@ namespace SteamSwitcher.Views
         private void Rebuild()
         {
             int h = _iconSize + _glassPadding * 2;
-            _iconRadius = _roundedMode ? (_iconSize + 4) / 2 : 6;
+            _iconRadius = _roundedMode ? _iconSize / 2 : 8;
             _glassRadius = h / 2;
 
             GamePanel.Children.Clear();
@@ -397,24 +398,65 @@ namespace SteamSwitcher.Views
 
         // --- Glass ---
 
+        private static bool IsSystemInLightTheme()
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                if (key != null)
+                {
+                    var val = key.GetValue("SystemUsesLightTheme");
+                    if (val != null)
+                        return Convert.ToInt32(val) != 0;
+                }
+            }
+            catch { }
+            return false;
+        }
+
         private void UpdateGlass()
         {
             if (GlassBorder == null) return;
+            
+            bool isLight = IsSystemInLightTheme();
+
             if (_glassEnabled)
             {
-                GlassBorder.Background = new LinearGradientBrush(
-                    Color.FromArgb(120, 255, 255, 255),
-                    Color.FromArgb(50, 225, 240, 255),
-                    new Point(0, 0), new Point(1, 1));
-                GlassBorder.BorderBrush = new LinearGradientBrush(
-                    Color.FromArgb(180, 255, 255, 255),
-                    Color.FromArgb(60, 100, 160, 220),
-                    new Point(0, 0), new Point(0, 1));
+                if (isLight)
+                {
+                    GlassBorder.Background = new LinearGradientBrush(
+                        Color.FromArgb(135, 255, 255, 255),
+                        Color.FromArgb(75, 235, 245, 255),
+                        new Point(0, 0), new Point(1, 1));
+                    GlassBorder.BorderBrush = new LinearGradientBrush(
+                        Color.FromArgb(160, 255, 255, 255),
+                        Color.FromArgb(50, 100, 150, 220),
+                        new Point(0, 0), new Point(0, 1));
+                }
+                else
+                {
+                    GlassBorder.Background = new LinearGradientBrush(
+                        Color.FromArgb(25, 255, 255, 255),
+                        Color.FromArgb(12, 0, 0, 0),
+                        new Point(0, 0), new Point(1, 1));
+                    GlassBorder.BorderBrush = new LinearGradientBrush(
+                        Color.FromArgb(45, 255, 255, 255),
+                        Color.FromArgb(15, 255, 255, 255),
+                        new Point(0, 0), new Point(0, 1));
+                }
             }
             else
             {
-                GlassBorder.Background = new SolidColorBrush(Color.FromArgb(230, 245, 250, 255));
-                GlassBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(170, 255, 255, 255));
+                if (isLight)
+                {
+                    GlassBorder.Background = new SolidColorBrush(Color.FromArgb(235, 245, 250, 255));
+                    GlassBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(180, 225, 235, 245));
+                }
+                else
+                {
+                    GlassBorder.Background = new SolidColorBrush(Color.FromArgb(235, 30, 30, 33));
+                    GlassBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(45, 255, 255, 255));
+                }
             }
         }
 
@@ -457,12 +499,11 @@ namespace SteamSwitcher.Views
         private Border MakeGameBtn(GameListViewModel game)
         {
             int sz = _iconSize;
-            int r = _iconRadius;
 
             var border = new Border
             {
                 Width = sz, Height = sz,
-                CornerRadius = new CornerRadius(r),
+                CornerRadius = new CornerRadius(8),
                 BorderBrush = new SolidColorBrush(game.HasBinding
                     ? Color.FromArgb(140, 48, 209, 88)
                     : Color.FromArgb(120, 255, 255, 255)),
@@ -480,34 +521,55 @@ namespace SteamSwitcher.Views
                 : _accountManager.GetSteamService().GetGameIconPath(game.AppId);
 
             var imgBrush = LoadImageBrush(path, sz);
+            Border overlay;
             if (imgBrush != null)
             {
                 border.Background = imgBrush;
+                overlay = new Border
+                {
+                    CornerRadius = new CornerRadius(8),
+                    Background = Brushes.Transparent
+                };
             }
             else
             {
                 border.Background = BtnBrush();
-                border.Child = FallbackIcon(sz);
+                overlay = new Border
+                {
+                    CornerRadius = new CornerRadius(8),
+                    Background = Brushes.Transparent,
+                    Child = FallbackIcon(sz)
+                };
             }
-
-            var overlay = new Border
-            {
-                CornerRadius = new CornerRadius(r),
-                Background = Brushes.Transparent
-            };
             border.Child = overlay;
 
             border.MouseEnter += (s, e) =>
             {
                 overlay.Background = game.HasBinding ? ActiveBrush() : HoverBrush();
                 border.BorderBrush = _hoverBorderBrush;
-                if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1.08; sc.ScaleY = 1.08; }
+                if (border.RenderTransform is ScaleTransform sc)
+                {
+                    var anim = new DoubleAnimation(1.08, TimeSpan.FromMilliseconds(150))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    };
+                    sc.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                    sc.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+                }
             };
             border.MouseLeave += (s, e) =>
             {
                 overlay.Background = Brushes.Transparent;
                 border.BorderBrush = game.HasBinding ? _bindingBorderBrush : _normalBorderBrush;
-                if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1; sc.ScaleY = 1; }
+                if (border.RenderTransform is ScaleTransform sc)
+                {
+                    var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    };
+                    sc.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                    sc.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+                }
             };
             border.MouseRightButtonDown += (s, e) =>
             {
@@ -521,12 +583,11 @@ namespace SteamSwitcher.Views
         private Border MakeQuickLaunchBtn(QuickLaunchItem item)
         {
             int sz = _iconSize;
-            int r = _iconRadius;
 
             var border = new Border
             {
                 Width = sz, Height = sz,
-                CornerRadius = new CornerRadius(r),
+                CornerRadius = new CornerRadius(8),
                 BorderBrush = _normalBorderBrush,
                 BorderThickness = new Thickness(1),
                 Margin = new Thickness(2, 0, 2, 0),
@@ -538,34 +599,55 @@ namespace SteamSwitcher.Views
             };
 
             var imgBrush = LoadImageBrush(item.IconPath, sz);
+            Border overlay;
             if (imgBrush != null)
             {
                 border.Background = imgBrush;
+                overlay = new Border
+                {
+                    CornerRadius = new CornerRadius(8),
+                    Background = Brushes.Transparent
+                };
             }
             else
             {
                 border.Background = BtnBrush();
-                border.Child = FallbackIcon(sz, "⚡");
+                overlay = new Border
+                {
+                    CornerRadius = new CornerRadius(8),
+                    Background = Brushes.Transparent,
+                    Child = FallbackIcon(sz, "⚡")
+                };
             }
-
-            var overlay = new Border
-            {
-                CornerRadius = new CornerRadius(r),
-                Background = Brushes.Transparent
-            };
             border.Child = overlay;
 
             border.MouseEnter += (s, e) =>
             {
                 overlay.Background = HoverBrush();
                 border.BorderBrush = _hoverBorderBrush;
-                if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1.08; sc.ScaleY = 1.08; }
+                if (border.RenderTransform is ScaleTransform sc)
+                {
+                    var anim = new DoubleAnimation(1.08, TimeSpan.FromMilliseconds(150))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    };
+                    sc.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                    sc.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+                }
             };
             border.MouseLeave += (s, e) =>
             {
                 overlay.Background = Brushes.Transparent;
                 border.BorderBrush = _normalBorderBrush;
-                if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1; sc.ScaleY = 1; }
+                if (border.RenderTransform is ScaleTransform sc)
+                {
+                    var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    };
+                    sc.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                    sc.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+                }
             };
             border.MouseRightButtonDown += (s, e) =>
             {
@@ -597,21 +679,26 @@ namespace SteamSwitcher.Views
             };
 
             var imgBrush = LoadImageBrush(account.AvatarPath, sz);
+            Border overlay;
             if (imgBrush != null)
             {
                 border.Background = imgBrush;
+                overlay = new Border
+                {
+                    CornerRadius = new CornerRadius(r),
+                    Background = Brushes.Transparent
+                };
             }
             else
             {
                 border.Background = BtnBrush();
-                border.Child = FallbackText(Initial(account), sz);
+                overlay = new Border
+                {
+                    CornerRadius = new CornerRadius(r),
+                    Background = Brushes.Transparent,
+                    Child = FallbackText(Initial(account), sz)
+                };
             }
-
-            var overlay = new Border
-            {
-                CornerRadius = new CornerRadius(r),
-                Background = Brushes.Transparent
-            };
             border.Child = overlay;
 
             border.MouseRightButtonDown += (s, e) =>
@@ -625,7 +712,15 @@ namespace SteamSwitcher.Views
                 {
                     overlay.Background = HoverBrush();
                     border.BorderBrush = _hoverBorderBrush;
-                    if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1.08; sc.ScaleY = 1.08; }
+                    if (border.RenderTransform is ScaleTransform sc)
+                    {
+                        var anim = new DoubleAnimation(1.08, TimeSpan.FromMilliseconds(150))
+                        {
+                            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                        };
+                        sc.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                        sc.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+                    }
                 }
             };
             border.MouseLeave += (s, e) =>
@@ -634,7 +729,15 @@ namespace SteamSwitcher.Views
                 {
                     overlay.Background = Brushes.Transparent;
                     border.BorderBrush = _normalBorderBrush;
-                    if (border.RenderTransform is ScaleTransform sc) { sc.ScaleX = 1; sc.ScaleY = 1; }
+                    if (border.RenderTransform is ScaleTransform sc)
+                    {
+                        var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150))
+                        {
+                            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                        };
+                        sc.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                        sc.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+                    }
                 }
             };
 

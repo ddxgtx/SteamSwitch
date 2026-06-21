@@ -39,9 +39,13 @@ namespace SteamSwitcher.Services
         public bool AutoInstallUpdates { get; set; }
         public bool ShowNotificationOnSteamClose { get; set; }
         public string Theme { get; set; } = "Dark";
+        public bool MinimalMode { get; set; } = false;
+        public bool DesktopFloatingDockEnabled { get; set; } = true;
         public List<string> PinnedAccountIds { get; set; } = new();
         public List<int> PinnedGameIds { get; set; } = new();
         public List<string> PinnedPanelItemOrder { get; set; } = new();
+        public string CustomSteamPath { get; set; } = "";
+        public string CustomLoginUsersPath { get; set; } = "";
     }
 
     public static class SettingsService

@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)]()
-[![Release](https://img.shields.io/badge/Release-v2.5.2-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
+[![Release](https://img.shields.io/badge/Release-v2.6-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
 [![Status](https://img.shields.io/badge/Status-Stable-brightgreen.svg)]()
 
 **[官方网站](http://ddxgtx.fun/SteamSwitch)** · **[下载最新版](https://github.com/ddxgtx/SteamSwitch/releases/latest)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)**

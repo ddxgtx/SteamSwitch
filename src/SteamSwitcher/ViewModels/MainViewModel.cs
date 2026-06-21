@@ -93,6 +93,12 @@ namespace SteamSwitcher.ViewModels
         private int _taskbarWindowSize;
 
         [ObservableProperty]
+        private bool _minimalMode;
+
+        [ObservableProperty]
+        private bool _desktopFloatingDockEnabled;
+
+        [ObservableProperty]
         private int _taskbarAvatarSize;
 
         [ObservableProperty]
@@ -142,6 +148,12 @@ namespace SteamSwitcher.ViewModels
         private bool _enableLibraryInjection;
 
         [ObservableProperty]
+        private string _customSteamPath = "";
+
+        [ObservableProperty]
+        private string _customLoginUsersPath = "";
+
+        [ObservableProperty]
         private bool _autoScanGamesOnStartup;
 
         [ObservableProperty]
@@ -168,6 +180,8 @@ namespace SteamSwitcher.ViewModels
         public event EventHandler? QuickLaunchChanged;
         public event EventHandler<string>? NotificationRequested;
         public event EventHandler<UpdateInfo>? UpdateAvailable;
+        public event EventHandler<bool>? MinimalModeChanged;
+        public event EventHandler<bool>? DesktopFloatingDockEnabledChanged;
 
         public string AccountCountText => Accounts.Count.ToString();
         public string BindingCountText => GameBindings.Count.ToString();
@@ -561,6 +575,8 @@ namespace SteamSwitcher.ViewModels
             _desktopFloatingRoundedMode = _settings.DesktopFloatingRoundedMode;
             _desktopFloatingGlassColor = _settings.DesktopFloatingGlassColor;
             _theme = _settings.Theme;
+            _minimalMode = _settings.MinimalMode;
+            _desktopFloatingDockEnabled = _settings.DesktopFloatingDockEnabled;
             _enableLibraryInjection = _settings.EnableLibraryInjection;
             _autoScanGamesOnStartup = _settings.AutoScanGamesOnStartup;
             _confirmBeforeGameLaunch = _settings.ConfirmBeforeGameLaunch;
@@ -568,6 +584,8 @@ namespace SteamSwitcher.ViewModels
             _checkUpdateOnStartup = _settings.CheckUpdateOnStartup;
             _autoInstallUpdates = _settings.AutoInstallUpdates;
             _showNotificationOnSteamClose = _settings.ShowNotificationOnSteamClose;
+            _customSteamPath = _settings.CustomSteamPath ?? "";
+            _customLoginUsersPath = _settings.CustomLoginUsersPath ?? "";
             if (_startWithWindows && !registryStartWithWindows)
                 SettingsService.SetStartWithWindows(true);
 
@@ -586,6 +604,7 @@ namespace SteamSwitcher.ViewModels
             };
 
             PropertyChanged += OnPropertyChanged;
+            InitializeMinimalModeTimer();
         }
 
         private void OnGameBindingsChanged(object? sender, EventArgs e)
@@ -872,7 +891,7 @@ namespace SteamSwitcher.ViewModels
                     _settings.DesktopFloatingLocked = DesktopFloatingLocked;
                     break;
                 case nameof(DesktopFloatingOpacity):
-                    _settings.DesktopFloatingOpacity = Math.Clamp(DesktopFloatingOpacity, 45, 100);
+                    _settings.DesktopFloatingOpacity = Math.Clamp(DesktopFloatingOpacity, 20, 100);
                     break;
                 case nameof(DesktopFloatingAvatarSize):
                     _settings.DesktopFloatingAvatarSize = DesktopFloatingAvatarSize;
@@ -931,6 +950,25 @@ namespace SteamSwitcher.ViewModels
                 case nameof(ShowNotificationOnSteamClose):
                     _settings.ShowNotificationOnSteamClose = ShowNotificationOnSteamClose;
                     break;
+                case nameof(CustomSteamPath):
+                    _settings.CustomSteamPath = CustomSteamPath;
+                    _accountManager.GetSteamService().SetCustomPaths(CustomSteamPath, CustomLoginUsersPath);
+                    _ = _accountManager.LoadAccountsAsync();
+                    break;
+                case nameof(CustomLoginUsersPath):
+                    _settings.CustomLoginUsersPath = CustomLoginUsersPath;
+                    _accountManager.GetSteamService().SetCustomPaths(CustomSteamPath, CustomLoginUsersPath);
+                    _ = _accountManager.LoadAccountsAsync();
+                    break;
+                case nameof(MinimalMode):
+                    _settings.MinimalMode = MinimalMode;
+                    InitializeMinimalModeTimer();
+                    MinimalModeChanged?.Invoke(this, MinimalMode);
+                    break;
+                case nameof(DesktopFloatingDockEnabled):
+                    _settings.DesktopFloatingDockEnabled = DesktopFloatingDockEnabled;
+                    DesktopFloatingDockEnabledChanged?.Invoke(this, DesktopFloatingDockEnabled);
+                    break;
             }
 
             _settingsDirty = true;
@@ -948,6 +986,7 @@ namespace SteamSwitcher.ViewModels
             IsLoading = true;
             StatusText = "正在检测 Steam...";
 
+            _accountManager.GetSteamService().SetCustomPaths(CustomSteamPath, CustomLoginUsersPath);
             var success = await _accountManager.InitializeAsync();
             if (!success)
             {
@@ -1384,6 +1423,10 @@ namespace SteamSwitcher.ViewModels
 
             IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
             IsLoading = false;
+            if (MinimalMode)
+            {
+                Core.MemoryLimiter.CleanMemory();
+            }
         }
 
         [RelayCommand]
@@ -1753,6 +1796,10 @@ namespace SteamSwitcher.ViewModels
             {
                 IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
                 IsLoading = false;
+                if (MinimalMode)
+                {
+                    Core.MemoryLimiter.CleanMemory();
+                }
             }
         }
 
@@ -1774,6 +1821,36 @@ namespace SteamSwitcher.ViewModels
             _wsServer?.Dispose();
             _accountManager.Dispose();
             GC.SuppressFinalize(this);
+        }
+
+        private DispatcherTimer? _minimalModeTimer;
+
+        private void InitializeMinimalModeTimer()
+        {
+            if (_minimalModeTimer == null)
+            {
+                _minimalModeTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromSeconds(30)
+                };
+                _minimalModeTimer.Tick += (s, e) =>
+                {
+                    if (MinimalMode)
+                    {
+                        Core.MemoryLimiter.CleanMemory();
+                    }
+                };
+            }
+
+            if (MinimalMode)
+            {
+                _minimalModeTimer.Start();
+                Core.MemoryLimiter.CleanMemory();
+            }
+            else
+            {
+                _minimalModeTimer.Stop();
+            }
         }
     }
 

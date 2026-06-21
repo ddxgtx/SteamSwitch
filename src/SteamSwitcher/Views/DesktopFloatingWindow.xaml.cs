@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using SteamSwitcher.Core;
 using SteamSwitcher.Models;
@@ -32,8 +33,23 @@ namespace SteamSwitcher.Views
         private EventHandler? _pinnedGamesChangedHandler;
         private EventHandler? _pinnedAccountsChangedHandler;
         private EventHandler? _quickLaunchChangedHandler;
+        private EventHandler<bool>? _minimalModeChangedHandler;
+        private EventHandler<bool>? _dockEnabledChangedHandler;
         private PanelDragHelper? _gameDragHelper;
         private PanelDragHelper? _avatarDragHelper;
+
+        private System.Windows.Threading.DispatcherTimer? _autoHideTimer;
+        private double _normalOpacity = 1.0;
+        private bool _isDragging;
+        private bool _isCollapsed;
+
+        private enum AnchorEdge
+        {
+            None,
+            Left,
+            Right,
+            Top
+        }
 
         private const int WS_EX_TOOLWINDOW = 0x00000080;
 
@@ -57,9 +73,29 @@ namespace SteamSwitcher.Views
             InitializeComponent();
             _accountManager = accountManager;
 
-            Loaded += (s, e) => { DesktopFloatingWindow_Loaded(s!, e); SetupDragDrop(); };
+            Loaded += (s, e) => { DesktopFloatingWindow_Loaded(s!, e); SetupDragDrop(); InitializeAutoHide(); };
             LocationChanged += DesktopFloatingWindow_LocationChanged;
             SourceInitialized += (s, e) => HideFromAltTab();
+        }
+
+        private void InitializeAutoHide()
+        {
+            _normalOpacity = OpacityPercentToDouble();
+            _autoHideTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(200)
+            };
+            _autoHideTimer.Tick += AutoHideTimer_Tick;
+            _autoHideTimer.Start();
+        }
+
+        private double OpacityPercentToDouble()
+        {
+            if (_viewModel != null)
+            {
+                return Math.Clamp(_viewModel.DesktopFloatingOpacity, 20, 100) / 100.0;
+            }
+            return 0.8;
         }
 
         private void SetupDragDrop()
@@ -191,6 +227,10 @@ namespace SteamSwitcher.Views
                     _viewModel.PinnedAccountsChanged -= _pinnedAccountsChangedHandler;
                 if (_quickLaunchChangedHandler != null)
                     _viewModel.QuickLaunchChanged -= _quickLaunchChangedHandler;
+                if (_minimalModeChangedHandler != null)
+                    _viewModel.MinimalModeChanged -= _minimalModeChangedHandler;
+                if (_dockEnabledChangedHandler != null)
+                    _viewModel.DesktopFloatingDockEnabledChanged -= _dockEnabledChangedHandler;
             }
 
             _viewModel = viewModel;
@@ -212,9 +252,28 @@ namespace SteamSwitcher.Views
                 RefreshGameIcons();
             });
 
+            _minimalModeChangedHandler = (s, val) => Dispatcher.Invoke(() =>
+            {
+                if (val)
+                {
+                    BeginAnimation(OpacityProperty, null);
+                    Opacity = _normalOpacity;
+                }
+            });
+            _dockEnabledChangedHandler = (s, val) => Dispatcher.Invoke(() =>
+            {
+                if (!val && _isCollapsed)
+                {
+                    var edgeLimit = GetAnchorEdge(out double limitVal);
+                    ExpandWindow(edgeLimit, limitVal);
+                }
+            });
+
             _viewModel.PinnedGamesChanged += _pinnedGamesChangedHandler;
             _viewModel.PinnedAccountsChanged += _pinnedAccountsChangedHandler;
             _viewModel.QuickLaunchChanged += _quickLaunchChangedHandler;
+            _viewModel.MinimalModeChanged += _minimalModeChangedHandler;
+            _viewModel.DesktopFloatingDockEnabledChanged += _dockEnabledChangedHandler;
         }
 
         public void SetPinnedAccounts(List<SteamAccount> accounts)
@@ -237,7 +296,7 @@ namespace SteamSwitcher.Views
 
         public void SetAvatarSize(int size)
         {
-            _avatarSize = Math.Clamp(size, 32, 56);
+            _avatarSize = Math.Clamp(size, 24, 72);
             RefreshAll();
         }
 
@@ -272,7 +331,12 @@ namespace SteamSwitcher.Views
 
         public void SetOpacityPercent(int percent)
         {
-            Opacity = Math.Clamp(percent, 45, 100) / 100.0;
+            _normalOpacity = Math.Clamp(percent, 20, 100) / 100.0;
+            if (!_isCollapsed)
+            {
+                BeginAnimation(OpacityProperty, null);
+                Opacity = _normalOpacity;
+            }
         }
 
         public void SetSavedPosition(double? left, double? top)
@@ -295,7 +359,7 @@ namespace SteamSwitcher.Views
 
         private void DesktopFloatingWindow_LocationChanged(object? sender, EventArgs e)
         {
-            if (_readyToSavePosition && !_locked)
+            if (_readyToSavePosition && !_locked && !_isCollapsed && !_isDragging)
                 PositionChanged?.Invoke(this, (Left, Top));
         }
 
@@ -313,9 +377,14 @@ namespace SteamSwitcher.Views
 
             try
             {
+                _isDragging = true;
                 DragMove();
             }
             catch { }
+            finally
+            {
+                _isDragging = false;
+            }
         }
 
         private void Window_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -370,18 +439,18 @@ namespace SteamSwitcher.Views
                 var b = baseColor.B;
 
                 RootGlass.Background = new LinearGradientBrush(
-                    Color.FromArgb(142, 255, 255, 255),
-                    Color.FromArgb(60, r, g, b),
+                    Color.FromArgb(120, 255, 255, 255),
+                    Color.FromArgb(85, r, g, b),
                     new Point(0, 0), new Point(1, 1));
                 RootGlass.BorderBrush = new LinearGradientBrush(
-                    Color.FromArgb(180, 255, 255, 255),
-                    Color.FromArgb(80, r, g, b),
+                    Color.FromArgb(140, 255, 255, 255),
+                    Color.FromArgb(40, r, g, b),
                     new Point(0, 0), new Point(0, 1));
             }
             else
             {
-                RootGlass.Background = new SolidColorBrush(Color.FromArgb(230, 244, 250, 255));
-                RootGlass.BorderBrush = new SolidColorBrush(Color.FromArgb(176, 255, 255, 255));
+                RootGlass.Background = new SolidColorBrush(Color.FromArgb(235, 15, 17, 26));
+                RootGlass.BorderBrush = new SolidColorBrush(Color.FromArgb(64, 255, 255, 255));
             }
         }
 
@@ -493,7 +562,7 @@ namespace SteamSwitcher.Views
         private Border CreateGameButton(GameListViewModel game)
         {
             int size = _avatarSize;
-            int radius = _roundedMode ? size / 4 : 8;
+            int radius = 8;
             var border = CreateIconShell(size, radius);
             border.ToolTip = $"{game.GameName}\n点击启动 (账号: {game.BindingAccountName ?? "未绑定"})";
             border.Tag = game;
@@ -543,7 +612,7 @@ namespace SteamSwitcher.Views
         private Border CreateQuickLaunchButton(QuickLaunchItem item)
         {
             int size = _avatarSize;
-            int radius = _roundedMode ? size / 4 : 8;
+            int radius = 8;
             var border = CreateIconShell(size, radius);
             border.ToolTip = $"{item.Name}\n{item.ExecutablePath}";
             border.Tag = item;
@@ -591,7 +660,7 @@ namespace SteamSwitcher.Views
         private Border CreateAvatarButton(SteamAccount account)
         {
             int size = _avatarSize;
-            int radius = _roundedMode ? size / 4 : 8;
+            int radius = _roundedMode ? size / 2 : 8;
             var border = CreateIconShell(size, radius);
             border.ToolTip = account.PersonaName;
             border.Tag = account;
@@ -690,8 +759,12 @@ namespace SteamSwitcher.Views
                     : Color.FromArgb(190, 255, 255, 255));
                 if (border.RenderTransform is ScaleTransform scale)
                 {
-                    scale.ScaleX = 1.06;
-                    scale.ScaleY = 1.06;
+                    var anim = new DoubleAnimation(1.08, TimeSpan.FromMilliseconds(150))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    };
+                    scale.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                    scale.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
                 }
             };
 
@@ -702,8 +775,12 @@ namespace SteamSwitcher.Views
                 border.BorderThickness = normalThickness;
                 if (border.RenderTransform is ScaleTransform scale)
                 {
-                    scale.ScaleX = 1;
-                    scale.ScaleY = 1;
+                    var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    };
+                    scale.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                    scale.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
                 }
             };
         }
@@ -719,6 +796,232 @@ namespace SteamSwitcher.Views
                     border.BorderBrush = isCurrent ? _currentBorderBrush : _normalBorderBrush;
                 }
             }
+        }
+
+        private AnchorEdge GetAnchorEdge(out double screenLimit)
+        {
+            screenLimit = 0;
+            double left = Left;
+            double top = Top;
+            double width = ActualWidth > 0 ? ActualWidth : Width;
+            double height = ActualHeight > 0 ? ActualHeight : Height;
+
+            double screenLeft = SystemParameters.VirtualScreenLeft;
+            double screenWidth = SystemParameters.VirtualScreenWidth;
+            double screenTop = SystemParameters.VirtualScreenTop;
+            double screenRight = screenLeft + screenWidth;
+
+            const double threshold = 15;
+
+            if (left - screenLeft <= threshold)
+            {
+                screenLimit = screenLeft;
+                return AnchorEdge.Left;
+            }
+            if (screenRight - (left + width) <= threshold)
+            {
+                screenLimit = screenRight;
+                return AnchorEdge.Right;
+            }
+            if (top - screenTop <= threshold)
+            {
+                screenLimit = screenTop;
+                return AnchorEdge.Top;
+            }
+
+            return AnchorEdge.None;
+        }
+
+        protected override void OnMouseEnter(MouseEventArgs e)
+        {
+            base.OnMouseEnter(e);
+
+            if (!_isCollapsed || _isDragging || _locked) return;
+
+            bool dockEnabled = _viewModel?.DesktopFloatingDockEnabled ?? true;
+            if (!dockEnabled) return;
+
+            var edge = GetAnchorEdge(out double limit);
+            if (edge != AnchorEdge.None)
+            {
+                ExpandWindow(edge, limit);
+            }
+        }
+
+        private void AutoHideTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_isDragging || _locked) return;
+
+            bool dockEnabled = _viewModel?.DesktopFloatingDockEnabled ?? true;
+            if (!dockEnabled)
+            {
+                if (_isCollapsed)
+                {
+                    var edgeLimit = GetAnchorEdge(out double limitVal);
+                    ExpandWindow(edgeLimit, limitVal);
+                }
+                return;
+            }
+
+            bool isMouseOver = IsMouseOver;
+            var edge = GetAnchorEdge(out double limit);
+
+            if (isMouseOver)
+            {
+                if (_isCollapsed)
+                {
+                    ExpandWindow(edge, limit);
+                }
+            }
+            else
+            {
+                if (!_isCollapsed && edge != AnchorEdge.None)
+                {
+                    CollapseWindow(edge, limit);
+                }
+            }
+        }
+
+        private void ExpandWindow(AnchorEdge edge, double limit)
+        {
+            _isCollapsed = false;
+            _autoHideTimer?.Stop();
+
+            double targetPos = 0;
+            DependencyProperty? dp = null;
+
+            if (edge == AnchorEdge.Left)
+            {
+                targetPos = limit;
+                dp = LeftProperty;
+            }
+            else if (edge == AnchorEdge.Right)
+            {
+                targetPos = limit - ActualWidth;
+                dp = LeftProperty;
+            }
+            else if (edge == AnchorEdge.Top)
+            {
+                targetPos = limit;
+                dp = TopProperty;
+            }
+
+            if (_viewModel != null && _viewModel.MinimalMode)
+            {
+                if (dp != null)
+                {
+                    BeginAnimation(dp, null);
+                    if (dp == LeftProperty) Left = targetPos;
+                    else Top = targetPos;
+                }
+
+                BeginAnimation(OpacityProperty, null);
+                Opacity = _normalOpacity;
+
+                _autoHideTimer?.Start();
+                return;
+            }
+
+            if (dp != null)
+            {
+                var anim = new System.Windows.Media.Animation.DoubleAnimation
+                {
+                    To = targetPos,
+                    Duration = TimeSpan.FromMilliseconds(250),
+                    EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                };
+
+                anim.Completed += (s, ev) =>
+                {
+                    BeginAnimation(dp, null);
+                    if (dp == LeftProperty) Left = targetPos;
+                    else Top = targetPos;
+                    _autoHideTimer?.Start();
+                };
+
+                BeginAnimation(dp, anim);
+            }
+
+            var opacityAnim = new DoubleAnimation
+            {
+                To = _normalOpacity,
+                Duration = TimeSpan.FromMilliseconds(200)
+            };
+            opacityAnim.Completed += (s, ev) =>
+            {
+                BeginAnimation(OpacityProperty, null);
+                Opacity = _normalOpacity;
+            };
+            BeginAnimation(OpacityProperty, opacityAnim);
+        }
+
+        private void CollapseWindow(AnchorEdge edge, double limit)
+        {
+            _isCollapsed = true;
+            _autoHideTimer?.Stop();
+
+            double targetPos = 0;
+            DependencyProperty dp = LeftProperty;
+
+            const double visibleThickness = 4;
+
+            if (edge == AnchorEdge.Left)
+            {
+                targetPos = limit - ActualWidth + visibleThickness;
+                dp = LeftProperty;
+            }
+            else if (edge == AnchorEdge.Right)
+            {
+                targetPos = limit - visibleThickness;
+                dp = LeftProperty;
+            }
+            else if (edge == AnchorEdge.Top)
+            {
+                targetPos = limit - ActualHeight + visibleThickness;
+                dp = TopProperty;
+            }
+
+            if (_viewModel != null && _viewModel.MinimalMode)
+            {
+                BeginAnimation(dp, null);
+                if (dp == LeftProperty) Left = targetPos;
+                else Top = targetPos;
+
+                BeginAnimation(OpacityProperty, null);
+                Opacity = 0.25;
+
+                _autoHideTimer?.Start();
+                return;
+            }
+
+            var anim = new System.Windows.Media.Animation.DoubleAnimation
+            {
+                To = targetPos,
+                Duration = TimeSpan.FromMilliseconds(300),
+                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseInOut }
+            };
+
+            anim.Completed += (s, ev) =>
+            {
+                BeginAnimation(dp, null);
+                if (dp == LeftProperty) Left = targetPos;
+                else Top = targetPos;
+                _autoHideTimer?.Start();
+            };
+
+            BeginAnimation(dp, anim);
+
+            var opacityAnim = new DoubleAnimation
+            {
+                To = 0.25,
+                Duration = TimeSpan.FromMilliseconds(250)
+            };
+            opacityAnim.Completed += (s, ev) =>
+            {
+                BeginAnimation(OpacityProperty, null);
+                Opacity = 0.25;
+            };
+            BeginAnimation(OpacityProperty, opacityAnim);
         }
     }
 }

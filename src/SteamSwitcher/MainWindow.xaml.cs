@@ -100,7 +100,7 @@ namespace SteamSwitcher
 
                 int width = (int)(ActualWidth * dpiX);
                 int height = (int)(ActualHeight * dpiY);
-                int radius = (int)(12 * dpiX);
+                int radius = (int)(16 * dpiX);
 
                 if (width <= 0 || height <= 0) return;
 
@@ -139,8 +139,6 @@ namespace SteamSwitcher
             SettingsOffsetXText.Text = _viewModel.TaskbarOffsetX.ToString();
             SettingsOffsetYSlider.Value = _viewModel.TaskbarOffsetY;
             SettingsOffsetYText.Text = _viewModel.TaskbarOffsetY.ToString();
-            SettingsTaskbarWindowSizeSlider.Value = _viewModel.TaskbarWindowSize;
-            SettingsTaskbarWindowSizeText.Text = _viewModel.TaskbarWindowSize.ToString();
             SettingsTaskbarAvatarSlider.Value = _viewModel.TaskbarAvatarSize;
             SettingsTaskbarAvatarText.Text = _viewModel.TaskbarAvatarSize.ToString();
             SettingsFloatingAvatarSlider.Value = _viewModel.DesktopFloatingAvatarSize;
@@ -367,6 +365,7 @@ namespace SteamSwitcher
         {
             AccountView.Visibility = Visibility.Collapsed;
             GameView.Visibility = Visibility.Collapsed;
+            QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Visible;
             SetSidebarActive(SideSettings, SideAccentSettings,
                              SideAccounts, SideAccentAccount,
@@ -628,16 +627,6 @@ namespace SteamSwitcher
                 _taskbarBand.SetOffset(_viewModel.TaskbarOffsetX, _viewModel.TaskbarOffsetY);
         }
 
-        private void SettingsTaskbarWindowSize_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            if (_viewModel == null) return;
-            int val = (int)e.NewValue;
-            _viewModel.TaskbarWindowSize = val;
-            SettingsTaskbarWindowSizeText.Text = val.ToString();
-            if (_taskbarBand != null && _taskbarBand.IsPinned)
-                _taskbarBand.SetWindowSize(val);
-        }
-
         private void ResetLayout_Click(object sender, RoutedEventArgs e)
         {
             _viewModel.TaskbarPosition = Core.TaskbarPosition.Right;
@@ -654,7 +643,6 @@ namespace SteamSwitcher
             SyncTaskbarPositionRadios();
             SettingsOffsetXSlider.Value = _viewModel.TaskbarOffsetX;
             SettingsOffsetYSlider.Value = _viewModel.TaskbarOffsetY;
-            SettingsTaskbarWindowSizeSlider.Value = _viewModel.TaskbarWindowSize;
             SettingsTaskbarAvatarSlider.Value = _viewModel.TaskbarAvatarSize;
             SettingsFloatingOpacitySlider.Value = _viewModel.DesktopFloatingOpacity;
             SettingsFloatingAvatarSlider.Value = _viewModel.DesktopFloatingAvatarSize;
@@ -693,13 +681,23 @@ namespace SteamSwitcher
 
         private void SettingsTaskbarGlass_Changed(object sender, RoutedEventArgs e)
         {
-            if (_taskbarBand != null && _taskbarBand.IsPinned)
-                _taskbarBand.SetGlassEnabled(_viewModel.TaskbarGlassEnabled);
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.TaskbarGlassEnabled = val;
+                if (_taskbarBand != null && _taskbarBand.IsPinned)
+                    _taskbarBand.SetGlassEnabled(val);
+            }
         }
 
         private void SettingsFloatingGlass_Changed(object sender, RoutedEventArgs e)
         {
-            _desktopFloatingWindow?.SetGlassEnabled(_viewModel.DesktopFloatingGlassEnabled);
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.DesktopFloatingGlassEnabled = val;
+                _desktopFloatingWindow?.SetGlassEnabled(val);
+            }
         }
 
         private void GlassColor_Click(object sender, MouseButtonEventArgs e)
@@ -713,13 +711,23 @@ namespace SteamSwitcher
 
         private void SettingsTaskbarRounded_Changed(object sender, RoutedEventArgs e)
         {
-            if (_taskbarBand != null && _taskbarBand.IsPinned)
-                _taskbarBand.SetRoundedMode(_viewModel.TaskbarRoundedMode);
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.TaskbarRoundedMode = val;
+                if (_taskbarBand != null && _taskbarBand.IsPinned)
+                    _taskbarBand.SetRoundedMode(val);
+            }
         }
 
         private void SettingsFloatingRounded_Changed(object sender, RoutedEventArgs e)
         {
-            _desktopFloatingWindow?.SetRoundedMode(_viewModel.DesktopFloatingRoundedMode);
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.DesktopFloatingRoundedMode = val;
+                _desktopFloatingWindow?.SetRoundedMode(val);
+            }
         }
 
         private void ThemeToggle_Changed(object sender, RoutedEventArgs e)
@@ -752,12 +760,22 @@ namespace SteamSwitcher
 
         private void SettingsFloatingTopmost_Changed(object sender, RoutedEventArgs e)
         {
-            _desktopFloatingWindow?.SetTopmostEnabled(_viewModel.DesktopFloatingTopmost);
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.DesktopFloatingTopmost = val;
+                _desktopFloatingWindow?.SetTopmostEnabled(val);
+            }
         }
 
         private void SettingsFloatingLocked_Changed(object sender, RoutedEventArgs e)
         {
-            _desktopFloatingWindow?.SetLocked(_viewModel.DesktopFloatingLocked);
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.DesktopFloatingLocked = val;
+                _desktopFloatingWindow?.SetLocked(val);
+            }
         }
 
         private void SettingsFloatingOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -767,6 +785,114 @@ namespace SteamSwitcher
             _viewModel.DesktopFloatingOpacity = val;
             SettingsFloatingOpacityText.Text = $"{val}%";
             _desktopFloatingWindow?.SetOpacityPercent(val);
+        }
+
+        private void SettingsStartWithWindows_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.StartWithWindows = val;
+            }
+        }
+
+        private void SettingsAutoStartSteam_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.AutoStartSteam = val;
+            }
+        }
+
+        private void SettingsMinimizeToTray_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.MinimizeToTray = val;
+            }
+        }
+
+        private void SettingsAutoScanGames_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.AutoScanGamesOnStartup = val;
+            }
+        }
+
+        private void SettingsConfirmBeforeLaunch_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.ConfirmBeforeGameLaunch = val;
+            }
+        }
+
+        private void SettingsLibraryInjection_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.EnableLibraryInjection = val;
+            }
+        }
+
+        private void SettingsSilentCloseSteam_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.SilentCloseSteam = val;
+            }
+        }
+
+        private void SettingsCheckUpdate_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.CheckUpdateOnStartup = val;
+            }
+        }
+
+        private void SettingsAutoInstallUpdates_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.AutoInstallUpdates = val;
+            }
+        }
+
+        private void SettingsNotificationOnClose_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.ShowNotificationOnSteamClose = val;
+            }
+        }
+
+        private void SettingsMinimalMode_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.MinimalMode = val;
+            }
+        }
+
+        private void SettingsFloatingDock_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                bool val = cb.IsChecked == true;
+                _viewModel.DesktopFloatingDockEnabled = val;
+            }
         }
 
         private void OnSettingsPositionChanged(object? sender, Core.TaskbarPosition position)

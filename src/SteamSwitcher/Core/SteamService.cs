@@ -35,8 +35,26 @@ namespace SteamSwitcher.Core
         public string? SteamPath { get; private set; }
         public string? SteamExePath { get; private set; }
 
+        public string? CustomSteamPath { get; set; }
+        public string? CustomLoginUsersPath { get; set; }
+
+        public void SetCustomPaths(string? customSteamPath, string? customLoginUsersPath)
+        {
+            CustomSteamPath = customSteamPath;
+            CustomLoginUsersPath = customLoginUsersPath;
+            DetectSteamPath();
+        }
+
         public bool DetectSteamPath()
         {
+            if (!string.IsNullOrEmpty(CustomSteamPath) && Directory.Exists(CustomSteamPath))
+            {
+                SteamPath = CustomSteamPath;
+                SteamExePath = Path.Combine(SteamPath, "steam.exe");
+                AppLogger.Info($"Detected Steam path from custom path: {SteamPath}");
+                return true;
+            }
+
             SteamPath = _registryHelper.GetSteamPath();
             SteamExePath = _registryHelper.GetSteamExePath();
 
@@ -343,6 +361,10 @@ namespace SteamSwitcher.Core
 
         public string GetLoginUsersPath()
         {
+            if (!string.IsNullOrEmpty(CustomLoginUsersPath) && File.Exists(CustomLoginUsersPath))
+            {
+                return CustomLoginUsersPath;
+            }
             return Path.Combine(SteamPath ?? "", "config", "loginusers.vdf");
         }
 

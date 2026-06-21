@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6] - 2026-06-21
+
+### Added
+- 页面切换极简自适应：极简模式下（MinimalMode == True）自动停用页面切换动画，实现瞬切，消除了卡顿并提升运行效率。
+
+### Changed
+- 升级暗黑配色主题，底色为极具质感的深暗紫蓝，卡片采用幽蓝色磨砂玻璃卡片质感，主界面加设径向极光渐变背景。
+- 侧边栏按钮和列表项选中态全面重构，支持物理回弹弹性缩放动画与幽蓝色发光外阴影平滑淡入淡出。
+- 任务栏常驻图标大小滑块最大值限制为合理的 40 像素，防止截断任务栏。
+- 将“圆角模式”重命名为“圆形模式”，在开启后账号头像呈现完美的正圆形，而游戏及快启图标固定为精致的 8 像素圆角。
+
+### Fixed
+- 修复“打开其他页面后再打开设置界面底层会出现其他页面”的问题，在视图折叠时强制归零 Opacity，防范硬件加速残留与重叠。
+- 修复任务栏常驻池头像、游戏图标、快速启动图标在加载失败时 Fallback 状态（首字母及闪电图标）被 overlay 遮罩层覆盖而不显示的 Bug。
+
 ## [2.5.2] - 2026-06-14
 
 ### Changed

@@ -222,5 +222,10 @@ namespace SteamSwitcher.Views
         {
             Close();
         }
+
+        private void Minimize_Click(object sender, RoutedEventArgs e)
+        {
+            WindowState = WindowState.Minimized;
+        }
     }
 }

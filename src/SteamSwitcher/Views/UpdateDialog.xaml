@@ -12,7 +12,7 @@
         Topmost="True"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
 
-    <Border Background="{DynamicResource WindowBgBrush}" CornerRadius="12" Padding="20"
+    <Border Background="{DynamicResource WindowBgBrush}" CornerRadius="16" Padding="20"
             BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
         <Grid>
             <Grid.RowDefinitions>

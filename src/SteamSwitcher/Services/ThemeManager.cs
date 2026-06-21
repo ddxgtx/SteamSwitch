@@ -14,12 +14,12 @@ namespace SteamSwitcher.Services
             var d = theme == "Dark";
 
             // Window / Card backgrounds
-            Set(r, "WindowBgBrush", d ? C(0x19, 0x19, 0x1C) : C(0xF5, 0xF5, 0xF7));
-            Set(r, "CardBgBrush", d ? CA(30, 255, 255, 255) : C(0xFF, 0xFF, 0xFF));
-            Set(r, "CardBgAltBrush", d ? CA(20, 255, 255, 255) : C(0xF0, 0xF0, 0xF2));
+            Set(r, "WindowBgBrush", d ? C(0x0E, 0x0F, 0x16) : C(0xF5, 0xF5, 0xF7));
+            Set(r, "CardBgBrush", d ? CA(16, 120, 160, 255) : C(0xFF, 0xFF, 0xFF));
+            Set(r, "CardBgAltBrush", d ? CA(12, 120, 160, 255) : C(0xF0, 0xF0, 0xF2));
 
             // Sidebar
-            Set(r, "SidebarBgBrush", d ? C(0x19, 0x19, 0x1C) : C(0xEB, 0xEB, 0xED));
+            Set(r, "SidebarBgBrush", d ? C(0x07, 0x08, 0x0D) : C(0xEB, 0xEB, 0xED));
             Set(r, "SidebarActiveBgBrush", d ? CA(26, 10, 132, 255) : CA(40, 10, 132, 255));
             Set(r, "SidebarActiveFgBrush", d ? C(0x0A, 0x84, 0xFF) : C(0x00, 0x66, 0xCC));
             Set(r, "SidebarInactiveFgBrush", d ? C(0x8E, 0x8E, 0x96) : C(0x6E, 0x6E, 0x76));
@@ -34,7 +34,7 @@ namespace SteamSwitcher.Services
             Set(r, "AccentBgBrush", d ? CA(26, 10, 132, 255) : CA(20, 0, 102, 204));
 
             // Border / Separator
-            Set(r, "BorderBrush", d ? C(0x2C, 0x2C, 0x2E) : C(0xDD, 0xDD, 0xDF));
+            Set(r, "BorderBrush", d ? C(0x16, 0x17, 0x22) : C(0xDD, 0xDD, 0xDF));
             Set(r, "SeparatorBrush", d ? CA(34, 255, 255, 255) : CA(30, 0, 0, 0));
 
             // Input / Control backgrounds

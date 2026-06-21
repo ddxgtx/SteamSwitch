@@ -70,8 +70,15 @@
             <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
             <Setter Property="BorderThickness" Value="0"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                <Border Background="{TemplateBinding Background}" x:Name="bg"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="Background" Value="#E81123"/><Setter Property="Foreground" Value="White"/></Trigger></ControlTemplate.Triggers>
+                <Border Background="{TemplateBinding Background}" x:Name="bg">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="bg" Property="Background" Value="#E81123"/>
+                        <Setter Property="Foreground" Value="White"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
         </Style>
 
@@ -80,8 +87,15 @@
             <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
             <Setter Property="BorderThickness" Value="0"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                <Border Background="{TemplateBinding Background}" x:Name="bg"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="Background" Value="{DynamicResource HoverBgBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/></Trigger></ControlTemplate.Triggers>
+                <Border Background="{TemplateBinding Background}" CornerRadius="4" x:Name="bg">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="bg" Property="Background" Value="{DynamicResource HoverBgBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
         </Style>
 
@@ -90,78 +104,344 @@
             <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
             <Setter Property="BorderThickness" Value="0"/><Setter Property="FontSize" Value="14"/><Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                <Border Background="{TemplateBinding Background}" CornerRadius="6" x:Name="bg"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="Background" Value="{DynamicResource HoverBgBrush}"/><Setter Property="Foreground" Value="White"/></Trigger></ControlTemplate.Triggers>
-            </ControlTemplate></Setter.Value></Setter>
-        </Style>
-
-        <Style x:Key="PrimaryBtn" TargetType="Button">
-            <Setter Property="Height" Value="38"/><Setter Property="Background" Value="#0A84FF"/><Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontWeight" Value="Medium"/><Setter Property="FontSize" Value="13"/><Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                <Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="b"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                <Border Background="{TemplateBinding Background}" CornerRadius="6" x:Name="bg">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
                 <ControlTemplate.Triggers>
-                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#409CFF"/></Trigger>
-                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Background" Value="#0066CC"/></Trigger>
-                    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Background" Value="{DynamicResource SelectedBgBrush2}"/><Setter Property="Foreground" Value="#55FFFFFF"/></Trigger>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="bg" Property="Background" Value="{DynamicResource HoverBgBrush}"/>
+                        <Setter Property="Foreground" Value="White"/>
+                    </Trigger>
                 </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
         </Style>
 
+        <!-- 主按钮 (带微缩放动画与平滑过渡) -->
+        <Style x:Key="PrimaryBtn" TargetType="Button">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+                <Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="b">
+                    <Border.RenderTransform>
+                        <ScaleTransform x:Name="btnScale" ScaleX="1" ScaleY="1"/>
+                    </Border.RenderTransform>
+                    <Grid>
+                        <!-- Hover 亮色遮罩 -->
+                        <Border CornerRadius="10" Background="#24FFFFFF" Opacity="0" x:Name="hoverMask"/>
+                        <!-- Pressed 暗色遮罩 -->
+                        <Border CornerRadius="10" Background="#14000000" Opacity="0" x:Name="pressedMask"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverMask" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.03" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.03" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverMask" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.0" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="pressedMask" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.05"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.05"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.05"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="pressedMask" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.03" Duration="0:0:0.1"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.03" Duration="0:0:0.1"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter TargetName="b" Property="Background" Value="{DynamicResource BtnDisabledBgBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource BtnDisabledFgBrush}"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+
+        <!-- 次要按钮 -->
         <Style x:Key="SecondaryBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
             <Setter Property="Background" Value="{DynamicResource CardBgBrush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource BtnSecondaryFgBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                <Border Background="{TemplateBinding Background}" CornerRadius="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" x:Name="b"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                <Border Background="{TemplateBinding Background}" CornerRadius="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" x:Name="b">
+                    <Border.RenderTransform>
+                        <ScaleTransform x:Name="btnScale" ScaleX="1" ScaleY="1"/>
+                    </Border.RenderTransform>
+                    <Grid>
+                        <Border CornerRadius="10" Background="{DynamicResource HoverBgBrush}" Opacity="0" x:Name="hoverMask"/>
+                        <Border CornerRadius="10" Background="#10000000" Opacity="0" x:Name="pressedMask"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
                 <ControlTemplate.Triggers>
-                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource BtnHoverBgBrush}"/></Trigger>
-                    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Background" Value="{DynamicResource BtnDisabledBgBrush}"/><Setter Property="Foreground" Value="{DynamicResource BtnDisabledFgBrush}"/></Trigger>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverMask" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.03" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.03" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverMask" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.0" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="pressedMask" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.05"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.05"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.05"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="pressedMask" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.03" Duration="0:0:0.1"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.03" Duration="0:0:0.1"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter TargetName="b" Property="Background" Value="{DynamicResource BtnDisabledBgBrush}"/>
+                        <Setter TargetName="b" Property="BorderBrush" Value="Transparent"/>
+                        <Setter Property="Foreground" Value="{DynamicResource BtnDisabledFgBrush}"/>
+                    </Trigger>
                 </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
         </Style>
 
+        <!-- 危险动作按钮 (带微缩放动画与平滑过渡) -->
+        <Style x:Key="DangerBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
+            <Setter Property="Background" Value="#FF453A"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+                <Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="b">
+                    <Border.RenderTransform>
+                        <ScaleTransform x:Name="btnScale" ScaleX="1" ScaleY="1"/>
+                    </Border.RenderTransform>
+                    <Grid>
+                        <!-- Hover 亮色遮罩 -->
+                        <Border CornerRadius="10" Background="#24FFFFFF" Opacity="0" x:Name="hoverMask"/>
+                        <!-- Pressed 暗色遮罩 -->
+                        <Border CornerRadius="10" Background="#14000000" Opacity="0" x:Name="pressedMask"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverMask" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.03" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.03" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverMask" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.0" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="pressedMask" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.05"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="0.95" Duration="0:0:0.05"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="0.95" Duration="0:0:0.05"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="pressedMask" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.0" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter TargetName="b" Property="Background" Value="{DynamicResource BtnDisabledBgBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource BtnDisabledFgBrush}"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+
+        <!-- 刷新按钮 (悬浮时旋转 360 度交互) -->
         <Style x:Key="BtnRefresh" TargetType="Button">
             <Setter Property="Width" Value="36"/><Setter Property="Height" Value="36"/><Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="FontSize" Value="16"/><Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                <Border Background="{TemplateBinding Background}" CornerRadius="8" x:Name="b"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/></Trigger></ControlTemplate.Triggers>
+                <Border Background="{TemplateBinding Background}" CornerRadius="8" x:Name="b">
+                    <Border.RenderTransform>
+                        <RotateTransform x:Name="rotate" Angle="0"/>
+                    </Border.RenderTransform>
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="rotate" Storyboard.TargetProperty="Angle" To="360" Duration="0:0:0.6">
+                                        <DoubleAnimation.EasingFunction>
+                                            <QuadraticEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="rotate" Storyboard.TargetProperty="Angle" To="0" Duration="0:0:0.4"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
         </Style>
 
+        <!-- 复选框 (打勾缩放淡入动效) -->
         <Style x:Key="AppCheckBox" TargetType="CheckBox">
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
                 <StackPanel Orientation="Horizontal">
                     <Border Width="18" Height="18" CornerRadius="5" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1.5" x:Name="cb">
-                        <TextBlock Text="✓" Foreground="White" FontSize="11" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" x:Name="ck"/>
+                        <TextBlock Text="✓" Foreground="White" FontSize="11" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" 
+                                   Opacity="0" x:Name="ck" RenderTransformOrigin="0.5,0.5">
+                            <TextBlock.RenderTransform>
+                                <ScaleTransform ScaleX="0" ScaleY="0" x:Name="markScale"/>
+                            </TextBlock.RenderTransform>
+                        </TextBlock>
                     </Border>
                     <ContentPresenter VerticalAlignment="Center" Margin="10,0,0,0"/>
                 </StackPanel>
                 <ControlTemplate.Triggers>
-                    <Trigger Property="IsChecked" Value="True"><Setter TargetName="cb" Property="Background" Value="#0A84FF"/><Setter TargetName="cb" Property="BorderBrush" Value="#0A84FF"/><Setter TargetName="ck" Property="Visibility" Value="Visible"/></Trigger>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="cb" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                        <Setter TargetName="cb" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="ck" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="markScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="markScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="ck" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="markScale" Storyboard.TargetProperty="ScaleX" To="0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="markScale" Storyboard.TargetProperty="ScaleY" To="0" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
                 </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
         </Style>
 
+        <!-- 开关 Switch (平滑平移动画) -->
         <Style x:Key="SwitchToggle" TargetType="CheckBox">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
-                <Border Width="44" Height="25" CornerRadius="12.5" Background="{DynamicResource ToggleTrackBgBrush}"
+                <Border Width="44" Height="24" CornerRadius="12" Background="{DynamicResource ToggleTrackBgBrush}"
                         BorderBrush="{DynamicResource ToggleTrackBorderBrush}" BorderThickness="1" x:Name="track">
-                    <Ellipse Width="18" Height="18" Fill="{DynamicResource ToggleThumbBrush}" HorizontalAlignment="Left" Margin="3,0,0,0" x:Name="thumb"/>
+                    <Ellipse Width="16" Height="16" Fill="{DynamicResource ToggleThumbBrush}" HorizontalAlignment="Left" Margin="3,0,3,0" x:Name="thumb" RenderTransformOrigin="0.5,0.5">
+                        <Ellipse.RenderTransform>
+                            <TranslateTransform X="0" x:Name="trans"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
                     <Border.Effect>
-                        <DropShadowEffect Color="#5B9BFF" BlurRadius="8" ShadowDepth="0" Opacity="0.10"/>
+                        <DropShadowEffect Color="#007AFF" BlurRadius="8" ShadowDepth="0" Opacity="0.08"/>
                     </Border.Effect>
                 </Border>
                 <ControlTemplate.Triggers>
                     <Trigger Property="IsChecked" Value="True">
                         <Setter TargetName="track" Property="Background" Value="{DynamicResource ToggleTrackCheckedBgBrush}"/>
                         <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource ToggleTrackCheckedBorderBrush}"/>
-                        <Setter TargetName="thumb" Property="HorizontalAlignment" Value="Right"/>
-                        <Setter TargetName="thumb" Property="Margin" Value="0,0,3,0"/>
                         <Setter TargetName="thumb" Property="Fill" Value="White"/>
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="X" To="20" Duration="0:0:0.18">
+                                        <DoubleAnimation.EasingFunction>
+                                            <QuadraticEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.18">
+                                        <DoubleAnimation.EasingFunction>
+                                            <QuadraticEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
                     </Trigger>
                     <Trigger Property="IsMouseOver" Value="True">
                         <Setter TargetName="track" Property="Opacity" Value="0.9"/>
@@ -173,49 +453,141 @@
             </ControlTemplate></Setter.Value></Setter>
         </Style>
 
+        <!-- 单选框 -->
         <Style x:Key="SettingsRadio" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Setter Property="FontSize" Value="11"/><Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
                 <StackPanel Orientation="Horizontal">
                     <Border Width="16" Height="16" CornerRadius="8" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" x:Name="rb">
-                        <Ellipse Width="7" Height="7" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" x:Name="dot"/>
+                        <Ellipse Width="6" Height="6" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Center" 
+                                 Opacity="0" x:Name="dot" RenderTransformOrigin="0.5,0.5">
+                            <Ellipse.RenderTransform>
+                                <ScaleTransform ScaleX="0" ScaleY="0" x:Name="dotScale"/>
+                            </Ellipse.RenderTransform>
+                        </Ellipse>
                     </Border>
                     <ContentPresenter VerticalAlignment="Center" Margin="6,0,0,0"/>
                 </StackPanel>
                 <ControlTemplate.Triggers>
-                    <Trigger Property="IsChecked" Value="True"><Setter TargetName="rb" Property="Background" Value="#0A84FF"/><Setter TargetName="rb" Property="BorderBrush" Value="#0A84FF"/><Setter TargetName="dot" Property="Visibility" Value="Visible"/></Trigger>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="rb" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                        <Setter TargetName="rb" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="dot" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="dotScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="dotScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="dot" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="dotScale" Storyboard.TargetProperty="ScaleX" To="0" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="dotScale" Storyboard.TargetProperty="ScaleY" To="0" Duration="0:0:0.12"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
                 </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
         </Style>
 
+        <!-- 账号列表容器 -->
         <Style x:Key="AccountList" TargetType="ListBox">
             <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="8,0"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
             <Setter Property="ItemContainerStyle"><Setter.Value><Style TargetType="ListBoxItem">
                 <Setter Property="Height" Value="76"/><Setter Property="Margin" Value="0,2"/><Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/>
                 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
-                    <Border Background="{TemplateBinding Background}" CornerRadius="14" x:Name="b"><ContentPresenter/></Border>
+                    <Border Background="{TemplateBinding Background}" CornerRadius="14" BorderThickness="1" BorderBrush="Transparent"
+                            RenderTransformOrigin="0.5,0.5" x:Name="b">
+                        <Border.RenderTransform>
+                            <TranslateTransform X="0" Y="0" x:Name="trans"/>
+                        </Border.RenderTransform>
+                        <Border.Effect>
+                            <DropShadowEffect Color="#000000" BlurRadius="6" ShadowDepth="1" Opacity="0" x:Name="shadow"/>
+                        </Border.Effect>
+                        <Grid>
+                            <Border CornerRadius="14" Background="{DynamicResource HoverBgBrush}" Opacity="0" x:Name="hoverBg"/>
+                            <Border CornerRadius="14" Background="{DynamicResource SelectedBgBrush}" Opacity="0" x:Name="selectBg">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#0084FF" BlurRadius="12" ShadowDepth="0" Opacity="0.25"/>
+                                </Border.Effect>
+                            </Border>
+                            <ContentPresenter/>
+                        </Grid>
+                    </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger>
-                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource SelectedBgBrush}"/></Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="Y" To="-2" Duration="0:0:0.15">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="Opacity" To="0.15" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="BlurRadius" To="12" Duration="0:0:0.15"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="Y" To="0" Duration="0:0:0.15">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                        <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="BlurRadius" To="6" Duration="0:0:0.15"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="selectBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="selectBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate></Setter.Value></Setter>
             </Style></Setter.Value></Setter>
         </Style>
 
+        <!-- 账号项模板 -->
         <DataTemplate x:Key="AccountItem">
             <Grid Margin="14,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="50"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Border Grid.Column="0" Width="46" Height="46" CornerRadius="12" Background="{DynamicResource CardBgBrush}" VerticalAlignment="Center">
-                    <Border.Clip><RectangleGeometry Rect="0,0,46,46" RadiusX="12" RadiusY="12"/></Border.Clip>
+                <Border Grid.Column="0" Width="46" Height="46" CornerRadius="12" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" VerticalAlignment="Center">
+                    <Border.Clip><RectangleGeometry Rect="0,0,44,44" RadiusX="11" RadiusY="11"/></Border.Clip>
                     <Image Source="{Binding Avatar}" Stretch="UniformToFill"/>
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0,0,0">
-                    <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="Medium"/>
+                    <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold"/>
                     <TextBlock Text="{Binding Username}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,4,0,0"/>
                 </StackPanel>
-                <Border Grid.Column="2" VerticalAlignment="Center" Margin="8,0" Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}" Background="#2230D158" CornerRadius="8" Padding="10,5">
-                    <TextBlock Text="当前" Foreground="#30D158" FontSize="11" FontWeight="SemiBold"/>
+                <Border Grid.Column="2" VerticalAlignment="Center" Margin="8,0" Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}" 
+                        Style="{StaticResource StatusBadgeStyle}" CornerRadius="8" Padding="10,5">
+                    <TextBlock Text="当前" Foreground="{DynamicResource SuccessFgBrush}" FontSize="11" FontWeight="SemiBold"/>
                 </Border>
                 <ToggleButton Grid.Column="3" VerticalAlignment="Center" IsChecked="{Binding IsPinned}" Width="36" Height="36" Cursor="Hand" Background="Transparent">
                     <ToggleButton.Style><Style TargetType="ToggleButton"><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
@@ -251,8 +623,8 @@
                                             <Border Background="{DynamicResource CardBgAltBrush}" CornerRadius="5" Padding="7,2">
                                                 <TextBlock Text="{Binding AppId, StringFormat='AppID {0}'}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10"/>
                                             </Border>
-                                            <Border Background="{DynamicResource SuccessBgBrush}" CornerRadius="5" Padding="7,2" Margin="6,0,0,0"
-                                                    Visibility="{Binding HasBinding, Converter={StaticResource BoolToVis}}">
+                                            <Border Margin="6,0,0,0" Visibility="{Binding HasBinding, Converter={StaticResource BoolToVis}}"
+                                                    Style="{StaticResource StatusBadgeStyle}" CornerRadius="5" Padding="7,2">
                                                 <TextBlock Text="已绑定" Foreground="#30D158" FontSize="10" FontWeight="SemiBold"/>
                                             </Border>
                                         </StackPanel>
@@ -340,14 +712,185 @@
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
-                <Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="b">
-                    <ContentPresenter/>
+                <Border CornerRadius="10" RenderTransformOrigin="0.5,0.5" x:Name="b">
+                    <Border.RenderTransform>
+                        <TranslateTransform X="0" Y="0" x:Name="trans"/>
+                    </Border.RenderTransform>
+                    <Border.Effect>
+                        <DropShadowEffect Color="#000000" BlurRadius="6" ShadowDepth="1" Opacity="0" x:Name="shadow"/>
+                    </Border.Effect>
+                    <Grid>
+                        <Border CornerRadius="10" Background="{DynamicResource HoverBgBrush}" Opacity="0" x:Name="hoverBg"/>
+                        <Border CornerRadius="10" Background="{DynamicResource SelectedBgBrush2}" Opacity="0" x:Name="selectBg">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#0084FF" BlurRadius="12" ShadowDepth="0" Opacity="0.25"/>
+                            </Border.Effect>
+                        </Border>
+                        <ContentPresenter/>
+                    </Grid>
                 </Border>
                 <ControlTemplate.Triggers>
-                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger>
-                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource SelectedBgBrush2}"/></Trigger>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                    <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="Y" To="-2" Duration="0:0:0.15">
+                                        <DoubleAnimation.EasingFunction>
+                                            <CubicEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="Opacity" To="0.15" Duration="0:0:0.15"/>
+                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="BlurRadius" To="12" Duration="0:0:0.15"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                    <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="Y" To="0" Duration="0:0:0.15">
+                                        <DoubleAnimation.EasingFunction>
+                                            <CubicEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="BlurRadius" To="6" Duration="0:0:0.15"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                    <Trigger Property="IsSelected" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="selectBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="selectBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
                 </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value></Setter>
+        </Style>
+
+        <!-- 快速启动列表项样式 -->
+        <Style x:Key="QuickLaunchListItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+                <Border CornerRadius="10" RenderTransformOrigin="0.5,0.5" x:Name="b">
+                    <Border.RenderTransform>
+                        <TranslateTransform X="0" Y="0" x:Name="trans"/>
+                    </Border.RenderTransform>
+                    <Border.Effect>
+                        <DropShadowEffect Color="#000000" BlurRadius="6" ShadowDepth="1" Opacity="0" x:Name="shadow"/>
+                    </Border.Effect>
+                    <Grid>
+                        <Border CornerRadius="10" Background="{DynamicResource HoverBgBrush}" Opacity="0" x:Name="hoverBg"/>
+                        <Border CornerRadius="10" Background="{DynamicResource SelectedBgBrush2}" Opacity="0" x:Name="selectBg">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#0084FF" BlurRadius="12" ShadowDepth="0" Opacity="0.25"/>
+                            </Border.Effect>
+                        </Border>
+                        <ContentPresenter/>
+                    </Grid>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                    <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="Y" To="-2" Duration="0:0:0.15">
+                                        <DoubleAnimation.EasingFunction>
+                                            <CubicEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="Opacity" To="0.15" Duration="0:0:0.15"/>
+                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="BlurRadius" To="12" Duration="0:0:0.15"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hoverBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                    <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="Y" To="0" Duration="0:0:0.15">
+                                        <DoubleAnimation.EasingFunction>
+                                            <CubicEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="BlurRadius" To="6" Duration="0:0:0.15"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                    <Trigger Property="IsSelected" Value="True">
+                        <Trigger.EnterActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="selectBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="selectBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </Trigger.ExitActions>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+
+        <!-- 页面切换渐入和向上滑入过渡动效 -->
+        <Style x:Key="FadeInUpViewStyle" TargetType="Grid">
+            <Setter Property="Opacity" Value="1"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value>
+                    <TranslateTransform Y="0"/>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="Visibility" Value="Collapsed">
+                    <Setter Property="Opacity" Value="0"/>
+                </Trigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding Visibility, RelativeSource={RelativeSource Self}}" Value="Visible"/>
+                        <Condition Binding="{Binding DataContext.MinimalMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="False"/>
+                    </MultiDataTrigger.Conditions>
+                    <MultiDataTrigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.22">
+                                    <DoubleAnimation.EasingFunction>
+                                        <CubicEase EasingMode="EaseOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TranslateTransform.Y)" From="12" To="0" Duration="0:0:0.22">
+                                    <DoubleAnimation.EasingFunction>
+                                        <CubicEase EasingMode="EaseOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </MultiDataTrigger.EnterActions>
+                </MultiDataTrigger>
+            </Style.Triggers>
         </Style>
 
         <!-- 圆角调整大小手柄 -->
@@ -370,191 +913,310 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- 苹果风格侧边栏按钮样式 -->
+        <Style x:Key="AppleSidebarBtnStyle" TargetType="Button">
+            <Setter Property="Width" Value="52"/>
+            <Setter Property="Height" Value="52"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource SidebarInactiveFgBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <!-- 苹果风格 12px 圆角胶囊容器 -->
+                        <Border Background="{TemplateBinding Background}" CornerRadius="12" x:Name="b" RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="btnScale" ScaleX="1" ScaleY="1"/>
+                            </Border.RenderTransform>
+                            <Border.Effect>
+                                <DropShadowEffect x:Name="sidebarShadow" Color="#0084FF" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                            </Border.Effect>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!-- 悬停时如果是未选中状态，显示轻微悬浮灰 -->
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="Background" Value="Transparent"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/>
+                            </MultiTrigger>
+                            
+                            <!-- 悬停缩放动画 -->
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.04" Duration="0:0:0.15">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.04" Duration="0:0:0.15">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.0" Duration="0:0:0.15">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.0" Duration="0:0:0.15">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+
+                            <!-- 点击按压收缩动画 -->
+                            <Trigger Property="IsPressed" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="0.94" Duration="0:0:0.08">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="0.94" Duration="0:0:0.08">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleX" To="1.0" Duration="0:0:0.12">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="btnScale" Storyboard.TargetProperty="ScaleY" To="1.0" Duration="0:0:0.12">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+
+                            <!-- 选中态（FontWeight为SemiBold时）冰蓝色呼吸外发光阴影 -->
+                            <Trigger Property="FontWeight" Value="SemiBold">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="sidebarShadow" Storyboard.TargetProperty="Opacity" To="0.3" Duration="0:0:0.2"/>
+                                            <DoubleAnimation Storyboard.TargetName="sidebarShadow" Storyboard.TargetProperty="BlurRadius" To="12" Duration="0:0:0.2"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="sidebarShadow" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/>
+                                            <DoubleAnimation Storyboard.TargetName="sidebarShadow" Storyboard.TargetProperty="BlurRadius" To="0" Duration="0:0:0.2"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
-    <Border x:Name="RootBorder" Background="{DynamicResource WindowBgBrush}" CornerRadius="12" ClipToBounds="True">
+    <Border x:Name="RootBorder" Background="{DynamicResource WindowBgBrush}" CornerRadius="16" ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
-            <!-- 标题栏 -->
-            <Border Grid.Row="0" Background="{DynamicResource WindowBgBrush}" Padding="0">
-                <Grid Height="40">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <!-- 窗口底部星光溢光背景层 (极轻度发光叠加) -->
+            <Border Grid.RowSpan="3" IsHitTestVisible="False" Opacity="0.08" CornerRadius="16" ClipToBounds="True">
+                <Border.Background>
+                    <RadialGradientBrush Center="0.85,0.15" GradientOrigin="0.85,0.15" RadiusX="0.7" RadiusY="0.7">
+                        <GradientStop Color="#007AFF" Offset="0"/>
+                        <GradientStop Color="Transparent" Offset="1"/>
+                    </RadialGradientBrush>
+                </Border.Background>
+            </Border>
+            <Border Grid.RowSpan="3" IsHitTestVisible="False" Opacity="0.06" CornerRadius="16" ClipToBounds="True">
+                <Border.Background>
+                    <RadialGradientBrush Center="0.15,0.85" GradientOrigin="0.15,0.85" RadiusX="0.8" RadiusY="0.8">
+                        <GradientStop Color="#5856D6" Offset="0"/>
+                        <GradientStop Color="Transparent" Offset="1"/>
+                    </RadialGradientBrush>
+                </Border.Background>
+            </Border>
+
+            <!-- 标题栏 (Windows 现代简约风) -->
+            <Border Grid.Row="0" Background="{DynamicResource SidebarBgBrush}" Padding="0">
+                <Grid Height="44">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <!-- 左侧：应用图标与标题 -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
-                        <Image Source="Resources/icon.png" Width="24" Height="24" Margin="0,0,10,0" RenderOptions.BitmapScalingMode="HighQuality"/>
-                        <TextBlock Text="Steam" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Text=" Switch" FontSize="15" FontWeight="Light" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                        <Image Source="Resources/icon.png" Width="18" Height="18" Margin="0,0,8,0" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <TextBlock Text="Steam" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text=" Switch" FontSize="12" FontWeight="Light" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <StackPanel Grid.Column="2" Orientation="Horizontal">
-                        <Button Content="↻" Style="{StaticResource BtnRefresh}" Command="{Binding RefreshCommand}" ToolTip="刷新"/>
-                        <Button Content="─" Style="{StaticResource BtnWindow}" Click="Minimize_Click"/>
-                        <Button Content="□" Style="{StaticResource BtnWindow}" Click="Maximize_Click"/>
-                        <Button Content="✕" Style="{StaticResource BtnClose}" Click="Close_Click"/>
+
+                    <!-- 中间留空 (可用作拖动区域) -->
+                    <Grid Grid.Column="1"/>
+
+                    <!-- 右侧：刷新及控制按钮 (Windows 11 现代简约) -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Stretch">
+                        <Button Content="↻" Style="{StaticResource BtnWindow}" Command="{Binding RefreshCommand}" ToolTip="刷新" Width="40" Height="44"/>
+                        <Button Content="─" Style="{StaticResource BtnWindow}" Click="Minimize_Click" ToolTip="最小化" Width="46" Height="44"/>
+                        <Button Content="✕" Style="{StaticResource BtnClose}" Click="Close_Click" ToolTip="关闭" Width="46" Height="44"/>
                     </StackPanel>
                 </Grid>
             </Border>
             <Border Grid.Row="0" Height="0.5" VerticalAlignment="Bottom" Background="{DynamicResource BorderBrush}"/>
 
-            <!-- 主体 -->
+            <!-- 主体 (左右分栏，侧边栏通底) -->
             <Grid Grid.Row="1">
-                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
 
-                <!-- 统计卡片 -->
-                <Grid Grid.Row="0" Margin="16,10,16,8">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.4*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Background="{DynamicResource CardBgBrush}" CornerRadius="10" Padding="14,11" Margin="0,0,6,0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                        <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="当前账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                <TextBlock Text="{Binding CurrentAccountName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                            <Border Grid.Column="1" Background="{DynamicResource SuccessBgBrush}" CornerRadius="8" Padding="9,5" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding SteamStateText}" Foreground="{DynamicResource SuccessFgBrush}" FontSize="11" FontWeight="SemiBold"/>
-                            </Border>
-                        </Grid>
-                    </Border>
-                    <Border Grid.Column="1" Background="{DynamicResource CardBgBrush}" CornerRadius="10" Padding="14,11" Margin="6,0,6,0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                        <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                <TextBlock Text="{Binding AccountCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1">
-                                <TextBlock Text="绑定" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                <TextBlock Text="{Binding BindingCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-                    <Border Grid.Column="2" Background="{DynamicResource CardBgBrush}" CornerRadius="10" Padding="14,11" Margin="6,0,0,0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                        <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                <TextBlock Text="{Binding GameCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1">
-                                <TextBlock Text="固定" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                <TextBlock Text="{Binding PinnedCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
-                            </StackPanel>
-                            <TextBlock Grid.ColumnSpan="2" Text="{Binding InjectorStateText}" Foreground="{DynamicResource AccentBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Bottom"/>
-                        </Grid>
-                    </Border>
-                </Grid>
-
-                <!-- 库界面注入 -->
-                <Border Grid.Row="1" Background="{DynamicResource CardBgBrush}" CornerRadius="8" Padding="10,8" Margin="16,0,16,8" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                    <Grid>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock Text="库界面游戏启动" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
-                            <TextBlock Text="在 Steam 库当前游戏旁选择账号，之后点 [启动] 自动切换并运行。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"/>
-                            <TextBlock Text="⚠️ 开启调试端口，存在账号封禁风险" Foreground="#FF9500" FontSize="11" Margin="0,3,0,0"/>
-                        </StackPanel>
-                        <Button Grid.Column="1" Content="注入" Command="{Binding StartInjectorCommand}"
-                                IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
-                                Style="{StaticResource SecondaryBtn}" Width="64" Height="32" Margin="10,0,0,0"/>
-                    </Grid>
-                </Border>
-
-                <!-- 侧边栏 + 内容 -->
-                <Grid Grid.Row="2" Margin="0,0,0,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0" Width="68" Background="{DynamicResource SidebarBgBrush}">
-                        <DockPanel Margin="10,14,10,14" LastChildFill="False">
-                            <StackPanel DockPanel.Dock="Top">
-                                <Grid Margin="0,0,0,6">
-                                    <Border x:Name="SideAccentAccount" Width="3" CornerRadius="2" Background="#0A84FF" HorizontalAlignment="Left" Margin="-10,0,0,0"/>
-                                    <Button x:Name="SideAccounts" Width="48" Height="48" Cursor="Hand" Click="SideAccounts_Click">
-                                        <Button.Style><Style TargetType="Button">
-                                            <Setter Property="Background" Value="{DynamicResource SelectedBgBrush}"/><Setter Property="Foreground" Value="#0A84FF"/>
-                                            <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="BorderThickness" Value="0"/><Setter Property="ToolTip" Value="账号列表"/>
-                                            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                                                <Border Background="{TemplateBinding Background}" CornerRadius="12" x:Name="b">
-                                                    <StackPanel>
-                                                        <TextBlock Text="⚡" FontSize="17" HorizontalAlignment="Center"/>
-                                                        <TextBlock Text="账号" FontSize="10" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                                    </StackPanel>
-                                                </Border>
-                                                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#24FFFFFF"/></Trigger></ControlTemplate.Triggers>
-                                            </ControlTemplate></Setter.Value></Setter>
-                                        </Style></Button.Style>
-                                    </Button>
-                                </Grid>
-                                <Grid Margin="0,0,0,6">
-                                    <Border x:Name="SideAccentGame" Width="3" CornerRadius="2" Background="Transparent" HorizontalAlignment="Left" Margin="-10,0,0,0"/>
-                                    <Button x:Name="SideGames" Width="48" Height="48" Cursor="Hand" Click="SideGames_Click">
-                                        <Button.Style><Style TargetType="Button">
-                                            <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#8E8E96"/>
-                                            <Setter Property="FontWeight" Value="Normal"/><Setter Property="BorderThickness" Value="0"/><Setter Property="ToolTip" Value="游戏绑定"/>
-                                            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                                                <Border Background="{TemplateBinding Background}" CornerRadius="12" x:Name="b">
-                                                    <StackPanel>
-                                                        <TextBlock Text="🎮" FontSize="17" HorizontalAlignment="Center"/>
-                                                        <TextBlock Text="游戏" FontSize="10" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                                    </StackPanel>
-                                                </Border>
-                                                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger></ControlTemplate.Triggers>
-                                            </ControlTemplate></Setter.Value></Setter>
-                                        </Style></Button.Style>
-                                    </Button>
-                                </Grid>
-                                <Grid Margin="0,0,0,6">
-                                    <Border x:Name="SideAccentQuickLaunch" Width="3" CornerRadius="2" Background="Transparent" HorizontalAlignment="Left" Margin="-10,0,0,0"/>
-                                    <Button x:Name="SideQuickLaunch" Width="48" Height="48" Cursor="Hand" Click="SideQuickLaunch_Click">
-                                        <Button.Style><Style TargetType="Button">
-                                            <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#8E8E96"/>
-                                            <Setter Property="FontWeight" Value="Normal"/><Setter Property="BorderThickness" Value="0"/><Setter Property="ToolTip" Value="快速启动"/>
-                                            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                                                <Border Background="{TemplateBinding Background}" CornerRadius="12" x:Name="b">
-                                                    <StackPanel>
-                                                        <TextBlock Text="🚀" FontSize="17" HorizontalAlignment="Center"/>
-                                                        <TextBlock Text="快启" FontSize="10" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                                    </StackPanel>
-                                                </Border>
-                                                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger></ControlTemplate.Triggers>
-                                            </ControlTemplate></Setter.Value></Setter>
-                                        </Style></Button.Style>
-                                    </Button>
-                                </Grid>
-                            </StackPanel>
-
-                            <Grid DockPanel.Dock="Bottom">
-                                <Border x:Name="SideAccentSettings" Width="3" CornerRadius="2" Background="Transparent" HorizontalAlignment="Left" Margin="-10,0,0,0"/>
-                                <Button x:Name="SideSettings" Width="48" Height="48" Cursor="Hand" Click="SideSettings_Click">
-                                    <Button.Style><Style TargetType="Button">
-                                        <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#8E8E96"/>
-                                        <Setter Property="FontWeight" Value="Normal"/><Setter Property="BorderThickness" Value="0"/><Setter Property="ToolTip" Value="设置"/>
-                                        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-                                            <Border Background="{TemplateBinding Background}" CornerRadius="12" x:Name="b">
-                                                <StackPanel>
-                                                    <TextBlock Text="⚙" FontSize="17" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="设置" FontSize="10" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                                </StackPanel>
-                                            </Border>
-                                            <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger></ControlTemplate.Triggers>
-                                        </ControlTemplate></Setter.Value></Setter>
-                                    </Style></Button.Style>
+                <!-- 左侧：全局侧边栏 -->
+                <Border Grid.Column="0" Background="{DynamicResource SidebarBgBrush}">
+                    <DockPanel Margin="10,10,10,14" LastChildFill="False">
+                        <StackPanel DockPanel.Dock="Top">
+                            <!-- 账号 -->
+                            <Grid Margin="0,0,0,8">
+                                <Border x:Name="SideAccentAccount" Width="0" Background="Transparent"/>
+                                <Button x:Name="SideAccounts" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideAccounts_Click" ToolTip="账号列表">
+                                    <StackPanel>
+                                        <TextBlock Text="⚡" FontSize="18" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="账号" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                    </StackPanel>
                                 </Button>
                             </Grid>
-                        </DockPanel>
-                    </Border>
-                    <Border Grid.Column="0" Width="1" Background="{DynamicResource BorderBrush}" HorizontalAlignment="Right"/>
+                            
+                            <!-- 游戏 -->
+                            <Grid Margin="0,0,0,8">
+                                <Border x:Name="SideAccentGame" Width="0" Background="Transparent"/>
+                                <Button x:Name="SideGames" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideGames_Click" ToolTip="游戏绑定">
+                                    <StackPanel>
+                                        <TextBlock Text="🎮" FontSize="18" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="游戏" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            
+                            <!-- 快速启动 -->
+                            <Grid Margin="0,0,0,8">
+                                <Border x:Name="SideAccentQuickLaunch" Width="0" Background="Transparent"/>
+                                <Button x:Name="SideQuickLaunch" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideQuickLaunch_Click" ToolTip="快速启动">
+                                    <StackPanel>
+                                        <TextBlock Text="🚀" FontSize="18" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="快启" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
 
-                    <!-- 主内容 -->
-                    <Grid Grid.Column="1" Margin="0,0,12,0">
-                        <!-- 账号视图 -->
-                        <Grid x:Name="AccountView">
-                            <Border Background="{DynamicResource CardBgBrush}" CornerRadius="8" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                                <ListBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
-                                         Style="{StaticResource AccountList}" ItemTemplate="{StaticResource AccountItem}" Padding="8,6"/>
+                        <!-- 设置放在底部 -->
+                        <Grid DockPanel.Dock="Bottom">
+                            <Border x:Name="SideAccentSettings" Width="0" Background="Transparent"/>
+                            <Button x:Name="SideSettings" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideSettings_Click" ToolTip="设置">
+                                <StackPanel>
+                                    <TextBlock Text="⚙" FontSize="18" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="设置" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </DockPanel>
+                </Border>
+                
+                <!-- 侧边栏与内容分割线 -->
+                <Border Grid.Column="0" Width="0.5" Background="{DynamicResource BorderBrush}" HorizontalAlignment="Right"/>
+
+                <!-- 右侧：主内容区 -->
+                <Grid Grid.Column="1" Margin="16,14,16,14">
+                    <!-- 账号视图 -->
+                    <Grid x:Name="AccountView" Style="{StaticResource FadeInUpViewStyle}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- 统计卡片 -->
+                        <Grid Grid.Row="0" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.4*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource ShineCardBorder}" Padding="14,11" Margin="0,0,6,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="当前账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                                        <TextBlock Text="{Binding CurrentAccountName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <Border Grid.Column="1" Style="{StaticResource StatusBadgeStyle}" CornerRadius="8" Padding="9,5" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding SteamStateText}" Foreground="{DynamicResource SuccessFgBrush}" FontSize="11" FontWeight="SemiBold"/>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                            <Border Grid.Column="1" Style="{StaticResource ShineCardBorder}" Padding="14,11" Margin="6,0,6,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                                        <TextBlock Text="{Binding AccountCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="绑定" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                                        <TextBlock Text="{Binding BindingCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource ShineCardBorder}" Padding="14,11" Margin="6,0,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                                        <TextBlock Text="{Binding GameCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="固定" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                                        <TextBlock Text="{Binding PinnedCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.ColumnSpan="2" Text="{Binding InjectorStateText}" Foreground="{DynamicResource AccentBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Bottom"/>
+                                </Grid>
                             </Border>
                         </Grid>
 
+                        <!-- 库界面注入 -->
+                        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Padding="12,10" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="库界面游戏启动" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                    <TextBlock Text="在 Steam 库当前游戏旁选择账号，之后点 [启动] 自动切换并运行。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                    <TextBlock Text="⚠️ 开启调试端口，存在账号封禁风险" Foreground="#FF9500" FontSize="11" Margin="0,3,0,0"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="注入" Command="{Binding StartInjectorCommand}"
+                                        IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
+                                        Style="{StaticResource SecondaryBtn}" Width="64" Height="32" Margin="10,0,0,0"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- 账号列表 -->
+                        <Border Grid.Row="2" Background="{DynamicResource CardBgBrush}" CornerRadius="8" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                            <ListBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
+                                     Style="{StaticResource AccountList}" ItemTemplate="{StaticResource AccountItem}" Padding="8,6"/>
+                        </Border>
+                    </Grid>
+ 
                         <!-- 游戏视图 -->
-                        <Grid x:Name="GameView" Visibility="Collapsed">
+                        <Grid x:Name="GameView" Visibility="Collapsed" Style="{StaticResource FadeInUpViewStyle}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
 
                             <!-- 左侧：游戏列表 -->
@@ -575,11 +1237,7 @@
                                             </Button>
                                         </Grid>
                                     </Border>
-                                    <Button Grid.Column="1" Content="扫描" Click="GameScan_Click" Width="72" Height="38" FontSize="12"
-                                            Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Medium" Cursor="Hand" BorderThickness="0">
-                                        <Button.Template><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="s"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                                        <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="s" Property="Background" Value="#409CFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
-                                    </Button>
+                                    <Button Grid.Column="1" Content="扫描" Click="GameScan_Click" Width="72" Height="38" Style="{StaticResource PrimaryBtn}"/>
                                 </Grid>
 
                                 <Grid Grid.Row="1" Margin="2,0,2,8">
@@ -603,11 +1261,7 @@
                                 </Border>
 
 
-                                <Button Grid.Row="3" Content="+ 手动添加游戏" Click="ManualAddToggle_Click" Margin="0,8,0,0" Height="34" FontSize="12"
-                                        Background="{DynamicResource CardBgBrush}" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="Medium" Cursor="Hand" BorderThickness="0">
-                                    <Button.Template><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="9" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" x:Name="ma"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                                    <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ma" Property="Background" Value="{DynamicResource BtnHoverBgBrush}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
-                                </Button>
+                                <Button Grid.Row="3" Content="+ 手动添加游戏" Click="ManualAddToggle_Click" Margin="0,8,0,0" Height="34" Style="{StaticResource SecondaryBtn}"/>
 
                                 <!-- 手动添加面板 -->
                                 <Border Grid.Row="4" x:Name="ManualAddPanel" Background="{DynamicResource CardBgBrush}" CornerRadius="10" Padding="12,10"
@@ -618,11 +1272,7 @@
                                         <TextBox Grid.Column="1" x:Name="ManualAppId" Background="{DynamicResource InputBgBrush}" Foreground="{DynamicResource TextPrimaryBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="7,5" FontSize="12" Margin="0,0,10,0"/>
                                         <TextBlock Grid.Column="2" Text="游戏名" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                         <TextBox Grid.Column="3" x:Name="ManualGameName" Background="{DynamicResource InputBgBrush}" Foreground="{DynamicResource TextPrimaryBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="7,5" FontSize="12" Margin="0,0,10,0"/>
-                                        <Button Grid.Column="4" Content="添加" Click="ManualAddBinding_Click" Width="58" Height="30" FontSize="12"
-                                                Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Medium" Cursor="Hand" BorderThickness="0">
-                                            <Button.Template><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="8" x:Name="mab"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                                            <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="mab" Property="Background" Value="#409CFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
-                                        </Button>
+                                        <Button Grid.Column="4" Content="添加" Click="ManualAddBinding_Click" Width="58" Height="30" Style="{StaticResource PrimaryBtn}"/>
                                     </Grid>
                                 </Border>
                             </Grid>
@@ -643,7 +1293,7 @@
                                             <TextBlock Text="已选游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" FontWeight="SemiBold"/>
                                             <TextBlock Text="{Binding SelectedGameName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,6,0,0"/>
                                             <TextBlock Text="{Binding SelectedGameAppId, StringFormat='AppID: {0}'}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11" Margin="0,4,0,0"/>
-                                            <Border Background="{DynamicResource SuccessBgBrush}" CornerRadius="6" Padding="8,3" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                            <Border Style="{StaticResource StatusBadgeStyle}" CornerRadius="6" Padding="8,3" HorizontalAlignment="Left" Margin="0,8,0,0"
                                                     Visibility="{Binding SelectedGameHasBinding, Converter={StaticResource BoolToVis}}">
                                                 <TextBlock Text="{Binding SelectedGameBindingAccount, StringFormat='✓ 已绑定: {0}'}" Foreground="#30D158" FontSize="11" FontWeight="SemiBold"/>
                                             </Border>
@@ -652,46 +1302,98 @@
 
                                     <TextBlock Grid.Row="2" Text="选择绑定账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"/>
                                     <ListBox Grid.Row="3" x:Name="GameAccountList" ItemsSource="{Binding Accounts}"
-                                             SelectedItem="{Binding SelectedBindingAccount}" Background="{DynamicResource CardBgAltBrush}"
-                                             BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,0,12" Padding="4">
+                                             SelectedItem="{Binding SelectedBindingAccount}" Background="Transparent"
+                                             BorderThickness="0" Margin="0,0,0,12" Padding="4">
                                         <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem">
                                             <Setter Property="Height" Value="50"/><Setter Property="Background" Value="Transparent"/>
                                             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
-                                                <Border Background="{TemplateBinding Background}" CornerRadius="8" Margin="0,2" x:Name="abi" Padding="9,6">
+                                                <Border CornerRadius="8" Margin="0,2" x:Name="abi"
+                                                        RenderTransformOrigin="0.5,0.5">
+                                                    <Border.RenderTransform>
+                                                        <TranslateTransform X="0" Y="0" x:Name="trans"/>
+                                                    </Border.RenderTransform>
+                                                    <Border.Effect>
+                                                        <DropShadowEffect Color="#000000" BlurRadius="4" ShadowDepth="1" Opacity="0" x:Name="shadow"/>
+                                                    </Border.Effect>
                                                     <Grid>
-                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                        <Border Grid.Column="0" Width="34" Height="34" CornerRadius="17" Background="{DynamicResource AvatarBgBrush}" VerticalAlignment="Center">
-                                                            <Image Source="{Binding Avatar}" Stretch="UniformToFill"><Image.Clip><EllipseGeometry Center="17,17" RadiusX="17" RadiusY="17"/></Image.Clip></Image>
+                                                        <Border CornerRadius="8" Background="{DynamicResource HoverBgBrush}" Opacity="0" x:Name="hoverBg"/>
+                                                        <Border CornerRadius="8" Background="{DynamicResource SelectedBgBrush}" Opacity="0" x:Name="selectBg">
+                                                            <Border.Effect>
+                                                                <DropShadowEffect Color="#0084FF" BlurRadius="10" ShadowDepth="0" Opacity="0.25"/>
+                                                            </Border.Effect>
                                                         </Border>
-                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0">
-                                                             <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="Medium" TextTrimming="CharacterEllipsis"/>
-                                                             <TextBlock Text="{Binding Username}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10"/>
-                                                        </StackPanel>
-                                                        <Border Grid.Column="2" Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}" Background="{DynamicResource SuccessBgBrush}" CornerRadius="5" Padding="6,2" VerticalAlignment="Center">
-                                                            <TextBlock Text="当前" Foreground="#30D158" FontSize="10" FontWeight="SemiBold"/>
-                                                        </Border>
+                                                        <Grid Margin="9,0">
+                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                            <Border Grid.Column="0" Width="34" Height="34" CornerRadius="17" Background="{DynamicResource AvatarBgBrush}" VerticalAlignment="Center">
+                                                                <Image Source="{Binding Avatar}" Stretch="UniformToFill"><Image.Clip><EllipseGeometry Center="17,17" RadiusX="17" RadiusY="17"/></Image.Clip></Image>
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0">
+                                                                 <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="Medium" TextTrimming="CharacterEllipsis"/>
+                                                                 <TextBlock Text="{Binding Username}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10"/>
+                                                            </StackPanel>
+                                                            <Border Grid.Column="2" Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}" 
+                                                                    Style="{StaticResource StatusBadgeStyle}" CornerRadius="5" Padding="6,2" VerticalAlignment="Center">
+                                                                <TextBlock Text="当前" Foreground="#30D158" FontSize="10" FontWeight="SemiBold"/>
+                                                            </Border>
+                                                        </Grid>
                                                     </Grid>
                                                 </Border>
                                                 <ControlTemplate.Triggers>
-                                                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="abi" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger>
-                                                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="abi" Property="Background" Value="{DynamicResource SelectedBgBrush}"/></Trigger>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Trigger.EnterActions>
+                                                            <BeginStoryboard>
+                                                                <Storyboard>
+                                                                    <DoubleAnimation Storyboard.TargetName="hoverBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                                                    <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="Y" To="-2" Duration="0:0:0.15">
+                                                                        <DoubleAnimation.EasingFunction>
+                                                                            <CubicEase EasingMode="EaseOut"/>
+                                                                        </DoubleAnimation.EasingFunction>
+                                                                    </DoubleAnimation>
+                                                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="Opacity" To="0.15" Duration="0:0:0.15"/>
+                                                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="BlurRadius" To="10" Duration="0:0:0.15"/>
+                                                                </Storyboard>
+                                                            </BeginStoryboard>
+                                                        </Trigger.EnterActions>
+                                                        <Trigger.ExitActions>
+                                                            <BeginStoryboard>
+                                                                <Storyboard>
+                                                                    <DoubleAnimation Storyboard.TargetName="hoverBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                                                    <DoubleAnimation Storyboard.TargetName="trans" Storyboard.TargetProperty="Y" To="0" Duration="0:0:0.15">
+                                                                        <DoubleAnimation.EasingFunction>
+                                                                            <CubicEase EasingMode="EaseOut"/>
+                                                                        </DoubleAnimation.EasingFunction>
+                                                                    </DoubleAnimation>
+                                                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                                                    <DoubleAnimation Storyboard.TargetName="shadow" Storyboard.TargetProperty="BlurRadius" To="4" Duration="0:0:0.15"/>
+                                                                </Storyboard>
+                                                            </BeginStoryboard>
+                                                        </Trigger.ExitActions>
+                                                    </Trigger>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Trigger.EnterActions>
+                                                            <BeginStoryboard>
+                                                                <Storyboard>
+                                                                    <DoubleAnimation Storyboard.TargetName="selectBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                                                </Storyboard>
+                                                            </BeginStoryboard>
+                                                        </Trigger.EnterActions>
+                                                        <Trigger.ExitActions>
+                                                            <BeginStoryboard>
+                                                                <Storyboard>
+                                                                    <DoubleAnimation Storyboard.TargetName="selectBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                                                                </Storyboard>
+                                                            </BeginStoryboard>
+                                                        </Trigger.ExitActions>
+                                                    </Trigger>
                                                 </ControlTemplate.Triggers>
                                             </ControlTemplate></Setter.Value></Setter>
                                         </Style></ListBox.ItemContainerStyle>
                                     </ListBox>
 
                                     <StackPanel Grid.Row="4">
-                                        <Button Content="保存绑定" Click="GameSaveBinding_Click" Height="38" FontSize="13" Margin="0,0,0,8"
-                                                Background="#0A84FF" Foreground="White" FontWeight="SemiBold" Cursor="Hand" BorderThickness="0">
-                                            <Button.Template><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="sb"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                                            <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="sb" Property="Background" Value="#409CFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
-                                        </Button>
-                                        <Button Content="删除绑定" Click="GameRemoveBinding_Click" Height="36" FontSize="12" Margin="0,0,0,8"
-                                                Background="#FF453A" Foreground="White" FontWeight="SemiBold" Cursor="Hand" BorderThickness="0"
-                                                Visibility="{Binding SelectedGameHasBinding, Converter={StaticResource BoolToVis}}">
-                                            <Button.Template><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="rb"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                                            <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="rb" Property="Background" Value="#FF6960"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
-                                        </Button>
+                                        <Button Content="保存绑定" Click="GameSaveBinding_Click" Style="{StaticResource PrimaryBtn}" Margin="0,0,0,8"/>
+                                        <Button Content="删除绑定" Click="GameRemoveBinding_Click" Height="36" Style="{StaticResource DangerBtn}" Margin="0,0,0,8"
+                                                Visibility="{Binding SelectedGameHasBinding, Converter={StaticResource BoolToVis}}"/>
                                         <ToggleButton x:Name="GamePinToggle" IsChecked="{Binding SelectedGame.IsPinned, Mode=OneWay, FallbackValue=False}"
                                                       Click="GamePinToggle_Click" Height="34" Cursor="Hand" HorizontalAlignment="Center">
                                             <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
@@ -713,32 +1415,29 @@
                         </Grid>
 
                         <!-- 快速启动视图 -->
-                        <Grid x:Name="QuickLaunchView" Visibility="Collapsed">
+                        <Grid x:Name="QuickLaunchView" Visibility="Collapsed" Style="{StaticResource FadeInUpViewStyle}">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-
+ 
                             <!-- 顶部：添加按钮 -->
                             <Grid Grid.Row="0" Margin="16,0,16,8">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="快速启动项" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                <Button Grid.Column="1" Content="+ 添加程序/快捷方式" Click="QuickLaunchAdd_Click" Width="128" Height="34" FontSize="12"
-                                        Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Medium" Cursor="Hand" BorderThickness="0">
-                                    <Button.Template><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="10" x:Name="qla"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                                    <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="qla" Property="Background" Value="#409CFF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
-                                </Button>
+                                <Button Grid.Column="1" Content="+ 添加程序/快捷方式" Click="QuickLaunchAdd_Click" Style="{StaticResource PrimaryBtn}" Padding="14,0" Height="34" FontSize="12"/>
                             </Grid>
-
+ 
                             <!-- 删除区域 -->
                             <Border x:Name="QuickLaunchDeleteZone" Grid.Row="0" Background="#CCFF453A" CornerRadius="8" Margin="16,0,16,4" Padding="12,8"
                                     Visibility="Collapsed" HorizontalAlignment="Stretch" Height="48">
                                 <TextBlock Text="🗑️ 拖到此处删除" Foreground="White" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
-
+ 
                             <!-- 列表 -->
                             <Border Grid.Row="1" Background="{DynamicResource CardBgAltBrush}" CornerRadius="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="16,0,16,8">
                                 <Grid>
                                     <ListBox x:Name="QuickLaunchListBox" ItemsSource="{Binding QuickLaunchList}"
                                              Background="Transparent" BorderThickness="0" Padding="8" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                              ItemTemplate="{DynamicResource QuickLaunchItemTemplate}"
+                                             ItemContainerStyle="{StaticResource QuickLaunchListItemStyle}"
                                              VirtualizingStackPanel.IsVirtualizing="True"
                                              VirtualizingStackPanel.VirtualizationMode="Recycling"/>
                                     <TextBlock x:Name="QuickLaunchEmptyHint" Text="点击上方 [+ 添加程序] 添加快速启动项" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="13"
@@ -746,31 +1445,47 @@
                                 </Grid>
                             </Border>
                         </Grid>
-
+ 
                         <!-- 设置视图 -->
-                        <Grid x:Name="SettingsView" Visibility="Collapsed">
-                            <Border Background="{DynamicResource CardBgAltBrush}" CornerRadius="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <Grid x:Name="SettingsView" Visibility="Collapsed" Style="{StaticResource FadeInUpViewStyle}">
+                            <Border Background="Transparent" BorderThickness="0" CornerRadius="0">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="8">
                                     <StackPanel>
-                                        <Border Background="{DynamicResource AccentBgBrush}" CornerRadius="14" Margin="6,6,6,10" Padding="16,14"
-                                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                        <Border CornerRadius="14" Margin="6,6,6,10" Padding="16,14" BorderThickness="0">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                    <GradientStop Color="#007AFF" Offset="0"/>
+                                                    <GradientStop Color="#5856D6" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                            <Border.Effect>
+                                                <DropShadowEffect Color="#5856D6" BlurRadius="16" ShadowDepth="2" Opacity="0.15"/>
+                                            </Border.Effect>
                                             <Grid>
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                                <Border Width="36" Height="36" CornerRadius="12" Background="{DynamicResource AccentBgBrush}" Margin="0,0,12,0">
-                                                    <TextBlock Text="⚙" Foreground="{DynamicResource AccentBrush}" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <Border Width="36" Height="36" CornerRadius="12" Background="#26FFFFFF" Margin="0,0,12,0">
+                                                    <TextBlock Text="⚙" Foreground="White" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                        <TextBlock.Effect>
+                                                            <DropShadowEffect Color="White" BlurRadius="4" ShadowDepth="0" Opacity="0.5"/>
+                                                        </TextBlock.Effect>
+                                                    </TextBlock>
                                                 </Border>
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock Text="设置" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="17" FontWeight="SemiBold"/>
-                                                    <TextBlock Text="管理启动、游戏库注入、任务栏常驻、桌面悬浮窗和外观行为" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                                    <TextBlock Text="设置" Foreground="White" FontSize="17" FontWeight="Bold"/>
+                                                    <TextBlock Text="管理启动、游戏库注入、任务栏常驻、桌面悬浮窗和外观行为" Foreground="#E5E5EA" FontSize="12" Margin="0,4,0,0"/>
                                                 </StackPanel>
                                             </Grid>
                                         </Border>
 
-                                        <TextBlock Text="外观" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="14,2,14,6"/>
+                                        <!-- 外观 -->
+                                        <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
+                                            <Border Height="12" Width="3" CornerRadius="1.5" Background="{DynamicResource AccentBrush}"/>
+                                            <TextBlock Text="外观" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                         <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="0"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                             <StackPanel>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
@@ -783,72 +1498,102 @@
                                             </StackPanel>
                                         </Border>
 
-                                        <TextBlock Text="常规行为" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="14,2,14,6"/>
+                                        <!-- 常规行为 -->
+                                        <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
+                                            <Border Height="12" Width="3" CornerRadius="1.5" Background="{DynamicResource AccentBrush}"/>
+                                            <TextBlock Text="常规行为" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                         <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="0"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                             <StackPanel>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="切换后自动启动 Steam" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="账号切换成功后自动拉起 Steam 客户端" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding AutoStartSteam}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding AutoStartSteam}" Checked="SettingsAutoStartSteam_Changed" Unchecked="SettingsAutoStartSteam_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="关闭时最小化到托盘" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="点关闭按钮时隐藏窗口，仍可从托盘恢复" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding MinimizeToTray}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding MinimizeToTray}" Checked="SettingsMinimizeToTray_Changed" Unchecked="SettingsMinimizeToTray_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="开机自动启动" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="写入当前用户启动项，登录 Windows 后自动运行" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding StartWithWindows}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding StartWithWindows}" Checked="SettingsStartWithWindows_Changed" Unchecked="SettingsStartWithWindows_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="极简模式" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="去除多余窗口动画，主动限制并压缩物理内存，只保留账号切换核心逻辑" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                        </StackPanel>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding MinimalMode}" Checked="SettingsMinimalMode_Changed" Unchecked="SettingsMinimalMode_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="桌面悬浮窗边缘吸附" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="悬浮窗靠边时自动折叠隐藏为一条，鼠标移动过去可瞬间自动弹出展开" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                        </StackPanel>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding DesktopFloatingDockEnabled}" Checked="SettingsFloatingDock_Changed" Unchecked="SettingsFloatingDock_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                             </StackPanel>
                                         </Border>
 
-                                        <TextBlock Text="游戏与库界面" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="14,2,14,6"/>
+                                        <!-- 游戏与库界面 -->
+                                        <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
+                                            <Border Height="12" Width="3" CornerRadius="1.5" Background="{DynamicResource AccentBrush}"/>
+                                            <TextBlock Text="游戏与库界面" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                         <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="0"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                             <StackPanel>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="启动时自动扫描游戏" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="打开应用后刷新已安装游戏、图标和绑定状态" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding AutoScanGamesOnStartup}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding AutoScanGamesOnStartup}" Checked="SettingsAutoScanGames_Changed" Unchecked="SettingsAutoScanGames_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="启动固定游戏前确认" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="点击任务栏固定游戏时先确认，避免误切账号和启动游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding ConfirmBeforeGameLaunch}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding ConfirmBeforeGameLaunch}" Checked="SettingsConfirmBeforeLaunch_Changed" Unchecked="SettingsConfirmBeforeLaunch_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
@@ -856,39 +1601,43 @@
                                                             <TextBlock Text="在 Steam 库游戏页面中显示账号选择和快速启动入口" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                             <TextBlock Text="⚠️ 开启将启用 CEF 调试端口，存在账号封禁风险" Foreground="#FF9500" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding EnableLibraryInjection}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding EnableLibraryInjection}" Checked="SettingsLibraryInjection_Changed" Unchecked="SettingsLibraryInjection_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                             </StackPanel>
                                         </Border>
 
-                                        <TextBlock Text="显示与通知" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="14,2,14,6"/>
+                                        <!-- 显示与通知 -->
+                                        <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
+                                            <Border Height="12" Width="3" CornerRadius="1.5" Background="{DynamicResource AccentBrush}"/>
+                                            <TextBlock Text="显示与通知" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                         <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="0"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                             <StackPanel>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="静默模式" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="切换账号时后台关闭 Steam，并用后台方式启动 Steam 和游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding SilentCloseSteam}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding SilentCloseSteam}" Checked="SettingsSilentCloseSteam_Changed" Unchecked="SettingsSilentCloseSteam_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="启动时检查更新" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="打开应用时自动检查是否有新版本" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding CheckUpdateOnStartup}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding CheckUpdateOnStartup}" Checked="SettingsCheckUpdate_Changed" Unchecked="SettingsCheckUpdate_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
@@ -896,21 +1645,21 @@
                                                             <TextBlock Text="{Binding CurrentVersionText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                             <TextBlock Text="{Binding GitHubReleasesUrl}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
                                                         </StackPanel>
-                                                        <WrapPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                                                             <Button Content="检查更新" Command="{Binding CheckForUpdatesManuallyCommand}" Style="{StaticResource SecondaryBtn}" Width="86" Height="32" Margin="0,0,8,0"/>
                                                             <Button Content="打开 GitHub" Command="{Binding OpenGitHubReleasesCommand}" Style="{StaticResource SecondaryBtn}" Width="96" Height="32"/>
-                                                        </WrapPanel>
+                                                        </StackPanel>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="自动更新" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="发现新版本后自动下载并启动安装器" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding AutoInstallUpdates}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding AutoInstallUpdates}" Checked="SettingsAutoInstallUpdates_Changed" Unchecked="SettingsAutoInstallUpdates_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
@@ -921,37 +1670,76 @@
                                                             <TextBlock Text="关闭 Steam 时显示通知" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="成功关闭 Steam 后弹出系统通知" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding ShowNotificationOnSteamClose}" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                        <CheckBox Grid.Column="1" IsChecked="{Binding ShowNotificationOnSteamClose}" Checked="SettingsNotificationOnClose_Changed" Unchecked="SettingsNotificationOnClose_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                             </StackPanel>
                                         </Border>
-
-                                        <TextBlock Text="维护与排障" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="14,2,14,6"/>
+ 
+                                        <!-- 维护与排障 -->
+                                        <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
+                                            <Border Height="12" Width="3" CornerRadius="1.5" Background="{DynamicResource AccentBrush}"/>
+                                            <TextBlock Text="维护与排障" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                         <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="14,12"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                             <Grid>
-                                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                <StackPanel>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <StackPanel Grid.Row="0" Margin="0,0,0,10">
                                                     <TextBlock Text="本地数据与日志" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                     <TextBlock Text="快速打开配置、绑定和运行日志所在目录，方便备份或定位问题" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
                                                 </StackPanel>
-                                                <WrapPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
-                                                    <Button Content="数据目录" Command="{Binding OpenDataFolderCommand}" Style="{StaticResource SecondaryBtn}" Width="82" Height="32" Margin="0,0,8,0"/>
-                                                    <Button Content="日志目录" Command="{Binding OpenLogFolderCommand}" Style="{StaticResource SecondaryBtn}" Width="82" Height="32" Margin="0,0,8,0"/>
-                                                    <Button Content="复制诊断" Command="{Binding CopyDiagnosticsCommand}" Style="{StaticResource SecondaryBtn}" Width="82" Height="32" Margin="0,0,8,0"/>
-                                                    <Button Content="重置布局" Click="ResetLayout_Click" Style="{StaticResource SecondaryBtn}" Width="82" Height="32"/>
-                                                </WrapPanel>
-                                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding SettingsDirectory}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,10,0,0" TextTrimming="CharacterEllipsis"/>
+                                                <Grid Grid.Row="1" Margin="0,4,0,4">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Button Grid.Row="0" Grid.Column="0" Command="{Binding OpenDataFolderCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,4,6" Height="36">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="📂" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="数据目录" FontSize="12" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Row="0" Grid.Column="1" Command="{Binding OpenLogFolderCommand}" Style="{StaticResource SecondaryBtn}" Margin="4,0,0,6" Height="36">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="📝" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="日志目录" FontSize="12" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Row="1" Grid.Column="0" Command="{Binding CopyDiagnosticsCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,6,4,0" Height="36">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="📋" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="复制诊断" FontSize="12" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Row="1" Grid.Column="1" Click="ResetLayout_Click" Style="{StaticResource SecondaryBtn}" Margin="4,6,0,0" Height="36">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="🔄" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="重置布局" FontSize="12" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                </Grid>
+                                                <TextBlock Grid.Row="2" Text="{Binding SettingsDirectory}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,8,0,0" TextTrimming="CharacterEllipsis"/>
                                             </Grid>
                                         </Border>
-
-                                        <TextBlock Text="任务栏常驻" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="14,2,14,6"/>
+ 
+                                        <!-- 任务栏常驻 -->
+                                        <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
+                                            <Border Height="12" Width="3" CornerRadius="1.5" Background="{DynamicResource AccentBrush}"/>
+                                            <TextBlock Text="任务栏常驻" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                         <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="0"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                             <StackPanel>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
@@ -962,7 +1750,7 @@
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                                         <TextBlock Text="位置" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
@@ -975,79 +1763,72 @@
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                                         <TextBlock Text="X轴偏移" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                                         <DockPanel Grid.Column="1">
-                                                            <TextBlock x:Name="SettingsOffsetXText" Text="0" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
+                                                            <TextBlock x:Name="SettingsOffsetXText" Text="0" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
                                                             <Slider x:Name="SettingsOffsetXSlider" Minimum="-200" Maximum="200" Value="0" TickFrequency="10" IsSnapToTickEnabled="True" ValueChanged="SettingsOffsetX_ValueChanged" VerticalAlignment="Center"/>
                                                         </DockPanel>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                                         <TextBlock Text="Y轴偏移" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                                         <DockPanel Grid.Column="1">
-                                                            <TextBlock x:Name="SettingsOffsetYText" Text="0" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
+                                                            <TextBlock x:Name="SettingsOffsetYText" Text="0" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
                                                             <Slider x:Name="SettingsOffsetYSlider" Minimum="-200" Maximum="200" Value="0" TickFrequency="10" IsSnapToTickEnabled="True" ValueChanged="SettingsOffsetY_ValueChanged" VerticalAlignment="Center"/>
                                                         </DockPanel>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                                        <TextBlock Text="液态玻璃" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                                        <DockPanel Grid.Column="1">
-                                                            <TextBlock x:Name="SettingsTaskbarWindowSizeText" Text="2" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
-                                                            <Slider x:Name="SettingsTaskbarWindowSizeSlider" Minimum="2" Maximum="30" Value="2" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SettingsTaskbarWindowSize_ValueChanged" VerticalAlignment="Center"/>
-                                                        </DockPanel>
-                                                    </Grid>
-                                                </Border>
-                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                                         <TextBlock Text="图标大小" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                                         <DockPanel Grid.Column="1">
-                                                            <TextBlock x:Name="SettingsTaskbarAvatarText" Text="38" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
-                                                            <Slider x:Name="SettingsTaskbarAvatarSlider" Minimum="16" Maximum="96" Value="38" TickFrequency="2" IsSnapToTickEnabled="True" ValueChanged="SettingsTaskbarAvatar_ValueChanged" VerticalAlignment="Center"/>
+                                                            <TextBlock x:Name="SettingsTaskbarAvatarText" Text="38" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
+                                                            <Slider x:Name="SettingsTaskbarAvatarSlider" Minimum="16" Maximum="40" Value="38" TickFrequency="2" IsSnapToTickEnabled="True" ValueChanged="SettingsTaskbarAvatar_ValueChanged" VerticalAlignment="Center"/>
                                                         </DockPanel>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
-                                                            <TextBlock Text="液态玻璃效果" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="任务栏毛玻璃" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="任务栏使用半透明玻璃背景" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding TaskbarGlassEnabled}" Checked="SettingsTaskbarGlass_Changed" Unchecked="SettingsTaskbarGlass_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
-                                                            <TextBlock Text="圆角模式" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
-                                                            <TextBlock Text="任务栏图标使用圆角显示" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                            <TextBlock Text="圆形模式" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="启用后账号头像呈圆形显示，游戏图标呈圆角显示" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding TaskbarRoundedMode}" Checked="SettingsTaskbarRounded_Changed" Unchecked="SettingsTaskbarRounded_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                             </StackPanel>
                                         </Border>
-
-                                        <TextBlock Text="桌面悬浮窗" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="14,2,14,6"/>
+ 
+                                        <!-- 桌面悬浮窗 -->
+                                        <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
+                                            <Border Height="12" Width="3" CornerRadius="1.5" Background="{DynamicResource AccentBrush}"/>
+                                            <TextBlock Text="桌面悬浮窗" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
                                         <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="0"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                             <StackPanel>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
@@ -1058,7 +1839,7 @@
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
@@ -1069,7 +1850,7 @@
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
@@ -1080,45 +1861,45 @@
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                                         <TextBlock Text="透明度" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                                         <DockPanel Grid.Column="1">
-                                                            <TextBlock x:Name="SettingsFloatingOpacityText" Text="80%" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
+                                                            <TextBlock x:Name="SettingsFloatingOpacityText" Text="80%" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
                                                             <Slider x:Name="SettingsFloatingOpacitySlider" Minimum="20" Maximum="100" Value="80" TickFrequency="5" IsSnapToTickEnabled="True" ValueChanged="SettingsFloatingOpacity_ValueChanged" VerticalAlignment="Center"/>
                                                         </DockPanel>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                                         <TextBlock Text="图标大小" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                                         <DockPanel Grid.Column="1">
-                                                            <TextBlock x:Name="SettingsFloatingAvatarText" Text="45" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
+                                                            <TextBlock x:Name="SettingsFloatingAvatarText" Text="45" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" FontWeight="SemiBold" Width="42" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right"/>
                                                             <Slider x:Name="SettingsFloatingAvatarSlider" Minimum="24" Maximum="72" Value="45" TickFrequency="2" IsSnapToTickEnabled="True" ValueChanged="SettingsFloatingAvatar_ValueChanged" VerticalAlignment="Center"/>
                                                         </DockPanel>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
-                                                            <TextBlock Text="液态玻璃效果" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="悬浮窗毛玻璃" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="悬浮窗使用半透明玻璃背景" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding DesktopFloatingGlassEnabled}" Checked="SettingsFloatingGlass_Changed" Unchecked="SettingsFloatingGlass_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12">
+                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                         <StackPanel>
-                                                            <TextBlock Text="圆角模式" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
-                                                            <TextBlock Text="悬浮窗图标使用圆角显示" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                                            <TextBlock Text="圆形模式" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                            <TextBlock Text="启用后账号头像呈圆形显示，游戏图标呈圆角显示" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding DesktopFloatingRoundedMode}" Checked="SettingsFloatingRounded_Changed" Unchecked="SettingsFloatingRounded_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
@@ -1132,35 +1913,29 @@
                                                             <TextBlock Text="自选液态玻璃效果的主色调" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                                            <Border Width="28" Height="28" CornerRadius="8" Cursor="Hand" Margin="3" Tag="#4A90D9"
-                                                                    ToolTip="蓝色" MouseLeftButtonDown="GlassColor_Click">
+                                                            <Border Tag="#4A90D9" ToolTip="蓝色" MouseLeftButtonDown="GlassColor_Click">
                                                                 <Border.Background><SolidColorBrush Color="#4A90D9"/></Border.Background>
-                                                                <Border.Style><Style TargetType="Border"><Setter Property="BorderThickness" Value="2"/><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#4A90D9"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                                                <Border.Style><Style TargetType="Border" BasedOn="{StaticResource ColorBlockStyle}"><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#4A90D9"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
                                                             </Border>
-                                                            <Border Width="28" Height="28" CornerRadius="8" Cursor="Hand" Margin="3" Tag="#9B59B6"
-                                                                    ToolTip="紫色" MouseLeftButtonDown="GlassColor_Click">
+                                                            <Border Tag="#9B59B6" ToolTip="紫色" MouseLeftButtonDown="GlassColor_Click">
                                                                 <Border.Background><SolidColorBrush Color="#9B59B6"/></Border.Background>
-                                                                <Border.Style><Style TargetType="Border"><Setter Property="BorderThickness" Value="2"/><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#9B59B6"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                                                <Border.Style><Style TargetType="Border" BasedOn="{StaticResource ColorBlockStyle}"><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#9B59B6"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
                                                             </Border>
-                                                            <Border Width="28" Height="28" CornerRadius="8" Cursor="Hand" Margin="3" Tag="#30D158"
-                                                                    ToolTip="绿色" MouseLeftButtonDown="GlassColor_Click">
+                                                            <Border Tag="#30D158" ToolTip="绿色" MouseLeftButtonDown="GlassColor_Click">
                                                                 <Border.Background><SolidColorBrush Color="#30D158"/></Border.Background>
-                                                                <Border.Style><Style TargetType="Border"><Setter Property="BorderThickness" Value="2"/><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#30D158"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                                                <Border.Style><Style TargetType="Border" BasedOn="{StaticResource ColorBlockStyle}"><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#30D158"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
                                                             </Border>
-                                                            <Border Width="28" Height="28" CornerRadius="8" Cursor="Hand" Margin="3" Tag="#FF9F0A"
-                                                                    ToolTip="橙色" MouseLeftButtonDown="GlassColor_Click">
+                                                            <Border Tag="#FF9F0A" ToolTip="橙色" MouseLeftButtonDown="GlassColor_Click">
                                                                 <Border.Background><SolidColorBrush Color="#FF9F0A"/></Border.Background>
-                                                                <Border.Style><Style TargetType="Border"><Setter Property="BorderThickness" Value="2"/><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#FF9F0A"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                                                <Border.Style><Style TargetType="Border" BasedOn="{StaticResource ColorBlockStyle}"><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#FF9F0A"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
                                                             </Border>
-                                                            <Border Width="28" Height="28" CornerRadius="8" Cursor="Hand" Margin="3" Tag="#FF453A"
-                                                                    ToolTip="红色" MouseLeftButtonDown="GlassColor_Click">
+                                                            <Border Tag="#FF453A" ToolTip="红色" MouseLeftButtonDown="GlassColor_Click">
                                                                 <Border.Background><SolidColorBrush Color="#FF453A"/></Border.Background>
-                                                                <Border.Style><Style TargetType="Border"><Setter Property="BorderThickness" Value="2"/><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#FF453A"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                                                <Border.Style><Style TargetType="Border" BasedOn="{StaticResource ColorBlockStyle}"><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#FF453A"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
                                                             </Border>
-                                                            <Border Width="28" Height="28" CornerRadius="8" Cursor="Hand" Margin="3" Tag="#FF6B9D"
-                                                                    ToolTip="粉色" MouseLeftButtonDown="GlassColor_Click">
+                                                            <Border Tag="#FF6B9D" ToolTip="粉色" MouseLeftButtonDown="GlassColor_Click">
                                                                 <Border.Background><SolidColorBrush Color="#FF6B9D"/></Border.Background>
-                                                                <Border.Style><Style TargetType="Border"><Setter Property="BorderThickness" Value="2"/><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#FF6B9D"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                                                <Border.Style><Style TargetType="Border" BasedOn="{StaticResource ColorBlockStyle}"><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding DesktopFloatingGlassColor}" Value="#FF6B9D"><Setter Property="BorderBrush" Value="White"/></DataTrigger></Style.Triggers></Style></Border.Style>
                                                             </Border>
                                                         </StackPanel>
                                                     </Grid>
@@ -1173,7 +1948,6 @@
                         </Grid>
                     </Grid>
                 </Grid>
-            </Grid>
 
             <!-- 底部栏 -->
             <Border Grid.Row="2" Background="{DynamicResource CardBgAltBrush}" Padding="14,10">
@@ -1189,12 +1963,12 @@
                     </Grid>
 
                     <WrapPanel Margin="0,0,0,6">
-                        <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}" Style="{StaticResource AppCheckBox}"/>
-                        <CheckBox Content="静默模式" IsChecked="{Binding SilentCloseSteam}" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
-                        <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
+                        <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}" Checked="SettingsAutoStartSteam_Changed" Unchecked="SettingsAutoStartSteam_Changed" Style="{StaticResource AppCheckBox}"/>
+                        <CheckBox Content="静默模式" IsChecked="{Binding SilentCloseSteam}" Checked="SettingsSilentCloseSteam_Changed" Unchecked="SettingsSilentCloseSteam_Changed" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
+                        <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}" Checked="SettingsMinimizeToTray_Changed" Unchecked="SettingsMinimizeToTray_Changed" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}" Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                         <CheckBox Content="桌面悬浮窗" IsChecked="{Binding DesktopFloatingEnabled}" Checked="DesktopFloating_Checked" Unchecked="DesktopFloating_Unchecked" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
-                        <CheckBox Content="库界面注入 ⚠️" IsChecked="{Binding EnableLibraryInjection}" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
+                        <CheckBox Content="库界面注入 ⚠️" IsChecked="{Binding EnableLibraryInjection}" Checked="SettingsLibraryInjection_Changed" Unchecked="SettingsLibraryInjection_Changed" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
                     </WrapPanel>
 
                     <Border Background="{DynamicResource InputBgBrush}" CornerRadius="8" Padding="10,6" Margin="0,0,0,6">

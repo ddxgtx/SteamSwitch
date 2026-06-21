@@ -120,6 +120,44 @@ namespace SteamSwitcher.Views
             Close();
         }
 
+        private void SelectSteamPath_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "Steam 主程序|steam.exe",
+                Title = "请选择 Steam 安装目录下的 steam.exe"
+            };
+            if (dialog.ShowDialog() == true)
+            {
+                _viewModel.CustomSteamPath = System.IO.Path.GetDirectoryName(dialog.FileName) ?? "";
+            }
+        }
+
+        private void SelectLoginUsersPath_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "配置文件|loginusers.vdf",
+                Title = "请选择 loginusers.vdf 配置文件"
+            };
+            if (dialog.ShowDialog() == true)
+            {
+                _viewModel.CustomLoginUsersPath = dialog.FileName;
+            }
+        }
+
+        private void ResetPaths_Click(object sender, RoutedEventArgs e)
+        {
+            _viewModel.CustomSteamPath = "";
+            _viewModel.CustomLoginUsersPath = "";
+            MessageBox.Show("已重置为系统自动探测路径，程序将重新扫描。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void Minimize_Click(object sender, RoutedEventArgs e)
+        {
+            WindowState = WindowState.Minimized;
+        }
+
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             DragMove();

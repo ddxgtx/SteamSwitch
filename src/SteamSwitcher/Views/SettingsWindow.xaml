@@ -11,9 +11,34 @@
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
     
     <Window.Resources>
+        <Style x:Key="BtnWindow" TargetType="Button">
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#98989D"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" x:Name="bg">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#26FFFFFF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="BtnClose" TargetType="Button">
-            <Setter Property="Width" Value="36"/>
-            <Setter Property="Height" Value="28"/>
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="40"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="#98989D"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -93,6 +118,31 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="PathBtn" TargetType="Button">
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Background" Value="#3A3A3C"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="6" x:Name="b">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="12,0"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#4A4A4C"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#2C2C2E"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     
     <Border Background="#1C1C1E" CornerRadius="10" BorderBrush="#2C2C2E" BorderThickness="1">
@@ -103,20 +153,29 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- 自定义标题栏 -->
+            <!-- 自定义标题栏 (Windows 现代简约风) -->
             <Border Grid.Row="0" Background="#1C1C1E" CornerRadius="10,10,0,0">
                 <Grid Height="40">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock Grid.Column="0" Text="设置" FontSize="15" FontWeight="SemiBold" 
-                               Foreground="White" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                    <!-- 左侧：应用图标与标题 -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                        <Image Source="../Resources/icon.png" Width="16" Height="16" Margin="0,0,8,0" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <TextBlock Text="设置" FontSize="12" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                    </StackPanel>
 
-                    <Button Grid.Column="1" Content="✕" 
-                            Style="{StaticResource BtnClose}" 
-                            Click="Close_Click" Margin="0,0,8,0"/>
+                    <!-- 中间留空 -->
+                    <Grid Grid.Column="1"/>
+
+                    <!-- 右侧：控制按钮 -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Stretch">
+                        <Button Content="─" Style="{StaticResource BtnWindow}" Click="Minimize_Click" ToolTip="最小化" Width="46" Height="40"/>
+                        <Button Content="✕" Style="{StaticResource BtnClose}" Click="Close_Click" ToolTip="关闭" Width="46" Height="40"/>
+                    </StackPanel>
                 </Grid>
             </Border>
 
@@ -147,6 +206,61 @@
                                 <CheckBox Content="开机自动启动" 
                                           IsChecked="{Binding StartWithWindows}"
                                           Style="{StaticResource SettingsCheckBox}"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 自定义路径 -->
+                    <TextBlock Text="自定义 Steam 路径" FontSize="12" FontWeight="Medium" 
+                               Foreground="#636366" Margin="20,16,20,8"/>
+                    
+                    <Border Background="#2C2C2E" CornerRadius="12" Margin="16,0,16,8" Padding="0">
+                        <StackPanel>
+                            <!-- Steam目录 -->
+                            <Border Padding="16,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <TextBlock Text="Steam 安装路径 (包含 steam.exe)" Foreground="#98989D" FontSize="13"/>
+                                        <TextBlock Text="{Binding CustomSteamPath, TargetNullValue='未设置（自动检测）', FallbackValue='未设置（自动检测）'}" 
+                                                   Foreground="#636366" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="浏览" Click="SelectSteamPath_Click" Width="60" Height="28" 
+                                            Style="{StaticResource PathBtn}" FontSize="12"/>
+                                </Grid>
+                            </Border>
+                            <Border Background="#38383A" Height="0.5" Margin="16,0"/>
+                            <!-- loginusers.vdf路径 -->
+                            <Border Padding="16,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <TextBlock Text="账号配置文件 (loginusers.vdf) 路径" Foreground="#98989D" FontSize="13"/>
+                                        <TextBlock Text="{Binding CustomLoginUsersPath, TargetNullValue='未设置（自动检测）', FallbackValue='未设置（自动检测）'}" 
+                                                   Foreground="#636366" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="浏览" Click="SelectLoginUsersPath_Click" Width="60" Height="28" 
+                                            Style="{StaticResource PathBtn}" FontSize="12"/>
+                                </Grid>
+                            </Border>
+                            <Border Background="#38383A" Height="0.5" Margin="16,0"/>
+                            <!-- 清除按钮 -->
+                            <Border Padding="16,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="恢复自动检测路径" Foreground="#98989D" FontSize="13" VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1" Content="重置" Click="ResetPaths_Click" Width="60" Height="28" 
+                                            Style="{StaticResource PathBtn}" FontSize="12"/>
+                                </Grid>
                             </Border>
                         </StackPanel>
                     </Border>
@@ -246,14 +360,14 @@
                             <Border Background="#38383A" Height="0.5" Margin="16,0"/>
                             <Border Padding="16,14">
                                 <CheckBox Content="液态玻璃效果" 
-                                          IsChecked="{Binding GlassEnabled}"
+                                          IsChecked="{Binding TaskbarGlassEnabled}"
                                           Checked="Glass_Checked" Unchecked="Glass_Unchecked"
                                           Style="{StaticResource SettingsCheckBox}"/>
                             </Border>
                             <Border Background="#38383A" Height="0.5" Margin="16,0"/>
                             <Border Padding="16,14">
                                 <CheckBox Content="圆角模式" 
-                                          IsChecked="{Binding RoundedMode}"
+                                          IsChecked="{Binding TaskbarRoundedMode}"
                                           Checked="Rounded_Checked" Unchecked="Rounded_Unchecked"
                                           Style="{StaticResource SettingsCheckBox}"/>
                             </Border>
