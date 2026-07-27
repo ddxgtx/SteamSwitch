@@ -549,9 +549,9 @@ namespace SteamSwitcher.ViewModels
 
             _settings = SettingsService.Load();
             var registryStartWithWindows = SettingsService.IsStartWithWindowsEnabled();
-            if (registryStartWithWindows && !_settings.StartWithWindows)
+            if (_settings.StartWithWindows != registryStartWithWindows)
             {
-                _settings.StartWithWindows = true;
+                _settings.StartWithWindows = registryStartWithWindows;
                 SettingsService.Save(_settings);
             }
 
@@ -586,9 +586,6 @@ namespace SteamSwitcher.ViewModels
             _showNotificationOnSteamClose = _settings.ShowNotificationOnSteamClose;
             _customSteamPath = _settings.CustomSteamPath ?? "";
             _customLoginUsersPath = _settings.CustomLoginUsersPath ?? "";
-            if (_startWithWindows && !registryStartWithWindows)
-                SettingsService.SetStartWithWindows(true);
-
             _settingsSaveTimer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromMilliseconds(500)

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-07-27
+
+### Changed
+- 主程序改为普通用户权限运行，开机自启不再触发 UAC。
+- 开机自启命令增加 `--autorun` 参数，登录后直接进入托盘，不显示主窗口。
+- 移除未被使用的 Steam `steamui` 注入文件落盘，注入脚本继续通过内存和 DevTools 执行。
+
+### Fixed
+- 修复 `requireAdministrator` 与 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 冲突导致的开机自启失败。
+- 修复安装器在管理员上下文写入 HKCU、可能为错误用户注册自启的问题。
+- 修复登录自启与手动启动并发时可能出现多个托盘实例的问题。
+- 修复取消安装器开机自启选项后，旧设置可能重新创建启动项的问题。
+- 卸载时主动清理当前用户的开机自启项。
+
 ## [2.6] - 2026-06-21
 
 ### Added
