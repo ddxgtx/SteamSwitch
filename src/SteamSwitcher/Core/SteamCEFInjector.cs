@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
@@ -52,7 +51,7 @@ namespace SteamSwitcher.Core
                 var versionJson = await response.Content.ReadAsStringAsync();
                 AppLogger.Info($"DevTools version response length: {versionJson.Length}");
 
-                _script = await BuildAndWriteInjectedAssetsAsync();
+                _script = BuildInjectedScript();
                 var injectedCount = await InjectIntoTargetsAsync(http, _script);
                 _isConnected = injectedCount > 0;
                 StartTargetRescan();
@@ -114,18 +113,8 @@ namespace SteamSwitcher.Core
             AppLogger.Info("Steam CEF target rescan loop stopped.");
         }
 
-        private async Task<string> BuildAndWriteInjectedAssetsAsync()
+        private string BuildInjectedScript()
         {
-            var steamPath = _accountManager.GetSteamService().SteamPath;
-            if (string.IsNullOrEmpty(steamPath))
-                throw new InvalidOperationException("Steam path is empty.");
-
-            var steamuiPath = Path.Combine(steamPath, "steamui");
-            var jsPath = Path.Combine(steamuiPath, "steamswitch.inject.js");
-            var cssPath = Path.Combine(steamuiPath, "steamswitch.inject.css");
-
-            AppLogger.Info($"Writing inject assets. jsPath={jsPath}, cssPath={cssPath}");
-
             var css = @"
 .steamswitch-wrap {
     position: relative;
@@ -309,8 +298,6 @@ namespace SteamSwitcher.Core
     line-height: 16px;
 }
 ";
-            await File.WriteAllTextAsync(cssPath, css);
-
             var accountDtos = new List<object>();
             foreach (var account in _accountManager.Accounts)
             {
@@ -987,8 +974,7 @@ namespace SteamSwitcher.Core
                 .Replace("__BINDINGS__", bindingsJson)
                 .Replace("__STYLE__", cssJson);
 
-            await File.WriteAllTextAsync(jsPath, js);
-            AppLogger.Info($"Inject assets written. Accounts={accountDtos.Count}, Bindings={bindingDtos.Count}");
+            AppLogger.Info($"Inject script built. Accounts={accountDtos.Count}, Bindings={bindingDtos.Count}");
             return js;
         }
 

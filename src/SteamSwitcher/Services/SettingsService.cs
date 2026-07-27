@@ -98,21 +98,22 @@ namespace SteamSwitcher.Services
         {
             try
             {
-                using var key = Registry.CurrentUser.OpenSubKey(
-                    @"Software\Microsoft\Windows\CurrentVersion\Run", true);
-                if (key == null)
-                    return;
-
                 const string valueName = "SteamSwitch";
                 if (enabled)
                 {
+                    using var key = Registry.CurrentUser.CreateSubKey(
+                        @"Software\Microsoft\Windows\CurrentVersion\Run", true);
                     var exePath = Environment.ProcessPath ??
                                   Process.GetCurrentProcess().MainModule?.FileName;
                     if (!string.IsNullOrWhiteSpace(exePath))
-                        key.SetValue(valueName, $"\"{exePath}\"", RegistryValueKind.String);
+                        key.SetValue(valueName, $"\"{exePath}\" --autorun", RegistryValueKind.String);
                 }
                 else
                 {
+                    using var key = Registry.CurrentUser.OpenSubKey(
+                        @"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                    if (key == null)
+                        return;
                     key.DeleteValue(valueName, false);
                 }
             }
@@ -127,9 +128,25 @@ namespace SteamSwitcher.Services
             try
             {
                 using var key = Registry.CurrentUser.OpenSubKey(
-                    @"Software\Microsoft\Windows\CurrentVersion\Run", false);
-                return key?.GetValue("SteamSwitch") is string value &&
-                       !string.IsNullOrWhiteSpace(value);
+                    @"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                if (key?.GetValue("SteamSwitch") is not string value ||
+                    string.IsNullOrWhiteSpace(value))
+                {
+                    return false;
+                }
+
+                var exePath = Environment.ProcessPath ??
+                              Process.GetCurrentProcess().MainModule?.FileName;
+                if (!string.IsNullOrWhiteSpace(exePath) &&
+                    string.Equals(value, $"\"{exePath}\"", StringComparison.OrdinalIgnoreCase))
+                {
+                    key.SetValue(
+                        "SteamSwitch",
+                        $"\"{exePath}\" --autorun",
+                        RegistryValueKind.String);
+                }
+
+                return true;
             }
             catch (Exception ex)
             {

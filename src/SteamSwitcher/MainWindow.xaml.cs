@@ -25,6 +25,7 @@ namespace SteamSwitcher
         private bool _gameSearchPlaceholder = true;
         private bool _exitRequested;
         private bool _shutdownStarted;
+        private readonly bool _startHidden;
         private const string GameSearchHint = "搜索游戏名称或 AppID...";
 
         [DllImport("user32.dll")]
@@ -48,12 +49,20 @@ namespace SteamSwitcher
             public int cyBottomHeight;
         }
 
-        public MainWindow()
+        public MainWindow(bool startHidden = false)
         {
+            _startHidden = startHidden;
             _viewModel = new MainViewModel();
             DataContext = _viewModel;
 
             InitializeComponent();
+
+            if (_startHidden)
+            {
+                ShowActivated = false;
+                ShowInTaskbar = false;
+                Opacity = 0;
+            }
 
             _trayIcon = new TrayIconService(this);
             _trayIcon.AccountSelected += OnTrayAccountSelected;
@@ -115,6 +124,13 @@ namespace SteamSwitcher
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            if (_startHidden)
+            {
+                Hide();
+                Opacity = 1;
+                ShowInTaskbar = true;
+            }
+
             try
             {
                 var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "icon.png");
@@ -165,6 +181,21 @@ namespace SteamSwitcher
             }
 
             SwitchToAccounts();
+        }
+
+        public void ActivateFromExternalRequest()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(ActivateFromExternalRequest));
+                return;
+            }
+
+            ShowInTaskbar = true;
+            Show();
+            if (WindowState == WindowState.Minimized)
+                WindowState = WindowState.Normal;
+            Activate();
         }
 
         private void OnTrayAccountSelected(object? sender, string steamId)
