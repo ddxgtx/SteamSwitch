@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Linq;
 using System.Net.Http;
 using System.Diagnostics;
@@ -31,6 +32,8 @@ namespace SteamSwitcher.ViewModels
         private WebSocketServer? _wsServer;
         private readonly DispatcherTimer _settingsSaveTimer;
         private bool _settingsDirty;
+        private bool _restoringStartWithWindows;
+        private bool _disposed;
 
         [ObservableProperty]
         private ObservableCollection<AccountViewModel> _accounts = new();
@@ -188,6 +191,7 @@ namespace SteamSwitcher.ViewModels
         public string GameCountText => GameList.Count.ToString();
         public string QuickLaunchCountText => QuickLaunchList.Count.ToString();
         public string CurrentVersionText => $"当前版本：v{UpdateService.GetCurrentVersion()}";
+        public string CompactVersionText => $"v{UpdateService.GetCurrentVersion()} · 就绪";
         public string GitHubReleasesUrl => UpdateService.ReleasesUrl;
 
         public string PinnedCountText => (Accounts.Count(a => a.IsPinned) + GameList.Count(g => g.IsPinned)).ToString();
@@ -195,6 +199,16 @@ namespace SteamSwitcher.ViewModels
             _accountManager.CurrentAccount?.PersonaName ??
             _accountManager.CurrentAccount?.AccountName ??
             "未检测";
+        public AccountViewModel? CurrentAccountViewModel => Accounts.FirstOrDefault(a => a.IsCurrent);
+        public string SwitchStrategyText => SilentCloseSteam ? "强制结束进程树" : "等待 Steam 正常退出";
+        public string LaunchBehaviorText => AutoStartSteam ? "切换后自动启动 Steam" : "仅更新登录账号";
+        public int BoundGameCount => GameList.Count(g => g.HasBinding);
+        public int UnboundGameCount => Math.Max(0, GameList.Count - BoundGameCount);
+        public double GameBindingCoverage => GameList.Count == 0 ? 0 : BoundGameCount * 100.0 / GameList.Count;
+        public string GameBindingCoverageText => GameList.Count == 0 ? "等待扫描游戏" : $"{BoundGameCount}/{GameList.Count} 款已配置";
+        public string InjectorStatusDescription => IsInjectorConnected
+            ? "Steam 库入口已连接"
+            : EnableLibraryInjection ? "等待 Steam 库连接" : "功能尚未启用";
         public string SteamStateText => IsSteamRunning ? "运行中" : "未运行";
         public string InjectorStateText => IsInjectorConnected ? "已连接" : "未注入";
 
@@ -209,9 +223,9 @@ namespace SteamSwitcher.ViewModels
         public string SelectedGameBindingAccount =>
             SelectedGame != null && !string.IsNullOrEmpty(SelectedGame.BindingAccountName)
                 ? SelectedGame.BindingAccountName
-                : "";
+                : "未绑定账号";
 
-        public string SelectedGameBindingTime => SelectedGame?.BindingLastPlayed ?? "";
+        public string SelectedGameBindingTime => SelectedGame?.BindingLastPlayed ?? "暂无启动记录";
         public string SettingsDirectory => SettingsService.SettingsDirectory;
         public string LogDirectory => AppLogger.LogDirectory;
         public string SettingsPath => SettingsService.SettingsPath;
@@ -463,15 +477,7 @@ namespace SteamSwitcher.ViewModels
             var targetSteamId = account.SteamId;
             var targetAccountName = account.AccountName;
 
-            var isCurrentAccount = false;
-            if (!string.IsNullOrEmpty(currentSteamId) && !string.IsNullOrEmpty(targetSteamId))
-            {
-                isCurrentAccount = string.Equals(currentSteamId, targetSteamId, StringComparison.OrdinalIgnoreCase);
-            }
-            if (!isCurrentAccount && !string.IsNullOrEmpty(currentAccountName) && !string.IsNullOrEmpty(targetAccountName))
-            {
-                isCurrentAccount = string.Equals(currentAccountName, targetAccountName, StringComparison.OrdinalIgnoreCase);
-            }
+            var isCurrentAccount = AccountManager.AreSameAccount(_accountManager.CurrentAccount, account);
 
             AppLogger.Info($"LaunchPinnedGame: appId={appId}, current=[{currentSteamId}|{currentAccountName}], target=[{targetSteamId}|{targetAccountName}], isCurrent={isCurrentAccount}");
 
@@ -479,7 +485,7 @@ namespace SteamSwitcher.ViewModels
             {
                 StatusText = $"当前已是 {account.PersonaName}，直接启动 {game.GameName}...";
                 NotificationRequested?.Invoke(this, $"当前已是 {account.PersonaName}，直接启动 {game.GameName}");
-                var launched = _accountManager.LaunchGame(appId, SilentCloseSteam);
+                var launched = _accountManager.LaunchGame(appId);
                 if (launched)
                 {
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
@@ -510,7 +516,7 @@ namespace SteamSwitcher.ViewModels
                 SelectedAccount = Accounts.FirstOrDefault(a => a.SteamId == account.SteamId);
                 UpdateCurrentAccount();
 
-                var launched = _accountManager.LaunchGame(appId, SilentCloseSteam);
+                var launched = _accountManager.LaunchGame(appId);
                 if (launched)
                 {
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
@@ -545,7 +551,7 @@ namespace SteamSwitcher.ViewModels
             _gameBinding.BindingsChanged += OnGameBindingsChanged;
 
             _quickLaunch = new QuickLaunchService();
-            _quickLaunch.ItemsChanged += (s, e) => Application.Current.Dispatcher.Invoke(UpdateQuickLaunchList);
+            _quickLaunch.ItemsChanged += OnQuickLaunchItemsChanged;
 
             _settings = SettingsService.Load();
             var registryStartWithWindows = SettingsService.IsStartWithWindowsEnabled();
@@ -590,23 +596,73 @@ namespace SteamSwitcher.ViewModels
             {
                 Interval = TimeSpan.FromMilliseconds(500)
             };
-            _settingsSaveTimer.Tick += (s, e) =>
-            {
-                _settingsSaveTimer.Stop();
-                if (_settingsDirty)
-                {
-                    _settingsDirty = false;
-                    SettingsService.Save(_settings);
-                }
-            };
+            _settingsSaveTimer.Tick += OnSettingsSaveTimerTick;
 
             PropertyChanged += OnPropertyChanged;
+            Accounts.CollectionChanged += OnDashboardCollectionChanged;
+            GameList.CollectionChanged += OnDashboardCollectionChanged;
+            GameBindings.CollectionChanged += OnDashboardCollectionChanged;
             InitializeMinimalModeTimer();
+        }
+
+        private void OnSettingsSaveTimerTick(object? sender, EventArgs e)
+        {
+            _settingsSaveTimer.Stop();
+            SavePendingSettings();
+        }
+
+        private void SavePendingSettings()
+        {
+            if (!_settingsDirty)
+                return;
+
+            _settingsDirty = false;
+            SettingsService.Save(_settings);
+        }
+
+        private void OnDashboardCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            NotifyDashboardMetrics();
+            if (ReferenceEquals(sender, Accounts))
+            {
+                OnPropertyChanged(nameof(CurrentAccountViewModel));
+                OnPropertyChanged(nameof(CurrentAccountName));
+            }
+        }
+
+        private void NotifyDashboardMetrics()
+        {
+            OnPropertyChanged(nameof(AccountCountText));
+            OnPropertyChanged(nameof(BindingCountText));
+            OnPropertyChanged(nameof(GameCountText));
+            OnPropertyChanged(nameof(PinnedCountText));
+            OnPropertyChanged(nameof(BoundGameCount));
+            OnPropertyChanged(nameof(UnboundGameCount));
+            OnPropertyChanged(nameof(GameBindingCoverage));
+            OnPropertyChanged(nameof(GameBindingCoverageText));
         }
 
         private void OnGameBindingsChanged(object? sender, EventArgs e)
         {
-            Application.Current.Dispatcher.Invoke(UpdateGameBindingsList);
+            DispatchToUi(UpdateGameBindingsList);
+        }
+
+        private void OnQuickLaunchItemsChanged(object? sender, EventArgs e)
+        {
+            DispatchToUi(UpdateQuickLaunchList);
+        }
+
+        private static void DispatchToUi(Action action)
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            if (!dispatcher.HasShutdownStarted && !dispatcher.HasShutdownFinished)
+                _ = dispatcher.BeginInvoke(action);
         }
 
         private void UpdateQuickLaunchList()
@@ -664,6 +720,7 @@ namespace SteamSwitcher.ViewModels
             OnPropertyChanged(nameof(SelectedGameHasBinding));
             OnPropertyChanged(nameof(SelectedGameBindingAccount));
             OnPropertyChanged(nameof(SelectedGameBindingTime));
+            NotifyDashboardMetrics();
         }
 
         public async Task ScanGamesAsync()
@@ -753,6 +810,7 @@ namespace SteamSwitcher.ViewModels
             OnPropertyChanged(nameof(SelectedGameBindingAccount));
             OnPropertyChanged(nameof(SelectedGameBindingTime));
             OnPropertyChanged(nameof(BindingCountText));
+            NotifyDashboardMetrics();
             StatusText = $"已绑定 {gameName} → {accountName}";
         }
 
@@ -773,6 +831,7 @@ namespace SteamSwitcher.ViewModels
             OnPropertyChanged(nameof(SelectedGameBindingAccount));
             OnPropertyChanged(nameof(SelectedGameBindingTime));
             OnPropertyChanged(nameof(BindingCountText));
+            NotifyDashboardMetrics();
             StatusText = "已删除绑定";
         }
 
@@ -842,6 +901,7 @@ namespace SteamSwitcher.ViewModels
 
         private void OnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
+            var shouldSaveSettings = true;
             switch (e.PropertyName)
             {
                 case nameof(AutoStartSteam):
@@ -851,8 +911,25 @@ namespace SteamSwitcher.ViewModels
                     _settings.MinimizeToTray = MinimizeToTray;
                     break;
                 case nameof(StartWithWindows):
-                    _settings.StartWithWindows = StartWithWindows;
-                    SettingsService.SetStartWithWindows(StartWithWindows);
+                    if (_restoringStartWithWindows)
+                    {
+                        shouldSaveSettings = false;
+                        break;
+                    }
+
+                    var requestedStartWithWindows = StartWithWindows;
+                    var registrationSucceeded = SettingsService.SetStartWithWindows(requestedStartWithWindows);
+                    var actualStartWithWindows = SettingsService.IsStartWithWindowsEnabled();
+                    _settings.StartWithWindows = actualStartWithWindows;
+                    if (!registrationSucceeded || actualStartWithWindows != requestedStartWithWindows)
+                    {
+                        _restoringStartWithWindows = true;
+                        StartWithWindows = actualStartWithWindows;
+                        _restoringStartWithWindows = false;
+                        StatusText = requestedStartWithWindows
+                            ? "开机自启设置失败，请检查当前用户注册表权限"
+                            : "关闭开机自启失败，请检查当前用户注册表权限";
+                    }
                     break;
                 case nameof(IsTaskbarPinned):
                     _settings.TaskbarPinned = IsTaskbarPinned;
@@ -966,7 +1043,13 @@ namespace SteamSwitcher.ViewModels
                     _settings.DesktopFloatingDockEnabled = DesktopFloatingDockEnabled;
                     DesktopFloatingDockEnabledChanged?.Invoke(this, DesktopFloatingDockEnabled);
                     break;
+                default:
+                    shouldSaveSettings = false;
+                    break;
             }
+
+            if (!shouldSaveSettings)
+                return;
 
             _settingsDirty = true;
             _settingsSaveTimer.Stop();
@@ -975,7 +1058,7 @@ namespace SteamSwitcher.ViewModels
 
         private void OnAccountsChanged(object? sender, EventArgs e)
         {
-            Application.Current.Dispatcher.Invoke(UpdateAccountsList);
+            DispatchToUi(UpdateAccountsList);
         }
 
         public async Task InitializeAsync()
@@ -983,41 +1066,46 @@ namespace SteamSwitcher.ViewModels
             IsLoading = true;
             StatusText = "正在检测 Steam...";
 
-            _accountManager.GetSteamService().SetCustomPaths(CustomSteamPath, CustomLoginUsersPath);
-            var success = await _accountManager.InitializeAsync();
-            if (!success)
+            try
             {
-                StatusText = "未找到 Steam 安装路径";
+                _accountManager.GetSteamService().SetCustomPaths(CustomSteamPath, CustomLoginUsersPath);
+                var success = await _accountManager.InitializeAsync();
+                if (!success)
+                {
+                    StatusText = "未找到 Steam 安装路径";
+                    return;
+                }
+
+                StatusText = $"已检测到 {_accountManager.Accounts.Count} 个账号";
+                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+
+                UpdateAccountsList();
+
+                await _gameBinding.LoadAsync();
+                await _quickLaunch.LoadAsync();
+                UpdateQuickLaunchList();
+                UpdateGameBindingsList();
+
+                if (AutoScanGamesOnStartup)
+                    await ScanGamesAsync();
+
+                if (EnableLibraryInjection)
+                {
+                    AppLogger.Info("Library injection is enabled; auto-starting injector after initialization.");
+                    _ = StartInjectorAsync();
+                }
+
+                if (CheckUpdateOnStartup)
+                    _ = CheckForUpdatesAsync(isManual: false);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("MainViewModel initialization failed.", ex);
+                StatusText = $"初始化失败: {ex.Message}";
+            }
+            finally
+            {
                 IsLoading = false;
-                return;
-            }
-
-            StatusText = $"已检测到 {_accountManager.Accounts.Count} 个账号";
-            IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-
-            UpdateAccountsList();
-
-            await _gameBinding.LoadAsync();
-            await _quickLaunch.LoadAsync();
-            UpdateQuickLaunchList();
-            UpdateGameBindingsList();
-
-            if (AutoScanGamesOnStartup)
-            {
-                await ScanGamesAsync();
-            }
-
-            IsLoading = false;
-
-            if (EnableLibraryInjection)
-            {
-                AppLogger.Info("Library injection is enabled; auto-starting injector after initialization.");
-                _ = StartInjectorAsync();
-            }
-
-            if (CheckUpdateOnStartup)
-            {
-                _ = CheckForUpdatesAsync(isManual: false);
             }
         }
 
@@ -1037,7 +1125,7 @@ namespace SteamSwitcher.ViewModels
         public async Task RemoveQuickLaunchItemAsync(string id)
         {
             await _quickLaunch.RemoveAsync(id);
-            StatusText = "Removed quick launch item";
+            StatusText = "已移除快速启动项目";
         }
 
         public async Task ToggleQuickLaunchPinAsync(string id)
@@ -1052,7 +1140,7 @@ namespace SteamSwitcher.ViewModels
             if (item != null)
             {
                 var launched = _quickLaunch.Launch(item);
-                StatusText = launched ? "Launching " + item.Name : "Failed to launch " + item.Name;
+                StatusText = launched ? $"正在启动 {item.Name}" : $"启动 {item.Name} 失败";
             }
         }
 
@@ -1294,7 +1382,8 @@ namespace SteamSwitcher.ViewModels
 
             if (_accountManager.CurrentAccount != null)
             {
-                SelectedAccount = Accounts.FirstOrDefault(a => a.Account.SteamId == _accountManager.CurrentAccount.SteamId);
+                SelectedAccount = Accounts.FirstOrDefault(a =>
+                    AccountManager.AreSameAccount(a.Account, _accountManager.CurrentAccount));
             }
 
             UpdateCurrentAccount();
@@ -1310,7 +1399,14 @@ namespace SteamSwitcher.ViewModels
         partial void OnIsInjectorConnectedChanged(bool value)
         {
             OnPropertyChanged(nameof(InjectorStateText));
+            OnPropertyChanged(nameof(InjectorStatusDescription));
         }
+
+        partial void OnSilentCloseSteamChanged(bool value) => OnPropertyChanged(nameof(SwitchStrategyText));
+
+        partial void OnAutoStartSteamChanged(bool value) => OnPropertyChanged(nameof(LaunchBehaviorText));
+
+        partial void OnEnableLibraryInjectionChanged(bool value) => OnPropertyChanged(nameof(InjectorStatusDescription));
 
         partial void OnSelectedGameChanged(GameListViewModel? value)
         {
@@ -1362,16 +1458,9 @@ namespace SteamSwitcher.ViewModels
 
             AppLogger.Info($"SwitchAccount: current=[{currentSteamId}|{currentAccountName}], selected=[{selectedSteamId}|{selectedAccountName}]");
 
-            // 比较 SteamId 或 AccountName
-            var isCurrentAccount = false;
-            if (!string.IsNullOrEmpty(currentSteamId) && !string.IsNullOrEmpty(selectedSteamId))
-            {
-                isCurrentAccount = string.Equals(currentSteamId, selectedSteamId, StringComparison.OrdinalIgnoreCase);
-            }
-            if (!isCurrentAccount && !string.IsNullOrEmpty(currentAccountName) && !string.IsNullOrEmpty(selectedAccountName))
-            {
-                isCurrentAccount = string.Equals(currentAccountName, selectedAccountName, StringComparison.OrdinalIgnoreCase);
-            }
+            var isCurrentAccount = AccountManager.AreSameAccount(
+                _accountManager.CurrentAccount,
+                SelectedAccount.Account);
 
             AppLogger.Info($"SwitchAccount: isCurrent={isCurrentAccount}");
 
@@ -1379,10 +1468,12 @@ namespace SteamSwitcher.ViewModels
             {
                 StatusText = $"{SelectedAccount.DisplayName} 已是当前账号";
                 NotificationRequested?.Invoke(this, $"{SelectedAccount.DisplayName} 已是当前账号");
-                if (launchSteam && AutoStartSteam)
+                if (launchSteam)
                 {
-                    _accountManager.LaunchSteam(silent: SilentCloseSteam);
-                    StatusText = $"当前已是 {SelectedAccount.DisplayName}，已启动 Steam";
+                    var launched = _accountManager.LaunchSteam();
+                    StatusText = launched
+                        ? $"当前已是 {SelectedAccount.DisplayName}，已启动 Steam"
+                        : $"当前已是 {SelectedAccount.DisplayName}，但 Steam 启动失败";
                 }
                 IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
                 return;
@@ -1400,10 +1491,12 @@ namespace SteamSwitcher.ViewModels
                     NotificationRequested?.Invoke(this, $"已切换到 {SelectedAccount.Account.PersonaName}");
                     UpdateCurrentAccount();
 
-                    if (launchSteam && AutoStartSteam)
+                    if (launchSteam)
                     {
-                        StatusText = "正在启动 Steam...";
-                        _accountManager.LaunchSteam(silent: SilentCloseSteam);
+                        var launched = _accountManager.LaunchSteam();
+                        StatusText = launched
+                            ? $"已切换到 {SelectedAccount.Account.PersonaName}，Steam 已启动"
+                            : $"已切换到 {SelectedAccount.Account.PersonaName}，但 Steam 启动失败";
                     }
                 }
                 else
@@ -1418,11 +1511,12 @@ namespace SteamSwitcher.ViewModels
                 StatusText = $"切换失败: {ex.Message}";
             }
 
-            IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-            IsLoading = false;
-            if (MinimalMode)
+            finally
             {
-                Core.MemoryLimiter.CleanMemory();
+                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                IsLoading = false;
+                if (MinimalMode)
+                    Core.MemoryLimiter.CleanMemory();
             }
         }
 
@@ -1432,28 +1526,56 @@ namespace SteamSwitcher.ViewModels
             IsLoading = true;
             StatusText = "正在刷新账号列表...";
 
-            await _accountManager.LoadAccountsAsync();
-            IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-
-            UpdateAccountsList();
-            StatusText = $"已刷新，共 {_accountManager.Accounts.Count} 个账号";
-            IsLoading = false;
+            try
+            {
+                await _accountManager.LoadAccountsAsync();
+                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                UpdateAccountsList();
+                StatusText = $"已刷新，共 {_accountManager.Accounts.Count} 个账号";
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Refresh accounts failed.", ex);
+                StatusText = $"刷新账号失败: {ex.Message}";
+            }
+            finally
+            {
+                IsLoading = false;
+            }
         }
 
         [RelayCommand]
         private void LaunchSteam()
         {
-            _accountManager.LaunchSteam(silent: SilentCloseSteam);
-            IsSteamRunning = true;
-            StatusText = "Steam 已启动";
+            var launched = _accountManager.LaunchSteam();
+            IsSteamRunning = launched || _accountManager.GetSteamService().IsSteamRunning();
+            StatusText = launched ? "Steam 已启动" : "Steam 启动失败，请检查安装路径";
         }
 
         [RelayCommand]
-        private void CloseSteam()
+        private async Task CloseSteamAsync()
         {
-            _ = _accountManager.GetSteamService().CloseSteamAsync();
-            IsSteamRunning = false;
             StatusText = "正在关闭 Steam...";
+            IsLoading = true;
+
+            try
+            {
+                var closed = await _accountManager.GetSteamService().CloseSteamAsync();
+                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                StatusText = closed && !IsSteamRunning
+                    ? "Steam 已关闭"
+                    : "Steam 未能完全退出，可启用强制关闭 Steam 后重试";
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("CloseSteamAsync command failed.", ex);
+                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                StatusText = $"关闭 Steam 失败: {ex.Message}";
+            }
+            finally
+            {
+                IsLoading = false;
+            }
         }
 
         [RelayCommand]
@@ -1492,8 +1614,7 @@ namespace SteamSwitcher.ViewModels
 
             try
             {
-                _wsServer?.Stop();
-                _wsServer?.Dispose();
+                CleanupInjectorResources();
                 _wsServer = new WebSocketServer(8081);
                 _wsServer.MessageReceived += OnWebSocketMessage;
                 _wsServer.ClientConnected += (s, id) => AppLogger.Info($"Library WebSocket client connected: {id}");
@@ -1504,6 +1625,7 @@ namespace SteamSwitcher.ViewModels
                 var debugReady = await EnsureSteamDebuggingAsync();
                 if (!debugReady)
                 {
+                    CleanupInjectorResources();
                     StatusText = $"无法打开 Steam 调试端口，日志: {AppLogger.CurrentLogPath}";
                     return;
                 }
@@ -1517,12 +1639,16 @@ namespace SteamSwitcher.ViewModels
 
                 var connected = await _injector.ConnectAsync();
                 IsInjectorConnected = connected;
+                if (!connected)
+                    CleanupInjectorResources();
                 StatusText = connected
                     ? $"注入器已启动，日志: {AppLogger.CurrentLogPath}"
                     : $"注入失败，日志: {AppLogger.CurrentLogPath}";
             }
             catch (Exception ex)
             {
+                CleanupInjectorResources();
+                IsInjectorConnected = false;
                 AppLogger.Error("StartInjectorAsync failed.", ex);
                 StatusText = $"注入启动失败: {ex.Message}，日志: {AppLogger.CurrentLogPath}";
             }
@@ -1627,13 +1753,32 @@ namespace SteamSwitcher.ViewModels
         private void StopInjector()
         {
             AppLogger.Info("StopInjector requested.");
-            _injector?.Dispose();
-            _injector = null;
-            _wsServer?.Stop();
-            _wsServer?.Dispose();
-            _wsServer = null;
+            CleanupInjectorResources();
             IsInjectorConnected = false;
             StatusText = "注入器已停止";
+        }
+
+        private void CleanupInjectorResources()
+        {
+            try
+            {
+                _injector?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Failed to dispose Steam CEF injector: {ex.Message}");
+            }
+            _injector = null;
+
+            try
+            {
+                _wsServer?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Failed to dispose library WebSocket server: {ex.Message}");
+            }
+            _wsServer = null;
         }
 
         private async void OnWebSocketMessage(object? sender, (string action, System.Text.Json.JsonElement data) e)
@@ -1713,15 +1858,7 @@ namespace SteamSwitcher.ViewModels
             var targetSteamId = account.SteamId;
             var targetAccountName = account.AccountName;
 
-            var isCurrentAccount = false;
-            if (!string.IsNullOrEmpty(currentSteamId) && !string.IsNullOrEmpty(targetSteamId))
-            {
-                isCurrentAccount = string.Equals(currentSteamId, targetSteamId, StringComparison.OrdinalIgnoreCase);
-            }
-            if (!isCurrentAccount && !string.IsNullOrEmpty(currentAccountName) && !string.IsNullOrEmpty(targetAccountName))
-            {
-                isCurrentAccount = string.Equals(currentAccountName, targetAccountName, StringComparison.OrdinalIgnoreCase);
-            }
+            var isCurrentAccount = AccountManager.AreSameAccount(_accountManager.CurrentAccount, account);
 
             AppLogger.Info($"SwitchAndLaunch: appId={appId}, current=[{currentSteamId}|{currentAccountName}], target=[{targetSteamId}|{targetAccountName}], isCurrent={isCurrentAccount}");
 
@@ -1737,7 +1874,7 @@ namespace SteamSwitcher.ViewModels
                 {
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
                 }
-                var launched = _accountManager.LaunchGame(appId, SilentCloseSteam);
+                var launched = _accountManager.LaunchGame(appId);
                 StatusText = launched
                     ? $"当前已是 {account.PersonaName}，正在启动游戏"
                     : "启动游戏失败";
@@ -1771,7 +1908,7 @@ namespace SteamSwitcher.ViewModels
                     await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
                 }
 
-                var launched = _accountManager.LaunchGame(appId, SilentCloseSteam);
+                var launched = _accountManager.LaunchGame(appId);
                 if (launched)
                 {
                     StatusText = $"已切换到 {account.PersonaName}，正在启动游戏";
@@ -1802,20 +1939,43 @@ namespace SteamSwitcher.ViewModels
 
         private void UpdateCurrentAccount()
         {
-            var currentSteamId = _accountManager.CurrentAccount?.SteamId;
             foreach (var acc in Accounts)
             {
-                acc.IsCurrent = !string.IsNullOrEmpty(currentSteamId) && acc.SteamId == currentSteamId;
+                acc.IsCurrent = AccountManager.AreSameAccount(acc.Account, _accountManager.CurrentAccount);
             }
 
             OnPropertyChanged(nameof(CurrentAccountName));
+            OnPropertyChanged(nameof(CurrentAccountViewModel));
         }
 
         public void Dispose()
         {
-            _settingsSaveTimer?.Stop();
-            _injector?.Dispose();
-            _wsServer?.Dispose();
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            _settingsSaveTimer.Stop();
+            _settingsSaveTimer.Tick -= OnSettingsSaveTimerTick;
+            SavePendingSettings();
+
+            if (_minimalModeTimer != null)
+            {
+                _minimalModeTimer.Stop();
+                _minimalModeTimer.Tick -= OnMinimalModeTimerTick;
+            }
+
+            PropertyChanged -= OnPropertyChanged;
+            Accounts.CollectionChanged -= OnDashboardCollectionChanged;
+            GameList.CollectionChanged -= OnDashboardCollectionChanged;
+            GameBindings.CollectionChanged -= OnDashboardCollectionChanged;
+            _accountManager.AccountsChanged -= OnAccountsChanged;
+            _gameBinding.BindingsChanged -= OnGameBindingsChanged;
+            _quickLaunch.ItemsChanged -= OnQuickLaunchItemsChanged;
+            foreach (var account in Accounts)
+                account.PropertyChanged -= OnAccountPropertyChanged;
+
+            CleanupInjectorResources();
+            _quickLaunch.Dispose();
             _accountManager.Dispose();
             GC.SuppressFinalize(this);
         }
@@ -1830,13 +1990,7 @@ namespace SteamSwitcher.ViewModels
                 {
                     Interval = TimeSpan.FromSeconds(30)
                 };
-                _minimalModeTimer.Tick += (s, e) =>
-                {
-                    if (MinimalMode)
-                    {
-                        Core.MemoryLimiter.CleanMemory();
-                    }
-                };
+                _minimalModeTimer.Tick += OnMinimalModeTimerTick;
             }
 
             if (MinimalMode)
@@ -1848,6 +2002,12 @@ namespace SteamSwitcher.ViewModels
             {
                 _minimalModeTimer.Stop();
             }
+        }
+
+        private void OnMinimalModeTimerTick(object? sender, EventArgs e)
+        {
+            if (MinimalMode)
+                Core.MemoryLimiter.CleanMemory();
         }
     }
 
@@ -1914,6 +2074,19 @@ namespace SteamSwitcher.ViewModels
         public string DisplayName => Account.PersonaName;
         public string Username => Account.AccountName;
         public string SteamId => Account.SteamId;
+        public string LastLoginText
+        {
+            get
+            {
+                if (Account.Timestamp <= 0) return "登录时间未知";
+                var elapsed = DateTime.Now - Account.LastLoginTime;
+                if (elapsed.TotalMinutes < 2) return "刚刚登录";
+                if (elapsed.TotalHours < 1) return $"{Math.Max(1, (int)elapsed.TotalMinutes)} 分钟前";
+                if (elapsed.TotalDays < 1) return $"{Math.Max(1, (int)elapsed.TotalHours)} 小时前";
+                if (elapsed.TotalDays < 7) return $"{Math.Max(1, (int)elapsed.TotalDays)} 天前";
+                return Account.LastLoginTime.ToString("yyyy-MM-dd");
+            }
+        }
 
         [ObservableProperty]
         private bool _isCurrent;

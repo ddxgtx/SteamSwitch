@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows;
 using System.Windows.Forms;
+using SteamSwitcher.Core;
 using SteamSwitcher.ViewModels;
 using FontStyle = System.Drawing.FontStyle;
 using MediaBrush = System.Windows.Media.Brush;
@@ -118,7 +119,7 @@ namespace SteamSwitcher.Services
             showItem.Click += (s, e) => ShowOwnerWindow();
             _contextMenu.Items.Add(showItem);
 
-            var launchItem = CreateMenuItem("启动 Steam", "按静默模式设置启动");
+            var launchItem = CreateMenuItem("启动 Steam", "正常启动 Steam");
             launchItem.Click += (s, e) => LaunchSteamRequested?.Invoke(this, EventArgs.Empty);
             _contextMenu.Items.Add(launchItem);
 
@@ -129,7 +130,9 @@ namespace SteamSwitcher.Services
 
                 foreach (var account in accounts)
                 {
-                    var isCurrent = account.Account.MostRecent;
+                    var isCurrent = AccountManager.AreSameAccount(
+                        account.Account,
+                        currentAccount?.Account);
                     var item = CreateMenuItem(
                         account.DisplayName,
                         string.IsNullOrWhiteSpace(account.Username) ? "" : account.Username,

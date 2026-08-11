@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -23,10 +24,12 @@ namespace SteamSwitcher
         private TaskbarBandWindow? _taskbarBand;
         private DesktopFloatingWindow? _desktopFloatingWindow;
         private bool _gameSearchPlaceholder = true;
+        private bool _accountSearchPlaceholder = true;
         private bool _exitRequested;
         private bool _shutdownStarted;
         private readonly bool _startHidden;
-        private const string GameSearchHint = "搜索游戏名称或 AppID...";
+        private const string GameSearchHint = "搜索游戏、AppID 或启动账号...";
+        private const string AccountSearchHint = "搜索账号名称或登录名...";
 
         [DllImport("user32.dll")]
         private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
@@ -68,6 +71,7 @@ namespace SteamSwitcher
             _trayIcon.AccountSelected += OnTrayAccountSelected;
             _trayIcon.LaunchSteamRequested += OnTrayLaunchSteamRequested;
             _trayIcon.ExitRequested += (s, e) => RequestExit();
+            _viewModel.GetAccountManager().CurrentAccountChanged += OnCurrentAccountChanged;
 
             _viewModel.NotificationRequested += (s, message) =>
             {
@@ -150,6 +154,9 @@ namespace SteamSwitcher
             GameSearchBox.Text = GameSearchHint;
             GameSearchBox.Foreground = (Brush)Application.Current.Resources["SearchPlaceholderFgBrush"];
             _gameSearchPlaceholder = true;
+            AccountSearchBox.Text = AccountSearchHint;
+            AccountSearchBox.Foreground = (Brush)Application.Current.Resources["SearchPlaceholderFgBrush"];
+            _accountSearchPlaceholder = true;
 
             SettingsOffsetXSlider.Value = _viewModel.TaskbarOffsetX;
             SettingsOffsetXText.Text = _viewModel.TaskbarOffsetX.ToString();
@@ -204,14 +211,22 @@ namespace SteamSwitcher
             if (account != null)
             {
                 _viewModel.SelectedAccount = account;
-                _ = _viewModel.SwitchAndLaunchCommand.ExecuteAsync(null);
+                _ = _viewModel.AutoStartSteam
+                    ? _viewModel.SwitchAndLaunchCommand.ExecuteAsync(null)
+                    : _viewModel.SwitchOnlyCommand.ExecuteAsync(null);
             }
         }
 
         private void OnTrayLaunchSteamRequested(object? sender, EventArgs e)
         {
             var accountManager = _viewModel.GetAccountManager();
-            accountManager.LaunchSteam(silent: _viewModel.SilentCloseSteam);
+            accountManager.LaunchSteam();
+        }
+
+        private void OnCurrentAccountChanged(object? sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+                _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount)));
         }
 
         private void Window_Closing(object? sender, CancelEventArgs e)
@@ -248,6 +263,7 @@ namespace SteamSwitcher
             _taskbarBand = null;
             _desktopFloatingWindow = null;
 
+            _viewModel.GetAccountManager().CurrentAccountChanged -= OnCurrentAccountChanged;
             taskbarBand?.Detach();
             taskbarBand?.Close();
             desktopFloatingWindow?.Close();
@@ -352,6 +368,8 @@ namespace SteamSwitcher
             GameView.Visibility = Visibility.Collapsed;
             QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "账号切换";
+            PageSubtitle.Text = "选择账号并安全切换 Steam 登录状态";
             SetSidebarActive(SideAccounts, SideAccentAccount,
                              SideGames, SideAccentGame,
                              SideQuickLaunch, SideAccentQuickLaunch,
@@ -364,6 +382,8 @@ namespace SteamSwitcher
             GameView.Visibility = Visibility.Visible;
             QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "游戏绑定与启动";
+            PageSubtitle.Text = "将游戏绑定到指定账号，一步完成切换与启动";
             SetSidebarActive(SideGames, SideAccentGame,
                              SideAccounts, SideAccentAccount,
                              SideQuickLaunch, SideAccentQuickLaunch,
@@ -398,6 +418,8 @@ namespace SteamSwitcher
             GameView.Visibility = Visibility.Collapsed;
             QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Visible;
+            PageTitle.Text = "设置与外观";
+            PageSubtitle.Text = "按工作流管理启动、通知、任务栏、悬浮窗和主题";
             SetSidebarActive(SideSettings, SideAccentSettings,
                              SideAccounts, SideAccentAccount,
                              SideGames, SideAccentGame,
@@ -440,6 +462,53 @@ namespace SteamSwitcher
                 : "未找到已安装的游戏";
         }
 
+        private void AccountCollectionViewSource_Filter(object sender, FilterEventArgs e)
+        {
+            if (_accountSearchPlaceholder || string.IsNullOrWhiteSpace(AccountSearchBox?.Text))
+            {
+                e.Accepted = true;
+                return;
+            }
+
+            if (e.Item is not AccountViewModel account)
+            {
+                e.Accepted = false;
+                return;
+            }
+
+            var query = AccountSearchBox.Text.Trim();
+            e.Accepted = account.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                         account.Username.Contains(query, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void AccountSearchBox_GotFocus(object sender, RoutedEventArgs e)
+        {
+            if (!_accountSearchPlaceholder) return;
+            _accountSearchPlaceholder = false;
+            AccountSearchBox.Text = string.Empty;
+            AccountSearchBox.Foreground = (Brush)Application.Current.Resources["SearchTextFgBrush"];
+        }
+
+        private void AccountSearchBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (!string.IsNullOrWhiteSpace(AccountSearchBox.Text)) return;
+            _accountSearchPlaceholder = true;
+            AccountSearchBox.Text = AccountSearchHint;
+            AccountSearchBox.Foreground = (Brush)Application.Current.Resources["SearchPlaceholderFgBrush"];
+            RefreshAccountFilter();
+        }
+
+        private void AccountSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            RefreshAccountFilter();
+        }
+
+        private void RefreshAccountFilter()
+        {
+            if (Resources["FilteredAccounts"] is CollectionViewSource source)
+                source.View?.Refresh();
+        }
+
         private void GameSearchBox_GotFocus(object sender, RoutedEventArgs e)
         {
             if (_gameSearchPlaceholder)
@@ -477,7 +546,9 @@ namespace SteamSwitcher
             {
                 var filtered = _viewModel.GameList
                     .Where(g => g.GameName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                                g.AppId.ToString().Contains(search, StringComparison.OrdinalIgnoreCase));
+                                g.AppId.ToString().Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                (!string.IsNullOrWhiteSpace(g.BindingAccountName) &&
+                                 g.BindingAccountName.Contains(search, StringComparison.OrdinalIgnoreCase)));
                 GameListBox.ItemsSource = new System.Collections.ObjectModel.ObservableCollection<GameListViewModel>(filtered);
             }
         }
@@ -1143,14 +1214,7 @@ namespace SteamSwitcher
         private async void OnTaskbarAccountSwitch(object? sender, Models.SteamAccount account)
         {
             var accountManager = _viewModel.GetAccountManager();
-            var currentSteamId = accountManager.CurrentAccount?.SteamId;
-            var currentAccountName = accountManager.CurrentAccount?.AccountName;
-
-            var isCurrent = false;
-            if (!string.IsNullOrEmpty(currentSteamId) && !string.IsNullOrEmpty(account.SteamId))
-                isCurrent = string.Equals(currentSteamId, account.SteamId, StringComparison.OrdinalIgnoreCase);
-            if (!isCurrent && !string.IsNullOrEmpty(currentAccountName) && !string.IsNullOrEmpty(account.AccountName))
-                isCurrent = string.Equals(currentAccountName, account.AccountName, StringComparison.OrdinalIgnoreCase);
+            var isCurrent = AccountManager.AreSameAccount(accountManager.CurrentAccount, account);
 
             if (isCurrent)
             {
@@ -1175,7 +1239,7 @@ namespace SteamSwitcher
                 if (_viewModel.AutoStartSteam)
                 {
                     _viewModel.StatusText = "正在启动Steam...";
-                    accountManager.LaunchSteam(silent: _viewModel.SilentCloseSteam);
+                    accountManager.LaunchSteam();
                 }
             }
             else
@@ -1210,6 +1274,8 @@ namespace SteamSwitcher
             GameView.Visibility = Visibility.Collapsed;
             QuickLaunchView.Visibility = Visibility.Visible;
             SettingsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "快速启动";
+            PageSubtitle.Text = "集中管理常用程序、快捷方式和固定入口";
             SetSidebarActive(SideQuickLaunch, SideAccentQuickLaunch,
                              SideAccounts, SideAccentAccount,
                              SideGames, SideAccentGame,

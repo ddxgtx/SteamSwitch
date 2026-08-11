@@ -26,6 +26,7 @@ namespace SteamSwitcher.Views
         private EventHandler? _pinnedGamesChangedHandler;
         private EventHandler? _pinnedAccountsChangedHandler;
         private EventHandler? _quickLaunchChangedHandler;
+        private EventHandler? _currentAccountChangedHandler;
         private PanelDragHelper? _gameDragHelper;
         private PanelDragHelper? _avatarDragHelper;
 
@@ -56,9 +57,19 @@ namespace SteamSwitcher.Views
             InitializeComponent();
             _accountManager = accountManager;
             _embedder = new TaskbarEmbedder();
+            _currentAccountChangedHandler = (s, e) => Dispatcher.BeginInvoke(
+                new Action(() => UpdateCurrentAccount(_accountManager.CurrentAccount)));
+            _accountManager.CurrentAccountChanged += _currentAccountChangedHandler;
             _embedder.TaskbarCreated += (s, e) => Application.Current.Dispatcher.Invoke(Rebuild);
             Loaded += (s, e) => { UpdateGlass(); SetupDragDrop(); };
             Closing += (s, e) => Detach();
+            Closed += (s, e) =>
+            {
+                if (_currentAccountChangedHandler != null)
+                    _accountManager.CurrentAccountChanged -= _currentAccountChangedHandler;
+                DetachViewModelEvents();
+                _embedder.Dispose();
+            };
             MouseLeftButtonDown += TaskbarBandWindow_MouseLeftButtonDown;
             MouseRightButtonDown += TaskbarBandWindow_MouseRightButtonDown;
         }
@@ -191,7 +202,7 @@ namespace SteamSwitcher.Views
                     if (account != null)
                         AccountSwitchRequested?.Invoke(this, account);
                 },
-                launchSteam: () => _accountManager.LaunchSteam(silent: _viewModel?.SilentCloseSteam ?? true),
+                launchSteam: () => _accountManager.LaunchSteam(),
                 refresh: () => Rebuild(),
                 detach: () => DetachRequested?.Invoke(this, EventArgs.Empty),
                 showDetach: true,
@@ -212,16 +223,7 @@ namespace SteamSwitcher.Views
 
         public void SetViewModel(MainViewModel vm)
         {
-            // Unsubscribe from old events if any
-            if (_viewModel != null)
-            {
-                if (_pinnedGamesChangedHandler != null)
-                    _viewModel.PinnedGamesChanged -= _pinnedGamesChangedHandler;
-                if (_pinnedAccountsChangedHandler != null)
-                    _viewModel.PinnedAccountsChanged -= _pinnedAccountsChangedHandler;
-                if (_quickLaunchChangedHandler != null)
-                    _viewModel.QuickLaunchChanged -= _quickLaunchChangedHandler;
-            }
+            DetachViewModelEvents();
 
             _viewModel = vm;
 
@@ -245,6 +247,21 @@ namespace SteamSwitcher.Views
             _viewModel.PinnedGamesChanged += _pinnedGamesChangedHandler;
             _viewModel.PinnedAccountsChanged += _pinnedAccountsChangedHandler;
             _viewModel.QuickLaunchChanged += _quickLaunchChangedHandler;
+        }
+
+        private void DetachViewModelEvents()
+        {
+            if (_viewModel == null)
+                return;
+
+            if (_pinnedGamesChangedHandler != null)
+                _viewModel.PinnedGamesChanged -= _pinnedGamesChangedHandler;
+            if (_pinnedAccountsChangedHandler != null)
+                _viewModel.PinnedAccountsChanged -= _pinnedAccountsChangedHandler;
+            if (_quickLaunchChangedHandler != null)
+                _viewModel.QuickLaunchChanged -= _quickLaunchChangedHandler;
+
+            _viewModel = null;
         }
 
         public void SetPinnedAccounts(List<SteamAccount> accounts)
@@ -318,7 +335,7 @@ namespace SteamSwitcher.Views
             {
                 if (child is Border b && b.Tag is SteamAccount acc)
                 {
-                    bool isCur = acc == current;
+                    bool isCur = AccountManager.AreSameAccount(acc, current);
                     b.BorderThickness = isCur ? new Thickness(2.5) : new Thickness(1);
                     b.BorderBrush = isCur ? _currentBorderBrush : _normalBorderBrush;
                 }
@@ -616,7 +633,7 @@ namespace SteamSwitcher.Views
                 {
                     CornerRadius = new CornerRadius(8),
                     Background = Brushes.Transparent,
-                    Child = FallbackIcon(sz, "⚡")
+                    Child = FallbackIcon(sz, "\uE945")
                 };
             }
             border.Child = overlay;
@@ -662,7 +679,7 @@ namespace SteamSwitcher.Views
         {
             int sz = _iconSize;
             int r = _iconRadius;
-            bool isCur = account == _accountManager.CurrentAccount;
+            bool isCur = AccountManager.AreSameAccount(account, _accountManager.CurrentAccount);
 
             var border = new Border
             {
@@ -708,7 +725,7 @@ namespace SteamSwitcher.Views
             };
             border.MouseEnter += (s, e) =>
             {
-                if (!isCur)
+                if (!AccountManager.AreSameAccount(account, _accountManager.CurrentAccount))
                 {
                     overlay.Background = HoverBrush();
                     border.BorderBrush = _hoverBorderBrush;
@@ -725,19 +742,18 @@ namespace SteamSwitcher.Views
             };
             border.MouseLeave += (s, e) =>
             {
-                if (!isCur)
+                overlay.Background = Brushes.Transparent;
+                bool isCurrent = AccountManager.AreSameAccount(account, _accountManager.CurrentAccount);
+                border.BorderBrush = isCurrent ? _currentBorderBrush : _normalBorderBrush;
+                border.BorderThickness = isCurrent ? new Thickness(2.5) : new Thickness(1);
+                if (border.RenderTransform is ScaleTransform sc)
                 {
-                    overlay.Background = Brushes.Transparent;
-                    border.BorderBrush = _normalBorderBrush;
-                    if (border.RenderTransform is ScaleTransform sc)
+                    var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150))
                     {
-                        var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150))
-                        {
-                            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                        };
-                        sc.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
-                        sc.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
-                    }
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    };
+                    sc.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+                    sc.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
                 }
             };
 
@@ -764,9 +780,10 @@ namespace SteamSwitcher.Views
             catch { return null; }
         }
 
-        private static UIElement FallbackIcon(int sz, string icon = "🎮") => new TextBlock()
+        private static UIElement FallbackIcon(int sz, string icon = "\uE7FC") => new TextBlock()
         {
             Text = icon,
+            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
             FontSize = sz > 36 ? 16 : 14,
             Foreground = new SolidColorBrush(Color.FromRgb(0x25, 0x2A, 0x32)),
             HorizontalAlignment = HorizontalAlignment.Center,

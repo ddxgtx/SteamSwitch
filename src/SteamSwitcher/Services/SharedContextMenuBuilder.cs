@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
+using SteamSwitcher.Core;
 using SteamSwitcher.ViewModels;
 
 namespace SteamSwitcher.Services
@@ -54,7 +55,7 @@ namespace SteamSwitcher.Services
                 stack.Children.Add(CreateRow(
                     menu,
                     "启动 Steam",
-                    "按静默模式设置启动",
+                    "正常启动 Steam",
                     "\uE768",
                     null,
                     palette,
@@ -110,7 +111,9 @@ namespace SteamSwitcher.Services
 
                 foreach (var account in accounts)
                 {
-                    var isCurrent = account == currentAccount || account.Account.MostRecent;
+                    var isCurrent = AccountManager.AreSameAccount(
+                        account.Account,
+                        currentAccount?.Account);
                     var row = CreateRow(
                         menu,
                         account.DisplayName,
