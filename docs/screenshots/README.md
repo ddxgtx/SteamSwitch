@@ -4,13 +4,11 @@
 
 ## 截图列表
 
-- `main_window.png` - 主界面（暗黑模式）
-- `game_list.png` - 游戏列表界面
-- `settings.png` - 设置界面
-- `taskbar.png` - 任务栏常驻效果
-- `floating_window.png` - 桌面悬浮窗效果
-- `tray_menu.png` - 系统托盘菜单
-- `white_theme.png` - 白色主题界面
+- `screenshot_1.png` - 账号切换页面（暗黑模式）
+- `screenshot_2.png` - 游戏列表与账号绑定页面
+- `screenshot_3.png` - 快捷启动页面
+- `screenshot_4.png` - 设置中心页面
+- `注入.png` - Steam 库注入效果
 
 ## 如何截图
 

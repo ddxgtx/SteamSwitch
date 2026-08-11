@@ -11,10 +11,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)]()
-[![Release](https://img.shields.io/badge/Release-v2.6.1-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases)
+[![Release](https://img.shields.io/badge/Release-v2.7-green.svg)](https://github.com/ddxgtx/SteamSwitch/releases/tag/v2.7)
 [![Status](https://img.shields.io/badge/Status-Stable-brightgreen.svg)]()
 
-**[官方网站](http://ddxgtx.fun/SteamSwitch)** · **[下载最新版](https://github.com/ddxgtx/SteamSwitch/releases/latest)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)**
+**[官方网站](http://ddxgtx.fun/SteamSwitch/)** · **[下载最新版](https://github.com/ddxgtx/SteamSwitch/releases/latest)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)**
 
 </div>
 
@@ -24,17 +24,17 @@
 
 <div align="center">
 
-**主界面**
-![主界面](docs/screenshots/screenshot_1.png)
+**账号切换**
+![账号切换](docs/screenshots/screenshot_1.png)
 
 **游戏绑定**
 ![游戏绑定](docs/screenshots/screenshot_2.png)
 
-**设置与快捷入口**
-![设置](docs/screenshots/screenshot_3.png)
+**快捷启动**
+![快捷启动](docs/screenshots/screenshot_3.png)
 
-**系统托盘**
-![托盘](docs/screenshots/screenshot_4.png)
+**设置中心**
+![设置中心](docs/screenshots/screenshot_4.png)
 
 **Steam 库注入**
 ![注入](docs/screenshots/注入.png)
@@ -45,11 +45,13 @@
 
 ## 功能特性
 
-### 2.5 重大更新：程序快速启动
+### v2.7 更新亮点
 
-- 新增程序快速启动，可把常用应用加入 Steam Switch。
-- 快速启动项可固定到任务栏常驻和桌面悬浮窗。
-- 快速启动项可与固定游戏混合拖拽排序，顺序自动保存。
+- 全面重构账号、游戏、快捷启动和设置页面，统一 Windows 11 深色工作台风格。
+- 游戏列表直接显示绑定的启动账号和最后启动时间，切换路径更清晰。
+- 修复普通用户开机自启与 UAC 冲突，程序本体始终以普通用户权限运行。
+- 完善悬浮窗、任务栏常驻窗和后台头像任务的资源释放，降低长期运行内存占用。
+- 「静默模式」更名为语义明确的「强制关闭 Steam」，启动与切换状态反馈更加准确。
 
 <table>
 <tr>
@@ -59,7 +61,7 @@
 - 自动读取 Steam 本机登录账号、昵称、头像
 - 支持「切换并启动 Steam」与「仅切换账号」
 - 系统托盘菜单快速切换
-- 最小化到托盘，支持开机自启
+- 最小化到托盘，支持无需 UAC 的开机自启
 - 切换时显示气泡提醒
 
 </td>
@@ -113,6 +115,7 @@
 - 发现新版本弹窗提示，支持一键更新
 - 暗黑/白色主题切换
 - 设置自动保存（500ms 防抖）
+- 窗口与后台任务退出时主动释放资源
 
 </td>
 </tr>
@@ -124,34 +127,27 @@
 
 ### 方式一：安装程序（推荐）
 
-下载 **[SteamSwitch-v2.5.2-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5.2/SteamSwitch-v2.5.2-win-x64-setup.exe)**
+下载 **[SteamSwitch-v2.7-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.7/SteamSwitch-v2.7-win-x64-setup.exe)**
 
 - 支持中文安装向导
 - 可选创建桌面快捷方式
 - 可选开机自启动
-- 自动请求管理员权限
+- 仅安装过程请求管理员权限，程序本体普通权限运行
 
 ### 方式二：解压版
 
-下载 **[SteamSwitch-v2.5.2-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5.2/SteamSwitch-v2.5.2-win-x64-portable.zip)**
+下载 **[SteamSwitch-v2.7-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.7/SteamSwitch-v2.7-win-x64-portable.zip)**
 
 - 解压到任意目录
 - 运行 `SteamSwitch.exe`
 - 无需安装，即开即用
-
-### 方式三：便携单文件版
-
-下载 **[SteamSwitch-v2.5.2-win-x64-portable.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v2.5.2/SteamSwitch-v2.5.2-win-x64-portable.exe)**
-
-- 单个 exe 文件，适合放入工具目录或移动设备
-- 无需安装，运行后配置仍保存在用户目录
 
 ### 系统要求
 
 | 要求 | 说明 |
 |------|------|
 | 操作系统 | Windows 10 / Windows 11 (64-bit) |
-| 运行时 | .NET 8.0 Desktop Runtime（便携版已内置） |
+| 运行时 | 已内置 .NET 8，无需另行安装 |
 | 前置条件 | 已安装 Steam 客户端 |
 
 ---
@@ -193,6 +189,7 @@
 |------|------|
 | `settings.json` | 应用设置、主题、布局配置 |
 | `gamebindings.json` | 游戏与账号绑定关系 |
+| `quicklaunch.json` | 快速启动项目与排序 |
 | `logs/steamswitch-YYYYMMDD.log` | 运行日志 |
 
 在设置页的「维护与排障」中可快速打开目录或重置布局。
@@ -204,6 +201,7 @@
 > **Steam Switch 是第三方开源工具，与 Valve Corporation 无关联。**
 
 - 「Steam 库界面注入」会开启 Steam CEF 调试端口
+- 注入功能默认关闭，账号切换、游戏绑定和快捷入口均可独立使用
 - 可能不符合 Steam 用户协议或未来平台策略
 - **不用于**作弊、绕过 DRM、篡改游戏进程
 - 不建议在 VAC/竞技游戏运行期间开启注入
@@ -266,7 +264,7 @@ dotnet build SteamSwitch.sln -c Release
 
 <div align="center">
 
-**[官方网站](http://ddxgtx.fun/SteamSwitch)** · **[下载](https://github.com/ddxgtx/SteamSwitch/releases)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)** · **[功能建议](https://github.com/ddxgtx/SteamSwitch/discussions)**
+**[官方网站](http://ddxgtx.fun/SteamSwitch/)** · **[下载](https://github.com/ddxgtx/SteamSwitch/releases)** · **[问题反馈](https://github.com/ddxgtx/SteamSwitch/issues)** · **[功能建议](https://github.com/ddxgtx/SteamSwitch/discussions)**
 
 如果觉得有用，请给个 ⭐ Star 支持一下！
 
