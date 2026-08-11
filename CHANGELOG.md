@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7] - 2026-08-11
+
 ### Added
 - 账号首页新增账号搜索、当前运行状态、账号/游戏/绑定/固定入口摘要，以及 Steam 库注入状态入口。
 - 账号卡片新增最近登录时间，游戏列表新增每款游戏的“启动账号”归属卡片；游戏搜索同时支持按绑定账号名称筛选。
