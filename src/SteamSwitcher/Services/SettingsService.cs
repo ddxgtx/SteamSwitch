@@ -94,7 +94,7 @@ namespace SteamSwitcher.Services
             }
         }
 
-        public static void SetStartWithWindows(bool enabled)
+        public static bool SetStartWithWindows(bool enabled)
         {
             try
             {
@@ -103,23 +103,27 @@ namespace SteamSwitcher.Services
                 {
                     using var key = Registry.CurrentUser.CreateSubKey(
                         @"Software\Microsoft\Windows\CurrentVersion\Run", true);
-                    var exePath = Environment.ProcessPath ??
-                                  Process.GetCurrentProcess().MainModule?.FileName;
-                    if (!string.IsNullOrWhiteSpace(exePath))
-                        key.SetValue(valueName, $"\"{exePath}\" --autorun", RegistryValueKind.String);
+                    var exePath = GetExecutablePath();
+                    if (key == null || string.IsNullOrWhiteSpace(exePath))
+                        return false;
+
+                    key.SetValue(valueName, $"\"{exePath}\" --autorun", RegistryValueKind.String);
                 }
                 else
                 {
                     using var key = Registry.CurrentUser.OpenSubKey(
                         @"Software\Microsoft\Windows\CurrentVersion\Run", true);
                     if (key == null)
-                        return;
+                        return true;
                     key.DeleteValue(valueName, false);
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
                 AppLogger.Error("Failed to set start with Windows.", ex);
+                return false;
             }
         }
 
@@ -135,8 +139,7 @@ namespace SteamSwitcher.Services
                     return false;
                 }
 
-                var exePath = Environment.ProcessPath ??
-                              Process.GetCurrentProcess().MainModule?.FileName;
+                var exePath = GetExecutablePath();
                 if (!string.IsNullOrWhiteSpace(exePath) &&
                     string.Equals(value, $"\"{exePath}\"", StringComparison.OrdinalIgnoreCase))
                 {
@@ -153,6 +156,15 @@ namespace SteamSwitcher.Services
                 AppLogger.Error("Failed to read start with Windows setting.", ex);
                 return false;
             }
+        }
+
+        private static string? GetExecutablePath()
+        {
+            if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
+                return Environment.ProcessPath;
+
+            using var process = Process.GetCurrentProcess();
+            return process.MainModule?.FileName;
         }
     }
 }

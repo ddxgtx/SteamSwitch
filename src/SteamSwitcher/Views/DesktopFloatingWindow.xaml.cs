@@ -35,6 +35,7 @@ namespace SteamSwitcher.Views
         private EventHandler? _quickLaunchChangedHandler;
         private EventHandler<bool>? _minimalModeChangedHandler;
         private EventHandler<bool>? _dockEnabledChangedHandler;
+        private EventHandler? _currentAccountChangedHandler;
         private PanelDragHelper? _gameDragHelper;
         private PanelDragHelper? _avatarDragHelper;
 
@@ -72,10 +73,26 @@ namespace SteamSwitcher.Views
         {
             InitializeComponent();
             _accountManager = accountManager;
+            _currentAccountChangedHandler = (s, e) => Dispatcher.BeginInvoke(
+                new Action(() => UpdateCurrentAccount(_accountManager.CurrentAccount)));
+            _accountManager.CurrentAccountChanged += _currentAccountChangedHandler;
 
             Loaded += (s, e) => { DesktopFloatingWindow_Loaded(s!, e); SetupDragDrop(); InitializeAutoHide(); };
             LocationChanged += DesktopFloatingWindow_LocationChanged;
             SourceInitialized += (s, e) => HideFromAltTab();
+            Closed += (s, e) =>
+            {
+                if (_currentAccountChangedHandler != null)
+                    _accountManager.CurrentAccountChanged -= _currentAccountChangedHandler;
+                DetachViewModelEvents();
+                if (_autoHideTimer != null)
+                {
+                    _autoHideTimer.Stop();
+                    _autoHideTimer.Tick -= AutoHideTimer_Tick;
+                    _autoHideTimer = null;
+                }
+                LocationChanged -= DesktopFloatingWindow_LocationChanged;
+            };
         }
 
         private void InitializeAutoHide()
@@ -218,20 +235,7 @@ namespace SteamSwitcher.Views
 
         public void SetViewModel(MainViewModel viewModel)
         {
-            // Unsubscribe from old events if any
-            if (_viewModel != null)
-            {
-                if (_pinnedGamesChangedHandler != null)
-                    _viewModel.PinnedGamesChanged -= _pinnedGamesChangedHandler;
-                if (_pinnedAccountsChangedHandler != null)
-                    _viewModel.PinnedAccountsChanged -= _pinnedAccountsChangedHandler;
-                if (_quickLaunchChangedHandler != null)
-                    _viewModel.QuickLaunchChanged -= _quickLaunchChangedHandler;
-                if (_minimalModeChangedHandler != null)
-                    _viewModel.MinimalModeChanged -= _minimalModeChangedHandler;
-                if (_dockEnabledChangedHandler != null)
-                    _viewModel.DesktopFloatingDockEnabledChanged -= _dockEnabledChangedHandler;
-            }
+            DetachViewModelEvents();
 
             _viewModel = viewModel;
 
@@ -274,6 +278,25 @@ namespace SteamSwitcher.Views
             _viewModel.QuickLaunchChanged += _quickLaunchChangedHandler;
             _viewModel.MinimalModeChanged += _minimalModeChangedHandler;
             _viewModel.DesktopFloatingDockEnabledChanged += _dockEnabledChangedHandler;
+        }
+
+        private void DetachViewModelEvents()
+        {
+            if (_viewModel == null)
+                return;
+
+            if (_pinnedGamesChangedHandler != null)
+                _viewModel.PinnedGamesChanged -= _pinnedGamesChangedHandler;
+            if (_pinnedAccountsChangedHandler != null)
+                _viewModel.PinnedAccountsChanged -= _pinnedAccountsChangedHandler;
+            if (_quickLaunchChangedHandler != null)
+                _viewModel.QuickLaunchChanged -= _quickLaunchChangedHandler;
+            if (_minimalModeChangedHandler != null)
+                _viewModel.MinimalModeChanged -= _minimalModeChangedHandler;
+            if (_dockEnabledChangedHandler != null)
+                _viewModel.DesktopFloatingDockEnabledChanged -= _dockEnabledChangedHandler;
+
+            _viewModel = null;
         }
 
         public void SetPinnedAccounts(List<SteamAccount> accounts)
@@ -384,6 +407,8 @@ namespace SteamSwitcher.Views
             finally
             {
                 _isDragging = false;
+                if (_readyToSavePosition && !_locked && !_isCollapsed)
+                    PositionChanged?.Invoke(this, (Left, Top));
             }
         }
 
@@ -405,7 +430,7 @@ namespace SteamSwitcher.Views
                     if (account != null)
                         AccountSwitchRequested?.Invoke(this, account);
                 },
-                launchSteam: () => _accountManager.LaunchSteam(silent: _viewModel?.SilentCloseSteam ?? true),
+                launchSteam: () => _accountManager.LaunchSteam(),
                 refresh: null,
                 detach: null,
                 showDetach: false,
@@ -639,12 +664,12 @@ namespace SteamSwitcher.Views
                 }
                 catch
                 {
-                    border.Child = CreateFallbackText("⚡", size);
+                    border.Child = CreateFallbackText("\uE945", size);
                 }
             }
             else
             {
-                border.Child = CreateFallbackText("⚡", size);
+                border.Child = CreateFallbackText("\uE945", size);
             }
 
             border.MouseRightButtonDown += (s, e) =>
@@ -690,7 +715,7 @@ namespace SteamSwitcher.Views
                 catch { }
             }
 
-            if (account == _accountManager.CurrentAccount)
+            if (AccountManager.AreSameAccount(account, _accountManager.CurrentAccount))
             {
                 border.BorderThickness = new Thickness(2.5);
                 border.BorderBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
@@ -701,7 +726,10 @@ namespace SteamSwitcher.Views
                 ShowContextMenu();
                 e.Handled = true;
             };
-            AttachHover(border, false);
+            AttachHover(
+                border,
+                false,
+                () => AccountManager.AreSameAccount(account, _accountManager.CurrentAccount));
             return border;
         }
 
@@ -724,7 +752,7 @@ namespace SteamSwitcher.Views
 
         private static TextBlock CreateFallbackText(string text, int size)
         {
-            return new TextBlock
+            var textBlock = new TextBlock
             {
                 Text = text,
                 FontSize = size > 40 ? 15 : 13,
@@ -733,6 +761,9 @@ namespace SteamSwitcher.Views
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
+            if (!string.IsNullOrEmpty(text) && text[0] >= '\uE000' && text[0] <= '\uF8FF')
+                textBlock.FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets");
+            return textBlock;
         }
 
         private static string GetAccountInitial(SteamAccount account)
@@ -743,7 +774,7 @@ namespace SteamSwitcher.Views
             return string.IsNullOrWhiteSpace(name) ? "S" : name[..1].ToUpperInvariant();
         }
 
-        private static void AttachHover(Border border, bool active)
+        private static void AttachHover(Border border, bool active, Func<bool>? isCurrentAccount = null)
         {
             Brush normalBorder = border.BorderBrush;
             Thickness normalThickness = border.BorderThickness;
@@ -752,11 +783,14 @@ namespace SteamSwitcher.Views
 
             border.MouseEnter += (s, e) =>
             {
-                if (!hasImage)
-                    border.Background = CreateLiquidHoverBrush();
-                border.BorderBrush = new SolidColorBrush(active
-                    ? Color.FromArgb(168, 48, 209, 88)
-                    : Color.FromArgb(190, 255, 255, 255));
+                if (isCurrentAccount?.Invoke() != true)
+                {
+                    if (!hasImage)
+                        border.Background = CreateLiquidHoverBrush();
+                    border.BorderBrush = new SolidColorBrush(active
+                        ? Color.FromArgb(168, 48, 209, 88)
+                        : Color.FromArgb(190, 255, 255, 255));
+                }
                 if (border.RenderTransform is ScaleTransform scale)
                 {
                     var anim = new DoubleAnimation(1.08, TimeSpan.FromMilliseconds(150))
@@ -771,8 +805,21 @@ namespace SteamSwitcher.Views
             border.MouseLeave += (s, e) =>
             {
                 border.Background = normalBackground;
-                border.BorderBrush = normalBorder;
-                border.BorderThickness = normalThickness;
+                if (isCurrentAccount?.Invoke() == true)
+                {
+                    border.BorderBrush = _currentBorderBrush;
+                    border.BorderThickness = new Thickness(2.5);
+                }
+                else if (isCurrentAccount != null)
+                {
+                    border.BorderBrush = _normalBorderBrush;
+                    border.BorderThickness = new Thickness(1);
+                }
+                else
+                {
+                    border.BorderBrush = normalBorder;
+                    border.BorderThickness = normalThickness;
+                }
                 if (border.RenderTransform is ScaleTransform scale)
                 {
                     var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150))
@@ -791,7 +838,7 @@ namespace SteamSwitcher.Views
             {
                 if (child is Border border && border.Tag is SteamAccount account)
                 {
-                    bool isCurrent = account == current;
+                    bool isCurrent = AccountManager.AreSameAccount(account, current);
                     border.BorderThickness = isCurrent ? new Thickness(2.5) : new Thickness(1);
                     border.BorderBrush = isCurrent ? _currentBorderBrush : _normalBorderBrush;
                 }

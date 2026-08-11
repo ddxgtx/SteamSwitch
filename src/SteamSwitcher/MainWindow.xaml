@@ -3,13 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Steam Switch"
         Icon="Resources/steam.ico"
-        Height="760" Width="1080"
-        MinHeight="620" MinWidth="900"
+        Height="800" Width="1180"
+        MinHeight="680" MinWidth="980"
         WindowStartupLocation="CenterScreen"
-        Background="Transparent"
+        Background="{DynamicResource WindowBgBrush}"
         WindowStyle="None"
-        AllowsTransparency="True"
+        AllowsTransparency="False"
         ResizeMode="CanResize"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
         Closing="Window_Closing"
         StateChanged="Window_StateChanged"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
@@ -18,6 +22,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <local:InverseBoolConverter x:Key="InverseBool" xmlns:local="clr-namespace:SteamSwitcher.Converters"/>
         <local:ThemeToBoolConverter x:Key="ThemeToBool" xmlns:local="clr-namespace:SteamSwitcher.Converters"/>
+        <CollectionViewSource x:Key="FilteredAccounts" Source="{Binding Accounts}" Filter="AccountCollectionViewSource_Filter"/>
 
         <!-- 全局滚动条样式 -->
         <Style TargetType="ScrollBar">
@@ -498,11 +503,14 @@
         <!-- 账号列表容器 -->
         <Style x:Key="AccountList" TargetType="ListBox">
             <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="8,0"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="Padding" Value="8"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></Setter.Value></Setter>
             <Setter Property="ItemContainerStyle"><Setter.Value><Style TargetType="ListBoxItem">
-                <Setter Property="Height" Value="76"/><Setter Property="Margin" Value="0,2"/><Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Width" Value="176"/><Setter Property="Height" Value="176"/><Setter Property="Margin" Value="5"/><Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/>
+                <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Stretch"/>
                 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
-                    <Border Background="{TemplateBinding Background}" CornerRadius="14" BorderThickness="1" BorderBrush="Transparent"
+                    <Border Background="{DynamicResource CardBgBrush}" CornerRadius="12" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"
                             RenderTransformOrigin="0.5,0.5" x:Name="b">
                         <Border.RenderTransform>
                             <TranslateTransform X="0" Y="0" x:Name="trans"/>
@@ -511,8 +519,8 @@
                             <DropShadowEffect Color="#000000" BlurRadius="6" ShadowDepth="1" Opacity="0" x:Name="shadow"/>
                         </Border.Effect>
                         <Grid>
-                            <Border CornerRadius="14" Background="{DynamicResource HoverBgBrush}" Opacity="0" x:Name="hoverBg"/>
-                            <Border CornerRadius="14" Background="{DynamicResource SelectedBgBrush}" Opacity="0" x:Name="selectBg">
+                            <Border CornerRadius="12" Background="{DynamicResource HoverBgBrush}" Opacity="0" x:Name="hoverBg"/>
+                            <Border CornerRadius="12" Background="{DynamicResource SelectedBgBrush}" Opacity="0" x:Name="selectBg">
                                 <Border.Effect>
                                     <DropShadowEffect Color="#0084FF" BlurRadius="12" ShadowDepth="0" Opacity="0.25"/>
                                 </Border.Effect>
@@ -552,7 +560,7 @@
                             </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
@@ -575,71 +583,102 @@
 
         <!-- 账号项模板 -->
         <DataTemplate x:Key="AccountItem">
-            <Grid Margin="14,0">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="50"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Border Grid.Column="0" Width="46" Height="46" CornerRadius="12" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" VerticalAlignment="Center">
-                    <Border.Clip><RectangleGeometry Rect="0,0,44,44" RadiusX="11" RadiusY="11"/></Border.Clip>
-                    <Image Source="{Binding Avatar}" Stretch="UniformToFill"/>
-                </Border>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0,0,0">
-                    <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding Username}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,4,0,0"/>
-                </StackPanel>
-                <Border Grid.Column="2" VerticalAlignment="Center" Margin="8,0" Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}" 
-                        Style="{StaticResource StatusBadgeStyle}" CornerRadius="8" Padding="10,5">
-                    <TextBlock Text="当前" Foreground="{DynamicResource SuccessFgBrush}" FontSize="11" FontWeight="SemiBold"/>
-                </Border>
-                <ToggleButton Grid.Column="3" VerticalAlignment="Center" IsChecked="{Binding IsPinned}" Width="36" Height="36" Cursor="Hand" Background="Transparent">
+            <Grid Margin="12,8">
+                <ToggleButton HorizontalAlignment="Right" VerticalAlignment="Top" IsChecked="{Binding IsPinned}" Width="30" Height="30" Cursor="Hand" Background="Transparent" Panel.ZIndex="2">
                     <ToggleButton.Style><Style TargetType="ToggleButton"><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="8" Width="36" Height="36" x:Name="b">
-                            <TextBlock Text="📌" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.4" x:Name="i"/>
+                        <Border Background="{TemplateBinding Background}" CornerRadius="8" Width="30" Height="30" x:Name="b">
+                            <TextBlock Text="&#xE734;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.55" x:Name="i"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{DynamicResource HoverBgBrush}"/><Setter TargetName="i" Property="Opacity" Value="0.8"/></Trigger>
-                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="i" Property="Opacity" Value="1"/><Setter TargetName="i" Property="Text" Value="📍"/></Trigger>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="i" Property="Opacity" Value="1"/><Setter TargetName="i" Property="Foreground" Value="{DynamicResource AccentBrush}"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate></Setter.Value></Setter></Style></ToggleButton.Style>
                 </ToggleButton>
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="144">
+                    <Border Width="56" Height="56" CornerRadius="28" Background="{DynamicResource AvatarBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="2" HorizontalAlignment="Center">
+                        <Image Source="{Binding Avatar}" Stretch="UniformToFill">
+                            <Image.Clip><EllipseGeometry Center="27,27" RadiusX="27" RadiusY="27"/></Image.Clip>
+                        </Image>
+                    </Border>
+                    <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,7,0,0"/>
+                    <TextBlock Text="{Binding Username}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,3,0,0">
+                        <TextBlock Text="&#xE823;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,0,5,0"/>
+                        <TextBlock Text="{Binding LastLoginText}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10"/>
+                    </StackPanel>
+                    <Border HorizontalAlignment="Center" Margin="0,5,0,0" Padding="8,3" CornerRadius="8" Background="{DynamicResource InputBgBrush}">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="6" Height="6" VerticalAlignment="Center" Margin="0,0,6,0">
+                                <Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource TextTertiaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsCurrent}" Value="True"><Setter Property="Fill" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock FontSize="10">
+                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="可切换"/><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsCurrent}" Value="True"><Setter Property="Text" Value="当前账号"/><Setter Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Grid>
         </DataTemplate>
 
                         <DataTemplate x:Key="GameItemTemplate">
-                            <Border Background="{DynamicResource CardBgBrush}" CornerRadius="10" Padding="12,10" Margin="0,3"
+                            <Border Background="{DynamicResource CardBgBrush}" CornerRadius="11" Padding="12,10" Margin="0,4"
                                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                 <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0" Width="42" Height="42" CornerRadius="10" Background="{DynamicResource AccentBgBrush}" Margin="0,0,12,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="184"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Width="52" Height="52" CornerRadius="11" Background="{DynamicResource AccentBgBrush}" Margin="0,0,13,0">
                                         <Border.Clip>
-                                            <RectangleGeometry Rect="0,0,42,42" RadiusX="10" RadiusY="10"/>
+                                            <RectangleGeometry Rect="0,0,52,52" RadiusX="11" RadiusY="11"/>
                                         </Border.Clip>
                                         <Grid>
-                                            <TextBlock Text="🎮" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <TextBlock Text="&#xE7FC;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="21" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             <Image Source="{Binding IconPath}" Stretch="UniformToFill"/>
                                         </Grid>
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                            <Border Background="{DynamicResource CardBgAltBrush}" CornerRadius="5" Padding="7,2">
-                                                <TextBlock Text="{Binding AppId, StringFormat='AppID {0}'}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10"/>
-                                            </Border>
-                                            <Border Margin="6,0,0,0" Visibility="{Binding HasBinding, Converter={StaticResource BoolToVis}}"
-                                                    Style="{StaticResource StatusBadgeStyle}" CornerRadius="5" Padding="7,2">
-                                                <TextBlock Text="已绑定" Foreground="#30D158" FontSize="10" FontWeight="SemiBold"/>
-                                            </Border>
+                                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                            <TextBlock Text="{Binding AppId, StringFormat='AppID {0}'}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10"/>
+                                            <Ellipse Width="3" Height="3" Fill="{DynamicResource TextTertiaryBrush}" Margin="8,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding SizeDisplay}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10"/>
                                         </StackPanel>
                                     </StackPanel>
-                                    <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10"
-                                               VerticalAlignment="Center" Margin="14,0,0,0"/>
+                                    <Border Grid.Column="2" CornerRadius="9" Padding="10,7" Margin="10,0" VerticalAlignment="Center">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="{DynamicResource InputBgBrush}"/>
+                                                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                                                <Setter Property="BorderThickness" Value="1"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasBinding}" Value="True">
+                                                        <Setter Property="Background" Value="{DynamicResource SuccessBgBrush}"/>
+                                                        <Setter Property="BorderBrush" Value="#6634C759"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="&#xE77B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding HasBinding}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                                            </TextBlock>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="启动账号" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="9"/>
+                                                <TextBlock Text="{Binding BindingAccountName, TargetNullValue=未绑定账号, FallbackValue=未绑定账号}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0">
+                                                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding HasBinding}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
                                     <ToggleButton Grid.Column="3" VerticalAlignment="Center" Width="34" Height="34" Cursor="Hand" Margin="8,0,0,0"
                                                   IsChecked="{Binding IsPinned, Mode=OneWay}" Click="GameItemPinToggle_Click">
                                         <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
                                             <Border Background="{DynamicResource CardBgAltBrush}" CornerRadius="8" Width="34" Height="34" x:Name="gpb">
-                                                <TextBlock Text="📌" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.35" x:Name="gpi"/>
+                                                <TextBlock Text="&#xE734;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.45" x:Name="gpi"/>
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="gpb" Property="Background" Value="{DynamicResource ToggleHoverBgBrush}"/><Setter TargetName="gpi" Property="Opacity" Value="0.75"/></Trigger>
-                                                <Trigger Property="IsChecked" Value="True"><Setter TargetName="gpb" Property="Background" Value="{DynamicResource ToggleCheckedBgBrush}"/><Setter TargetName="gpi" Property="Opacity" Value="1"/><Setter TargetName="gpi" Property="Text" Value="📍"/></Trigger>
+                                                <Trigger Property="IsChecked" Value="True"><Setter TargetName="gpb" Property="Background" Value="{DynamicResource ToggleCheckedBgBrush}"/><Setter TargetName="gpi" Property="Foreground" Value="{DynamicResource AccentBrush}"/><Setter TargetName="gpi" Property="Opacity" Value="1"/></Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate></ToggleButton.Template>
                                     </ToggleButton>
@@ -669,7 +708,7 @@
                                                     </Style>
                                                 </Image.Style>
                                             </Image>
-                                            <TextBlock Text="⚡" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <TextBlock Text="&#xE945;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Setter Property="Visibility" Value="Collapsed"/>
@@ -693,15 +732,15 @@
                                     <ToggleButton Grid.Column="2" IsChecked="{Binding IsPinned}" Click="QuickLaunchPinToggle_Click" Tag="{Binding Id}" Width="30" Height="30" Cursor="Hand" Margin="4,0">
                                         <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
                                             <Border Background="Transparent" CornerRadius="6" Width="30" Height="30" x:Name="pb">
-                                                <TextBlock Text="📌" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.5" x:Name="pi"/>
+                                                <TextBlock Text="&#xE840;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.5" x:Name="pi"/>
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="pi" Property="Opacity" Value="0.8"/></Trigger>
-                                                <Trigger Property="IsChecked" Value="True"><Setter TargetName="pi" Property="Opacity" Value="1"/><Setter TargetName="pi" Property="Text" Value="📍"/></Trigger>
+                                                <Trigger Property="IsChecked" Value="True"><Setter TargetName="pi" Property="Opacity" Value="1"/><Setter TargetName="pi" Property="Foreground" Value="{DynamicResource AccentBrush}"/></Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate></ToggleButton.Template>
                                     </ToggleButton>
-                                    <Button Grid.Column="3" Content="🗑️" Width="30" Height="30" Click="QuickLaunchRemove_Click" Tag="{Binding Id}" Background="Transparent" BorderThickness="0" Cursor="Hand" FontSize="14"/>
+                                    <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource TextSecondaryBrush}" Width="30" Height="30" Click="QuickLaunchRemove_Click" Tag="{Binding Id}" Background="Transparent" BorderThickness="0" Cursor="Hand" FontSize="14" ToolTip="删除"/>
                                 </Grid>
                             </Border>
                         </DataTemplate>
@@ -916,8 +955,8 @@
 
         <!-- 苹果风格侧边栏按钮样式 -->
         <Style x:Key="AppleSidebarBtnStyle" TargetType="Button">
-            <Setter Property="Width" Value="52"/>
-            <Setter Property="Height" Value="52"/>
+            <Setter Property="Width" Value="92"/>
+            <Setter Property="Height" Value="46"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -933,7 +972,7 @@
                             <Border.Effect>
                                 <DropShadowEffect x:Name="sidebarShadow" Color="#0084FF" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
                             </Border.Effect>
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <!-- 悬停时如果是未选中状态，显示轻微悬浮灰 -->
@@ -1027,7 +1066,7 @@
         </Style>
     </Window.Resources>
 
-    <Border x:Name="RootBorder" Background="{DynamicResource WindowBgBrush}" CornerRadius="16" ClipToBounds="True">
+    <Border x:Name="RootBorder" Background="{DynamicResource WindowBgBrush}" CornerRadius="16" ClipToBounds="True" SnapsToDevicePixels="True" RenderOptions.ClearTypeHint="Enabled">
         <Grid>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
@@ -1049,20 +1088,27 @@
                 </Border.Background>
             </Border>
 
-            <!-- 标题栏 (Windows 现代简约风) -->
+            <!-- 品牌标题栏 -->
             <Border Grid.Row="0" Background="{DynamicResource SidebarBgBrush}" Padding="0">
-                <Grid Height="44">
+                <Grid Height="58">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     
-                    <!-- 左侧：应用图标与标题 -->
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
-                        <Image Source="Resources/icon.png" Width="18" Height="18" Margin="0,0,8,0" RenderOptions.BitmapScalingMode="HighQuality"/>
-                        <TextBlock Text="Steam" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Text=" Switch" FontSize="12" FontWeight="Light" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                    <!-- 左侧：品牌与产品定位 -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="18,0,0,0" VerticalAlignment="Center">
+                        <Border Width="36" Height="36" CornerRadius="10" Background="{DynamicResource AccentBgBrush}" Margin="0,0,11,0">
+                            <Image Source="pack://siteoforigin:,,,/Resources/icon.png" Width="28" Height="28" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        </Border>
+                        <StackPanel VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="STEAM" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                <TextBlock Text=" SWITCH" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}"/>
+                            </StackPanel>
+                            <TextBlock Text="多账号切换与游戏启动中心" FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,3,0,0"/>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- 中间留空 (可用作拖动区域) -->
@@ -1070,9 +1116,9 @@
 
                     <!-- 右侧：刷新及控制按钮 (Windows 11 现代简约) -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Stretch">
-                        <Button Content="↻" Style="{StaticResource BtnWindow}" Command="{Binding RefreshCommand}" ToolTip="刷新" Width="40" Height="44"/>
-                        <Button Content="─" Style="{StaticResource BtnWindow}" Click="Minimize_Click" ToolTip="最小化" Width="46" Height="44"/>
-                        <Button Content="✕" Style="{StaticResource BtnClose}" Click="Close_Click" ToolTip="关闭" Width="46" Height="44"/>
+                        <Button Content="&#xE72C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Style="{StaticResource BtnWindow}" Command="{Binding RefreshCommand}" ToolTip="刷新" Width="42" Height="58"/>
+                        <Button Content="&#xE921;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Style="{StaticResource BtnWindow}" Click="Minimize_Click" ToolTip="最小化" Width="46" Height="58"/>
+                        <Button Content="&#xE8BB;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Style="{StaticResource BtnClose}" Click="Close_Click" ToolTip="关闭" Width="48" Height="58"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -1081,21 +1127,21 @@
             <!-- 主体 (左右分栏，侧边栏通底) -->
             <Grid Grid.Row="1">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="72"/>
+                    <ColumnDefinition Width="112"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- 左侧：全局侧边栏 -->
                 <Border Grid.Column="0" Background="{DynamicResource SidebarBgBrush}">
-                    <DockPanel Margin="10,10,10,14" LastChildFill="False">
+                    <DockPanel Margin="10,14,10,14" LastChildFill="False">
                         <StackPanel DockPanel.Dock="Top">
                             <!-- 账号 -->
                             <Grid Margin="0,0,0,8">
                                 <Border x:Name="SideAccentAccount" Width="0" Background="Transparent"/>
                                 <Button x:Name="SideAccounts" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideAccounts_Click" ToolTip="账号列表">
-                                    <StackPanel>
-                                        <TextBlock Text="⚡" FontSize="18" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="账号" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="11,0">
+                                        <TextBlock Text="&#xE77B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Width="22" VerticalAlignment="Center"/>
+                                        <TextBlock Text="账号" FontSize="12" VerticalAlignment="Center" Margin="9,0,0,0"/>
                                     </StackPanel>
                                 </Button>
                             </Grid>
@@ -1104,9 +1150,9 @@
                             <Grid Margin="0,0,0,8">
                                 <Border x:Name="SideAccentGame" Width="0" Background="Transparent"/>
                                 <Button x:Name="SideGames" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideGames_Click" ToolTip="游戏绑定">
-                                    <StackPanel>
-                                        <TextBlock Text="🎮" FontSize="18" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="游戏" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="11,0">
+                                        <TextBlock Text="&#xE7FC;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Width="22" VerticalAlignment="Center"/>
+                                        <TextBlock Text="游戏" FontSize="12" VerticalAlignment="Center" Margin="9,0,0,0"/>
                                     </StackPanel>
                                 </Button>
                             </Grid>
@@ -1115,24 +1161,31 @@
                             <Grid Margin="0,0,0,8">
                                 <Border x:Name="SideAccentQuickLaunch" Width="0" Background="Transparent"/>
                                 <Button x:Name="SideQuickLaunch" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideQuickLaunch_Click" ToolTip="快速启动">
-                                    <StackPanel>
-                                        <TextBlock Text="🚀" FontSize="18" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="快启" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="11,0">
+                                        <TextBlock Text="&#xE945;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Width="22" VerticalAlignment="Center"/>
+                                        <TextBlock Text="快启" FontSize="12" VerticalAlignment="Center" Margin="9,0,0,0"/>
                                     </StackPanel>
                                 </Button>
                             </Grid>
                         </StackPanel>
 
                         <!-- 设置放在底部 -->
-                        <Grid DockPanel.Dock="Bottom">
-                            <Border x:Name="SideAccentSettings" Width="0" Background="Transparent"/>
-                            <Button x:Name="SideSettings" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideSettings_Click" ToolTip="设置">
-                                <StackPanel>
-                                    <TextBlock Text="⚙" FontSize="18" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="设置" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
-                                </StackPanel>
-                            </Button>
-                        </Grid>
+                        <StackPanel DockPanel.Dock="Bottom">
+                            <Grid>
+                                <Border x:Name="SideAccentSettings" Width="0" Background="Transparent"/>
+                                <Button x:Name="SideSettings" Style="{StaticResource AppleSidebarBtnStyle}" Click="SideSettings_Click" ToolTip="设置">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="11,0">
+                                        <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="17" Width="22" VerticalAlignment="Center"/>
+                                        <TextBlock Text="设置" FontSize="12" VerticalAlignment="Center" Margin="9,0,0,0"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <Border Height="1" Background="{DynamicResource SeparatorBrush}" Margin="8,12"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessFgBrush}" Margin="0,0,7,0"/>
+                                <TextBlock Text="{Binding CompactVersionText}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10"/>
+                            </StackPanel>
+                        </StackPanel>
                     </DockPanel>
                 </Border>
                 
@@ -1140,79 +1193,136 @@
                 <Border Grid.Column="0" Width="0.5" Background="{DynamicResource BorderBrush}" HorizontalAlignment="Right"/>
 
                 <!-- 右侧：主内容区 -->
-                <Grid Grid.Column="1" Margin="16,14,16,14">
+                <Grid Grid.Column="1" Margin="20,14,20,16">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="2,0,2,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="PageTitle" Text="账号切换" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="22" FontWeight="Bold"/>
+                            <TextBlock x:Name="PageSubtitle" Text="选择账号并安全切换 Steam 登录状态" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <Border Grid.Column="1" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12,7" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,7,0">
+                                    <Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource TextTertiaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsSteamRunning}" Value="True"><Setter Property="Fill" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock Text="{Binding SteamStateText, StringFormat=Steam {0}}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                    <Grid Grid.Row="1">
                     <!-- 账号视图 -->
                     <Grid x:Name="AccountView" Style="{StaticResource FadeInUpViewStyle}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="202"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
 
-                        <!-- 统计卡片 -->
+                        <!-- 账号搜索与摘要 -->
                         <Grid Grid.Row="0" Margin="0,0,0,10">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.4*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Style="{StaticResource ShineCardBorder}" Padding="14,11" Margin="0,0,6,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Border Background="{DynamicResource InputBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Height="40" Width="430" HorizontalAlignment="Left">
                                 <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="当前账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                        <TextBlock Text="{Binding CurrentAccountName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
-                                    </StackPanel>
-                                    <Border Grid.Column="1" Style="{StaticResource StatusBadgeStyle}" CornerRadius="8" Padding="9,5" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding SteamStateText}" Foreground="{DynamicResource SuccessFgBrush}" FontSize="11" FontWeight="SemiBold"/>
-                                    </Border>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBox Grid.Column="1" x:Name="AccountSearchBox" Text="搜索账号名称或登录名..." Background="Transparent" BorderThickness="0" Padding="0" VerticalContentAlignment="Center" FontSize="12"
+                                             TextChanged="AccountSearchBox_TextChanged" GotFocus="AccountSearchBox_GotFocus" LostFocus="AccountSearchBox_LostFocus"/>
                                 </Grid>
                             </Border>
-                            <Border Grid.Column="1" Style="{StaticResource ShineCardBorder}" Padding="14,11" Margin="6,0,6,0">
+                            <TextBlock Grid.Column="1" Text="{Binding AccountCountText, StringFormat={}{0} 个账号}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center" Margin="16,0,2,0"/>
+                        </Grid>
+
+                        <!-- 账号卡片 -->
+                        <Border Grid.Row="1" Background="{DynamicResource CardBgAltBrush}" CornerRadius="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,0,12">
+                            <ListBox ItemsSource="{Binding Source={StaticResource FilteredAccounts}}" SelectedItem="{Binding SelectedAccount}"
+                                     Style="{StaticResource AccountList}" ItemTemplate="{StaticResource AccountItem}"/>
+                        </Border>
+
+                        <!-- 核心操作 -->
+                        <Grid Grid.Row="2" Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Command="{Binding SwitchAndLaunchCommand}" IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}" Style="{StaticResource PrimaryBtn}" Height="50" Margin="0,0,6,0">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" Margin="0,0,9,0"/>
+                                    <TextBlock Text="切换并启动 Steam" FontSize="13" FontWeight="SemiBold"/>
+                                    <TextBlock Text="&#xE76C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="12,0,0,0"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="1" Command="{Binding SwitchOnlyCommand}" IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}" Style="{StaticResource SecondaryBtn}" Height="50" Margin="6,0,0,0">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Margin="0,0,8,0"/>
+                                    <TextBlock Text="仅切换账号" FontSize="13" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- 状态与扩展能力 -->
+                        <Grid Grid.Row="3">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.25*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="1.35*"/></Grid.ColumnDefinitions>
+                            <!-- 当前账号与切换策略 -->
+                            <Border Grid.Column="0" Style="{StaticResource CardBorder}" Padding="14" Margin="0,0,6,0">
                                 <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                        <TextBlock Text="{Binding AccountCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="1"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <Border Width="36" Height="36" CornerRadius="18" Background="{DynamicResource AvatarBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,10,0">
+                                            <Grid>
+                                                <TextBlock Text="&#xE77B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <Image Source="{Binding CurrentAccountViewModel.Avatar}" Stretch="UniformToFill"><Image.Clip><EllipseGeometry Center="17,17" RadiusX="17" RadiusY="17"/></Image.Clip></Image>
+                                            </Grid>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding CurrentAccountViewModel.DisplayName, TargetNullValue=未检测账号}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding CurrentAccountViewModel.Username, TargetNullValue=等待 Steam 登录数据}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <Border Grid.Column="2" CornerRadius="8" Padding="8,4" VerticalAlignment="Center">
+                                            <Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource InputBgBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsSteamRunning}" Value="True"><Setter Property="Background" Value="{DynamicResource SuccessBgBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                            <StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Margin="0,0,6,0" VerticalAlignment="Center"><Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource TextTertiaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsSteamRunning}" Value="True"><Setter Property="Fill" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style></Ellipse><TextBlock Text="{Binding SteamStateText}" FontSize="9" FontWeight="SemiBold"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsSteamRunning}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Border Grid.Row="1" Background="{DynamicResource SeparatorBrush}" Margin="0,9,0,0"/>
+                                    <StackPanel Grid.Row="2" Margin="0,9,0,0">
+                                        <Grid Margin="0,0,0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="&#xE7E8;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="12" Margin="0,0,8,0"/><TextBlock Grid.Column="1" Text="切换策略" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10"/><TextBlock Grid.Column="2" Text="{Binding SwitchStrategyText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/></Grid>
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="12" Margin="0,0,8,0"/><TextBlock Grid.Column="1" Text="启动行为" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10"/><TextBlock Grid.Column="2" Text="{Binding LaunchBehaviorText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/></Grid>
                                     </StackPanel>
-                                    <StackPanel Grid.Column="1">
-                                        <TextBlock Text="绑定" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                        <TextBlock Text="{Binding BindingCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
-                                    </StackPanel>
+                                    <Border Grid.Row="3" Background="{DynamicResource InputBgBrush}" CornerRadius="8" Padding="9,5" Margin="0,9,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11" Margin="0,0,7,0"/><TextBlock Grid.Column="1" Text="{Binding StatusText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" TextTrimming="CharacterEllipsis"/></Grid></Border>
                                 </Grid>
                             </Border>
-                            <Border Grid.Column="2" Style="{StaticResource ShineCardBorder}" Padding="14,11" Margin="6,0,0,0">
+
+                            <!-- 账号与游戏数据概览 -->
+                            <Border Grid.Column="1" Style="{StaticResource CardBorder}" Padding="14" Margin="6,0">
                                 <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                        <TextBlock Text="{Binding GameCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1">
-                                        <TextBlock Text="固定" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-                                        <TextBlock Text="{Binding PinnedCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="21" FontWeight="Bold" Margin="0,4,0,0"/>
-                                    </StackPanel>
-                                    <TextBlock Grid.ColumnSpan="2" Text="{Binding InjectorStateText}" Foreground="{DynamicResource AccentBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Bottom"/>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><Border Width="30" Height="30" CornerRadius="9" Background="{DynamicResource AccentBgBrush}" Margin="0,0,9,0"><TextBlock Text="&#xE9D2;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel VerticalAlignment="Center"><TextBlock Text="数据概览" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="账号与游戏资源" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="9" Margin="0,2,0,0"/></StackPanel></StackPanel><TextBlock Grid.Column="1" Text="{Binding GameBindingCoverage, StringFormat={}{0:F0}%}" Foreground="{DynamicResource AccentBrush}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center"/></Grid>
+                                    <Grid Grid.Row="1" Margin="0,8,0,8">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource InputBgBrush}" CornerRadius="9" Padding="9,5" Margin="0,0,4,4"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="{Binding AccountCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/></Grid></Border>
+                                        <Border Grid.Column="1" Background="{DynamicResource InputBgBrush}" CornerRadius="9" Padding="9,5" Margin="4,0,0,4"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="{Binding GameCountText}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/></Grid></Border>
+                                        <Border Grid.Row="1" Background="{DynamicResource SuccessBgBrush}" CornerRadius="9" Padding="9,5" Margin="0,4,4,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="已绑定" Foreground="{DynamicResource SuccessFgBrush}" FontSize="9" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="{Binding BoundGameCount}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/></Grid></Border>
+                                        <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource InputBgBrush}" CornerRadius="9" Padding="9,5" Margin="4,4,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="未绑定" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="{Binding UnboundGameCount}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/></Grid></Border>
+                                    </Grid>
+                                    <StackPanel Grid.Row="2"><Grid Margin="0,0,0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="绑定覆盖率" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9"/><TextBlock Grid.Column="1" Text="{Binding GameBindingCoverageText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9"/></Grid><ProgressBar Minimum="0" Maximum="100" Value="{Binding GameBindingCoverage, Mode=OneWay}" Height="5" Background="{DynamicResource InputBgBrush}" Foreground="{DynamicResource AccentBrush}"><ProgressBar.Template><ControlTemplate TargetType="ProgressBar"><Border Background="{TemplateBinding Background}" CornerRadius="2.5" ClipToBounds="True"><Grid x:Name="PART_Track"><Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" CornerRadius="2.5" HorizontalAlignment="Left"/></Grid></Border></ControlTemplate></ProgressBar.Template></ProgressBar></StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- Steam 库快捷启动 -->
+                            <Border Grid.Column="2" Style="{StaticResource CardBorder}" Padding="14" Margin="6,0,0,0">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <Border Width="38" Height="38" CornerRadius="11" Background="#332D7DFF" Margin="0,0,11,0"><TextBlock Text="&#xE7FC;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#FF75B7FF" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="Steam 库快捷启动" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="在库页面切换账号并启动" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="9" Margin="0,3,0,0"/></StackPanel>
+                                        <Border Grid.Column="2" CornerRadius="8" Padding="8,4" VerticalAlignment="Center"><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource InputBgBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsInjectorConnected}" Value="True"><Setter Property="Background" Value="{DynamicResource SuccessBgBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="{Binding InjectorStateText}" FontSize="9" FontWeight="SemiBold"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsInjectorConnected}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Border>
+                                    </Grid>
+                                    <Border Grid.Row="1" Background="{DynamicResource InputBgBrush}" CornerRadius="9" Padding="9,6" Margin="0,8,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="12" Margin="0,0,8,0" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="{Binding InjectorStatusDescription}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/></Grid></Border>
+                                    <StackPanel Grid.Row="2" Margin="0,4" VerticalAlignment="Center"><Grid Margin="0,0,0,3"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE72E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource SuccessFgBrush}" FontSize="10" Margin="0,0,7,0"/><TextBlock Grid.Column="1" Text="库页面直接选择账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9"/></Grid><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE7BA;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#FFFFB454" FontSize="10" Margin="0,0,7,0"/><TextBlock Grid.Column="1" Text="会启用本地 CEF 调试端口" Foreground="#FFFFB454" FontSize="9"/></Grid></StackPanel>
+                                    <Button Grid.Row="3" Command="{Binding StartInjectorCommand}" IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}" Style="{StaticResource PrimaryBtn}" Height="32"><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="0,0,8,0"/><TextBlock Text="连接 Steam 库" FontSize="11" FontWeight="SemiBold"/></StackPanel></Button>
                                 </Grid>
                             </Border>
                         </Grid>
-
-                        <!-- 库界面注入 -->
-                        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Padding="12,10" Margin="0,0,0,10">
-                            <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="库界面游戏启动" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
-                                    <TextBlock Text="在 Steam 库当前游戏旁选择账号，之后点 [启动] 自动切换并运行。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"/>
-                                    <TextBlock Text="⚠️ 开启调试端口，存在账号封禁风险" Foreground="#FF9500" FontSize="11" Margin="0,3,0,0"/>
-                                </StackPanel>
-                                <Button Grid.Column="1" Content="注入" Command="{Binding StartInjectorCommand}"
-                                        IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
-                                        Style="{StaticResource SecondaryBtn}" Width="64" Height="32" Margin="10,0,0,0"/>
-                            </Grid>
-                        </Border>
-
-                        <!-- 账号列表 -->
-                        <Border Grid.Row="2" Background="{DynamicResource CardBgBrush}" CornerRadius="8" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                            <ListBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
-                                     Style="{StaticResource AccountList}" ItemTemplate="{StaticResource AccountItem}" Padding="8,6"/>
-                        </Border>
                     </Grid>
  
                         <!-- 游戏视图 -->
@@ -1228,10 +1338,10 @@
                                     <Border Background="{DynamicResource CardBgBrush}" CornerRadius="10" Padding="10,8" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,10,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="🔍" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="2,0,8,0" FontSize="13"/>
-                                            <TextBox Grid.Column="1" x:Name="GameSearchBox" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0" CaretBrush="{DynamicResource TextPrimaryBrush}" FontSize="13" Padding="2,0" VerticalAlignment="Center"
+                                            <TextBlock Grid.Column="0" Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="2,0,8,0" FontSize="13"/>
+                                            <TextBox Grid.Column="1" x:Name="GameSearchBox" Text="搜索游戏、AppID 或启动账号..." Background="Transparent" Foreground="{DynamicResource SearchPlaceholderFgBrush}" BorderThickness="0" CaretBrush="{DynamicResource TextPrimaryBrush}" FontSize="13" Padding="2,0" VerticalAlignment="Center"
                                                       TextChanged="GameSearchBox_TextChanged" GotFocus="GameSearchBox_GotFocus" LostFocus="GameSearchBox_LostFocus"/>
-                                            <Button Grid.Column="2" x:Name="GameClearSearch" Content="✕" Width="24" Height="24" FontSize="10" Background="Transparent" Foreground="{DynamicResource TextSecondaryBrush}" BorderThickness="0" Cursor="Hand" Click="GameClearSearch_Click" Visibility="Collapsed">
+                                            <Button Grid.Column="2" x:Name="GameClearSearch" Content="&#xE8BB;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Width="24" Height="24" FontSize="10" Background="Transparent" Foreground="{DynamicResource TextSecondaryBrush}" BorderThickness="0" Cursor="Hand" Click="GameClearSearch_Click" Visibility="Collapsed">
                                                 <Button.Template><ControlTemplate TargetType="Button"><Border x:Name="cb" Background="Transparent" CornerRadius="6"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                                 <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="cb" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
                                             </Button>
@@ -1287,20 +1397,51 @@
                                         <TextBlock Text="为游戏指定启动前切换的 Steam 账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
                                     </StackPanel>
 
-                                    <Border Grid.Row="1" Background="{DynamicResource CardBgBrush}" CornerRadius="10" Padding="12" Margin="0,0,0,12"
+                                    <Border Grid.Row="1" Background="{DynamicResource CardBgAltBrush}" CornerRadius="11" Padding="13" Margin="0,0,0,12"
                                             BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                                        <StackPanel>
-                                            <TextBlock Text="已选游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" FontWeight="SemiBold"/>
-                                            <TextBlock Text="{Binding SelectedGameName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,6,0,0"/>
-                                            <TextBlock Text="{Binding SelectedGameAppId, StringFormat='AppID: {0}'}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11" Margin="0,4,0,0"/>
-                                            <Border Style="{StaticResource StatusBadgeStyle}" CornerRadius="6" Padding="8,3" HorizontalAlignment="Left" Margin="0,8,0,0"
-                                                    Visibility="{Binding SelectedGameHasBinding, Converter={StaticResource BoolToVis}}">
-                                                <TextBlock Text="{Binding SelectedGameBindingAccount, StringFormat='✓ 已绑定: {0}'}" Foreground="#30D158" FontSize="11" FontWeight="SemiBold"/>
+                                        <Grid>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                <Border Width="40" Height="40" CornerRadius="10" Background="{DynamicResource AccentBgBrush}" Margin="0,0,11,0">
+                                                    <TextBlock Text="&#xE7FC;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding SelectedGameName}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding SelectedGameAppId, StringFormat='AppID {0}'}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,4,0,0"/>
+                                                </StackPanel>
+                                            </Grid>
+                                            <Border Grid.Row="1" CornerRadius="9" Padding="10,8" Margin="0,12,0,0">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="{DynamicResource InputBgBrush}"/>
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                                                        <Setter Property="BorderThickness" Value="1"/>
+                                                        <Style.Triggers><DataTrigger Binding="{Binding SelectedGameHasBinding}" Value="True"><Setter Property="Background" Value="{DynamicResource SuccessBgBrush}"/><Setter Property="BorderBrush" Value="#6634C759"/></DataTrigger></Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                    <TextBlock Text="&#xE77B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" VerticalAlignment="Center" Margin="0,0,9,0">
+                                                        <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding SelectedGameHasBinding}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                                                    </TextBlock>
+                                                    <StackPanel Grid.Column="1">
+                                                        <TextBlock Text="当前启动账号" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="9"/>
+                                                        <TextBlock Text="{Binding SelectedGameBindingAccount}" FontSize="12" FontWeight="SemiBold" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
+                                                            <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/><Style.Triggers><DataTrigger Binding="{Binding SelectedGameHasBinding}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding SelectedGameBindingTime, StringFormat='最后启动 · {0}'}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="9" Margin="0,3,0,0"/>
+                                                    </StackPanel>
+                                                </Grid>
                                             </Border>
-                                        </StackPanel>
+                                        </Grid>
                                     </Border>
 
-                                    <TextBlock Grid.Row="2" Text="选择绑定账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                    <Grid Grid.Row="2" Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="选择启动账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="1" Text="点击账号后保存" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="9"/>
+                                    </Grid>
                                     <ListBox Grid.Row="3" x:Name="GameAccountList" ItemsSource="{Binding Accounts}"
                                              SelectedItem="{Binding SelectedBindingAccount}" Background="Transparent"
                                              BorderThickness="0" Margin="0,0,0,12" Padding="4">
@@ -1399,13 +1540,13 @@
                                             <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
                                                 <Border Background="{DynamicResource ToggleBgBrush}" CornerRadius="9" Width="128" Height="34" x:Name="pb">
                                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                                        <TextBlock x:Name="pi" Text="📌" FontSize="14" VerticalAlignment="Center" Opacity="0.35"/>
+                                                        <TextBlock x:Name="pi" Text="&#xE734;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Opacity="0.45"/>
                                                         <TextBlock x:Name="pt" Text="固定到任务栏" FontSize="12" Foreground="#8E8E96" VerticalAlignment="Center" Margin="6,0,0,0"/>
                                                     </StackPanel>
                                                 </Border>
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="pb" Property="Background" Value="{DynamicResource ToggleHoverBgBrush}"/><Setter TargetName="pi" Property="Opacity" Value="0.7"/></Trigger>
-                                                    <Trigger Property="IsChecked" Value="True"><Setter TargetName="pi" Property="Opacity" Value="1"/><Setter TargetName="pi" Property="Text" Value="📍"/><Setter TargetName="pt" Property="Foreground" Value="#0A84FF"/></Trigger>
+                                                    <Trigger Property="IsChecked" Value="True"><Setter TargetName="pi" Property="Opacity" Value="1"/><Setter TargetName="pi" Property="Foreground" Value="{DynamicResource AccentBrush}"/><Setter TargetName="pt" Property="Foreground" Value="{DynamicResource AccentBrush}"/></Trigger>
                                                 </ControlTemplate.Triggers>
                                             </ControlTemplate></ToggleButton.Template>
                                         </ToggleButton>
@@ -1419,20 +1560,20 @@
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
  
                             <!-- 顶部：添加按钮 -->
-                            <Grid Grid.Row="0" Margin="16,0,16,8">
+                            <Grid Grid.Row="0" Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="快速启动项" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                <Button Grid.Column="1" Content="+ 添加程序/快捷方式" Click="QuickLaunchAdd_Click" Style="{StaticResource PrimaryBtn}" Padding="14,0" Height="34" FontSize="12"/>
+                                <Button Grid.Column="1" Content="添加程序或快捷方式" Click="QuickLaunchAdd_Click" Style="{StaticResource SecondaryBtn}" Padding="14,0" Height="34" FontSize="12"/>
                             </Grid>
  
                             <!-- 删除区域 -->
-                            <Border x:Name="QuickLaunchDeleteZone" Grid.Row="0" Background="#CCFF453A" CornerRadius="8" Margin="16,0,16,4" Padding="12,8"
+                            <Border x:Name="QuickLaunchDeleteZone" Grid.Row="0" Background="#CCFF453A" CornerRadius="8" Margin="0,0,0,4" Padding="12,8"
                                     Visibility="Collapsed" HorizontalAlignment="Stretch" Height="48">
-                                <TextBlock Text="🗑️ 拖到此处删除" Foreground="White" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="&#xE74D;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="White" FontSize="14" Margin="0,0,8,0"/><TextBlock Text="拖到此处删除" Foreground="White" FontSize="13"/></StackPanel>
                             </Border>
  
                             <!-- 列表 -->
-                            <Border Grid.Row="1" Background="{DynamicResource CardBgAltBrush}" CornerRadius="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="16,0,16,8">
+                            <Border Grid.Row="2" Background="{DynamicResource CardBgAltBrush}" CornerRadius="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,0,8">
                                 <Grid>
                                     <ListBox x:Name="QuickLaunchListBox" ItemsSource="{Binding QuickLaunchList}"
                                              Background="Transparent" BorderThickness="0" Padding="8" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -1440,8 +1581,19 @@
                                              ItemContainerStyle="{StaticResource QuickLaunchListItemStyle}"
                                              VirtualizingStackPanel.IsVirtualizing="True"
                                              VirtualizingStackPanel.VirtualizationMode="Recycling"/>
-                                    <TextBlock x:Name="QuickLaunchEmptyHint" Text="点击上方 [+ 添加程序] 添加快速启动项" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="13"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <StackPanel x:Name="QuickLaunchEmptyHint" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <Border Width="56" Height="56" CornerRadius="16" Background="{DynamicResource AccentBgBrush}" HorizontalAlignment="Center">
+                                            <TextBlock Text="&#xE945;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock Text="还没有快速启动项" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,14,0,0"/>
+                                        <TextBlock Text="把常用程序集中到一个入口，切换账号后也能立即启动。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,12"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,14">
+                                            <Border Background="{DynamicResource InputBgBrush}" CornerRadius="8" Padding="9,6" Margin="0,0,5,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="11" Margin="0,0,6,0"/><TextBlock Text="程序与快捷方式" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10"/></StackPanel></Border>
+                                            <Border Background="{DynamicResource InputBgBrush}" CornerRadius="8" Padding="9,6" Margin="5,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE840;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="11" Margin="0,0,6,0"/><TextBlock Text="固定到快捷面板" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10"/></StackPanel></Border>
+                                            <Border Background="{DynamicResource InputBgBrush}" CornerRadius="8" Padding="9,6" Margin="5,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8AB;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="11" Margin="0,0,6,0"/><TextBlock Text="拖拽调整顺序" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10"/></StackPanel></Border>
+                                        </StackPanel>
+                                        <Button Content="添加第一个项目" Click="QuickLaunchAdd_Click" Style="{StaticResource PrimaryBtn}" Width="132" Height="36" HorizontalAlignment="Center"/>
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                         </Grid>
@@ -1449,33 +1601,41 @@
                         <!-- 设置视图 -->
                         <Grid x:Name="SettingsView" Visibility="Collapsed" Style="{StaticResource FadeInUpViewStyle}">
                             <Border Background="Transparent" BorderThickness="0" CornerRadius="0">
-                                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="8">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0">
                                     <StackPanel>
-                                        <Border CornerRadius="14" Margin="6,6,6,10" Padding="16,14" BorderThickness="0">
-                                            <Border.Background>
-                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                                    <GradientStop Color="#007AFF" Offset="0"/>
-                                                    <GradientStop Color="#5856D6" Offset="1"/>
-                                                </LinearGradientBrush>
-                                            </Border.Background>
-                                            <Border.Effect>
-                                                <DropShadowEffect Color="#5856D6" BlurRadius="16" ShadowDepth="2" Opacity="0.15"/>
-                                            </Border.Effect>
-                                            <Grid>
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                                <Border Width="36" Height="36" CornerRadius="12" Background="#26FFFFFF" Margin="0,0,12,0">
-                                                    <TextBlock Text="⚙" Foreground="White" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                                        <TextBlock.Effect>
-                                                            <DropShadowEffect Color="White" BlurRadius="4" ShadowDepth="0" Opacity="0.5"/>
-                                                        </TextBlock.Effect>
-                                                    </TextBlock>
-                                                </Border>
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock Text="设置" Foreground="White" FontSize="17" FontWeight="Bold"/>
-                                                    <TextBlock Text="管理启动、游戏库注入、任务栏常驻、桌面悬浮窗和外观行为" Foreground="#E5E5EA" FontSize="12" Margin="0,4,0,0"/>
-                                                </StackPanel>
-                                            </Grid>
-                                        </Border>
+                                        <TextBlock Text="快捷设置" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" FontWeight="SemiBold" Margin="6,2,0,8"/>
+                                        <Grid Margin="6,0,6,12">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource CardBorder}" Padding="14" Margin="0,0,5,5">
+                                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="10" Background="#332D7DFF" Margin="0,0,11,0"><TextBlock Text="&#xE7E8;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#FF75B7FF" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                                    <StackPanel Grid.Column="1"><TextBlock Text="开机自启" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="登录 Windows 后自动运行" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
+                                                    <CheckBox Grid.Column="2" IsChecked="{Binding StartWithWindows}" Checked="SettingsStartWithWindows_Changed" Unchecked="SettingsStartWithWindows_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                            <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource CardBorder}" Padding="14" Margin="5,0,0,5">
+                                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="10" Background="#33FF9F43" Margin="0,0,11,0"><TextBlock Text="&#xE7E8;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#FFFFB454" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                                    <StackPanel Grid.Column="1"><TextBlock Text="强制关闭steam" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="切换时强制结束进程树" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
+                                                    <CheckBox Grid.Column="2" IsChecked="{Binding SilentCloseSteam}" Checked="SettingsSilentCloseSteam_Changed" Unchecked="SettingsSilentCloseSteam_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                            <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource CardBorder}" Padding="14" Margin="0,5,5,0">
+                                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="10" Background="#3334C759" Margin="0,0,11,0"><TextBlock Text="&#xE7F8;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#FF51D979" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                                    <StackPanel Grid.Column="1"><TextBlock Text="任务栏常驻" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="在任务栏快速切换账号" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
+                                                    <CheckBox Grid.Column="2" IsChecked="{Binding IsTaskbarPinned}" Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                            <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource CardBorder}" Padding="14" Margin="5,5,0,0">
+                                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <Border Width="36" Height="36" CornerRadius="10" Background="#3332C7D9" Margin="0,0,11,0"><TextBlock Text="&#xE8A9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#FF5CDCEB" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                                    <StackPanel Grid.Column="1"><TextBlock Text="桌面悬浮窗" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="显示桌面快捷切换入口" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
+                                                    <CheckBox Grid.Column="2" IsChecked="{Binding DesktopFloatingEnabled}" Checked="DesktopFloating_Checked" Unchecked="DesktopFloating_Unchecked" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </Grid>
 
                                         <!-- 外观 -->
                                         <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
@@ -1525,17 +1685,6 @@
                                                             <TextBlock Text="点关闭按钮时隐藏窗口，仍可从托盘恢复" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding MinimizeToTray}" Checked="SettingsMinimizeToTray_Changed" Unchecked="SettingsMinimizeToTray_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
-                                                    </Grid>
-                                                </Border>
-                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
-                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                        <StackPanel>
-                                                            <TextBlock Text="开机自动启动" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
-                                                            <TextBlock Text="写入当前用户启动项，登录 Windows 后自动运行" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
-                                                        </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding StartWithWindows}" Checked="SettingsStartWithWindows_Changed" Unchecked="SettingsStartWithWindows_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
                                                 <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
@@ -1599,7 +1748,7 @@
                                                         <StackPanel>
                                                             <TextBlock Text="Steam 库界面注入" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                                                             <TextBlock Text="在 Steam 库游戏页面中显示账号选择和快速启动入口" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
-                                                            <TextBlock Text="⚠️ 开启将启用 CEF 调试端口，存在账号封禁风险" Foreground="#FF9500" FontSize="11" Margin="0,4,0,0"/>
+                                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0"><TextBlock Text="&#xE7BA;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#FF9500" FontSize="11" Margin="0,0,6,0"/><TextBlock Text="开启将启用 CEF 调试端口，存在账号封禁风险" Foreground="#FF9500" FontSize="11"/></StackPanel>
                                                         </StackPanel>
                                                         <CheckBox Grid.Column="1" IsChecked="{Binding EnableLibraryInjection}" Checked="SettingsLibraryInjection_Changed" Unchecked="SettingsLibraryInjection_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                                                     </Grid>
@@ -1607,25 +1756,14 @@
                                             </StackPanel>
                                         </Border>
 
-                                        <!-- 显示与通知 -->
+                                        <!-- 更新与通知 -->
                                         <StackPanel Orientation="Horizontal" Margin="14,8,14,8">
                                             <Border Height="12" Width="3" CornerRadius="1.5" Background="{DynamicResource AccentBrush}"/>
-                                            <TextBlock Text="显示与通知" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="更新与通知" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
                                         </StackPanel>
                                         <Border Background="{DynamicResource CardBgBrush}" CornerRadius="14" Margin="6,0,6,10" Padding="0"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                                             <StackPanel>
-                                                <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                        <StackPanel>
-                                                            <TextBlock Text="静默模式" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
-                                                            <TextBlock Text="切换账号时后台关闭 Steam，并用后台方式启动 Steam 和游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
-                                                        </StackPanel>
-                                                        <CheckBox Grid.Column="1" IsChecked="{Binding SilentCloseSteam}" Checked="SettingsSilentCloseSteam_Changed" Unchecked="SettingsSilentCloseSteam_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
-                                                    </Grid>
-                                                </Border>
-                                                <Border Background="{DynamicResource SeparatorBrush}" Height="0.5" Margin="14,0"/>
                                                 <Border Padding="14,12" Style="{StaticResource SettingRowStyle}">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -1704,25 +1842,25 @@
                                                     </Grid.ColumnDefinitions>
                                                     <Button Grid.Row="0" Grid.Column="0" Command="{Binding OpenDataFolderCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,0,4,6" Height="36">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="📂" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
                                                             <TextBlock Text="数据目录" FontSize="12" VerticalAlignment="Center"/>
                                                         </StackPanel>
                                                     </Button>
                                                     <Button Grid.Row="0" Grid.Column="1" Command="{Binding OpenLogFolderCommand}" Style="{StaticResource SecondaryBtn}" Margin="4,0,0,6" Height="36">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="📝" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="&#xE8A5;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
                                                             <TextBlock Text="日志目录" FontSize="12" VerticalAlignment="Center"/>
                                                         </StackPanel>
                                                     </Button>
                                                     <Button Grid.Row="1" Grid.Column="0" Command="{Binding CopyDiagnosticsCommand}" Style="{StaticResource SecondaryBtn}" Margin="0,6,4,0" Height="36">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="📋" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="&#xE8C8;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
                                                             <TextBlock Text="复制诊断" FontSize="12" VerticalAlignment="Center"/>
                                                         </StackPanel>
                                                     </Button>
                                                     <Button Grid.Row="1" Grid.Column="1" Click="ResetLayout_Click" Style="{StaticResource SecondaryBtn}" Margin="4,6,0,0" Height="36">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="🔄" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
                                                             <TextBlock Text="重置布局" FontSize="12" VerticalAlignment="Center"/>
                                                         </StackPanel>
                                                     </Button>
@@ -1947,40 +2085,23 @@
                             </Border>
                         </Grid>
                     </Grid>
+                    </Grid>
                 </Grid>
 
             <!-- 底部栏 -->
-            <Border Grid.Row="2" Background="{DynamicResource CardBgAltBrush}" Padding="14,10">
-                <StackPanel>
-                    <Grid Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Content="切换并启动 Steam" Command="{Binding SwitchAndLaunchCommand}"
-                                IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
-                                Style="{StaticResource PrimaryBtn}" Margin="0,0,6,0"/>
-                        <Button Grid.Column="1" Content="仅切换账号" Command="{Binding SwitchOnlyCommand}"
-                                IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBool}}"
-                                Style="{StaticResource SecondaryBtn}" Margin="6,0,0,0"/>
-                    </Grid>
-
-                    <WrapPanel Margin="0,0,0,6">
-                        <CheckBox Content="启动Steam" IsChecked="{Binding AutoStartSteam}" Checked="SettingsAutoStartSteam_Changed" Unchecked="SettingsAutoStartSteam_Changed" Style="{StaticResource AppCheckBox}"/>
-                        <CheckBox Content="静默模式" IsChecked="{Binding SilentCloseSteam}" Checked="SettingsSilentCloseSteam_Changed" Unchecked="SettingsSilentCloseSteam_Changed" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
-                        <CheckBox Content="最小化到托盘" IsChecked="{Binding MinimizeToTray}" Checked="SettingsMinimizeToTray_Changed" Unchecked="SettingsMinimizeToTray_Changed" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
-                        <CheckBox Content="任务栏常驻" IsChecked="{Binding IsTaskbarPinned}" Checked="TaskbarPin_Checked" Unchecked="TaskbarPin_Unchecked" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
-                        <CheckBox Content="桌面悬浮窗" IsChecked="{Binding DesktopFloatingEnabled}" Checked="DesktopFloating_Checked" Unchecked="DesktopFloating_Unchecked" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
-                        <CheckBox Content="库界面注入 ⚠️" IsChecked="{Binding EnableLibraryInjection}" Checked="SettingsLibraryInjection_Changed" Unchecked="SettingsLibraryInjection_Changed" Style="{StaticResource AppCheckBox}" Margin="14,0,0,0"/>
-                    </WrapPanel>
-
-                    <Border Background="{DynamicResource InputBgBrush}" CornerRadius="8" Padding="10,6" Margin="0,0,0,6">
-                        <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                    </Border>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <TextBlock Text="Powered by " Foreground="{DynamicResource FooterTextBrush}" FontSize="10"/>
-                        <TextBlock Text="ddxgtx" Foreground="{DynamicResource FooterLinkBrush}" FontSize="10" FontWeight="Medium"/>
-                        <TextBlock Text="  |  " Foreground="{DynamicResource FooterTextBrush}" FontSize="10"/>
-                        <TextBlock Text="GitHub" Foreground="{DynamicResource AccentBrush}" FontSize="10" Cursor="Hand" MouseLeftButtonDown="GitHubLink_Click"/>
+            <Border Grid.Row="2" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,7">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessFgBrush}" Margin="0,0,8,0"/>
+                        <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" MaxWidth="520"/>
                     </StackPanel>
-                </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <CheckBox Content="自动启动 Steam" IsChecked="{Binding AutoStartSteam}" Checked="SettingsAutoStartSteam_Changed" Unchecked="SettingsAutoStartSteam_Changed" Style="{StaticResource AppCheckBox}"/>
+                        <CheckBox Content="强制关闭 Steam" IsChecked="{Binding SilentCloseSteam}" Checked="SettingsSilentCloseSteam_Changed" Unchecked="SettingsSilentCloseSteam_Changed" Style="{StaticResource AppCheckBox}" Margin="16,0,0,0"/>
+                        <TextBlock Text="GitHub" Foreground="{DynamicResource AccentBrush}" FontSize="10" Cursor="Hand" Margin="18,0,0,0" MouseLeftButtonDown="GitHubLink_Click"/>
+                    </StackPanel>
+                </Grid>
             </Border>
 
             <!-- 加载遮罩 - 覆盖全窗口 -->

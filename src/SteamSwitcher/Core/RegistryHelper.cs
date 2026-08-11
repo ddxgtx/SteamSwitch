@@ -25,11 +25,11 @@ namespace SteamSwitcher.Core
             try
             {
                 using var key = Registry.CurrentUser.OpenSubKey(SteamRegistryPath, true);
-                if (key != null)
-                {
-                    key.SetValue("AutoLoginUser", username, RegistryValueKind.String);
-                    key.SetValue("RememberPassword", 1, RegistryValueKind.DWord);
-                }
+                if (key == null)
+                    throw new InvalidOperationException($"无法打开注册表项 HKCU\\{SteamRegistryPath}");
+
+                key.SetValue("AutoLoginUser", username, RegistryValueKind.String);
+                key.SetValue("RememberPassword", 1, RegistryValueKind.DWord);
             }
             catch (Exception ex)
             {

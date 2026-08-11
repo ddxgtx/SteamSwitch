@@ -441,7 +441,7 @@
                     <Border Background="{TemplateBinding Background}" 
                             CornerRadius="8" Width="32" Height="32"
                             x:Name="border">
-                        <TextBlock Text="📌" FontSize="14" 
+                        <TextBlock Text="&#xE840;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"
                                    Opacity="0.3" x:Name="icon"/>
                     </Border>
@@ -452,7 +452,7 @@
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="icon" Property="Opacity" Value="1"/>
-                            <Setter TargetName="icon" Property="Text" Value="📍"/>
+                            <Setter TargetName="icon" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

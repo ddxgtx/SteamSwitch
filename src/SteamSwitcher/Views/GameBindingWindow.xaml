@@ -184,7 +184,7 @@
                             <RectangleGeometry Rect="0,0,42,42" RadiusX="10" RadiusY="10"/>
                         </Border.Clip>
                         <Grid>
-                            <TextBlock Text="🎮" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBlock Text="&#xE7FC;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             <Image Source="{Binding IconPath}" Stretch="UniformToFill"/>
                         </Grid>
                     </Border>
@@ -219,7 +219,7 @@
                                         <ControlTemplate TargetType="ToggleButton">
                                             <Border Background="#17171B" CornerRadius="8"
                                                     Width="34" Height="34" x:Name="b">
-                                                <TextBlock Text="📌" FontSize="14"
+                                                <TextBlock Text="&#xE840;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14"
                                                            HorizontalAlignment="Center" VerticalAlignment="Center"
                                                            Opacity="0.35" x:Name="i"/>
                                             </Border>
@@ -231,7 +231,7 @@
                                                 <Trigger Property="IsChecked" Value="True">
                                                     <Setter TargetName="b" Property="Background" Value="#1A3D5F"/>
                                                     <Setter TargetName="i" Property="Opacity" Value="1"/>
-                                                    <Setter TargetName="i" Property="Text" Value="📍"/>
+                                                    <Setter TargetName="i" Property="Foreground" Value="#0A84FF"/>
                                                     <Setter TargetName="b" Property="ToolTip" Value="已固定到任务栏"/>
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
@@ -301,7 +301,7 @@
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
                         <Border Width="24" Height="24" CornerRadius="6" Background="#0A84FF"
                                 Margin="0,0,10,0">
-                            <TextBlock Text="🎮" Foreground="White" FontSize="12"
+                            <TextBlock Text="&#xE7FC;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="White" FontSize="12"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock Text="游戏账号绑定" FontSize="15" FontWeight="SemiBold"

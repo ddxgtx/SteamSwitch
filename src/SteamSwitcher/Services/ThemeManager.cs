@@ -14,40 +14,40 @@ namespace SteamSwitcher.Services
             var d = theme == "Dark";
 
             // Window / Card backgrounds
-            Set(r, "WindowBgBrush", d ? C(0x0E, 0x0F, 0x16) : C(0xF5, 0xF5, 0xF7));
-            Set(r, "CardBgBrush", d ? CA(16, 120, 160, 255) : C(0xFF, 0xFF, 0xFF));
-            Set(r, "CardBgAltBrush", d ? CA(12, 120, 160, 255) : C(0xF0, 0xF0, 0xF2));
+            Set(r, "WindowBgBrush", d ? C(0x07, 0x11, 0x1F) : C(0xF5, 0xF5, 0xF7));
+            Set(r, "CardBgBrush", d ? C(0x10, 0x1C, 0x2D) : C(0xFF, 0xFF, 0xFF));
+            Set(r, "CardBgAltBrush", d ? C(0x0B, 0x16, 0x25) : C(0xF0, 0xF0, 0xF2));
 
             // Sidebar
-            Set(r, "SidebarBgBrush", d ? C(0x07, 0x08, 0x0D) : C(0xEB, 0xEB, 0xED));
-            Set(r, "SidebarActiveBgBrush", d ? CA(26, 10, 132, 255) : CA(40, 10, 132, 255));
-            Set(r, "SidebarActiveFgBrush", d ? C(0x0A, 0x84, 0xFF) : C(0x00, 0x66, 0xCC));
-            Set(r, "SidebarInactiveFgBrush", d ? C(0x8E, 0x8E, 0x96) : C(0x6E, 0x6E, 0x76));
+            Set(r, "SidebarBgBrush", d ? C(0x09, 0x14, 0x22) : C(0xEB, 0xEB, 0xED));
+            Set(r, "SidebarActiveBgBrush", d ? C(0x18, 0x3B, 0x75) : CA(40, 10, 132, 255));
+            Set(r, "SidebarActiveFgBrush", d ? C(0x75, 0xB7, 0xFF) : C(0x00, 0x66, 0xCC));
+            Set(r, "SidebarInactiveFgBrush", d ? C(0x89, 0x97, 0xAA) : C(0x6E, 0x6E, 0x76));
 
             // Text
             Set(r, "TextPrimaryBrush", d ? C(0xFF, 0xFF, 0xFF) : C(0x1D, 0x1D, 0x1F));
-            Set(r, "TextSecondaryBrush", d ? C(0x8E, 0x8E, 0x96) : C(0x6E, 0x6E, 0x76));
-            Set(r, "TextTertiaryBrush", d ? C(0x6C, 0x6C, 0x72) : C(0xAE, 0xAE, 0xB4));
+            Set(r, "TextSecondaryBrush", d ? C(0xA3, 0xAE, 0xC0) : C(0x6E, 0x6E, 0x76));
+            Set(r, "TextTertiaryBrush", d ? C(0x68, 0x77, 0x8C) : C(0xAE, 0xAE, 0xB4));
 
             // Accent
-            Set(r, "AccentBrush", d ? C(0x0A, 0x84, 0xFF) : C(0x00, 0x66, 0xCC));
-            Set(r, "AccentBgBrush", d ? CA(26, 10, 132, 255) : CA(20, 0, 102, 204));
+            Set(r, "AccentBrush", d ? C(0x2D, 0x7D, 0xFF) : C(0x00, 0x66, 0xCC));
+            Set(r, "AccentBgBrush", d ? CA(51, 45, 125, 255) : CA(20, 0, 102, 204));
 
             // Border / Separator
-            Set(r, "BorderBrush", d ? C(0x16, 0x17, 0x22) : C(0xDD, 0xDD, 0xDF));
-            Set(r, "SeparatorBrush", d ? CA(34, 255, 255, 255) : CA(30, 0, 0, 0));
+            Set(r, "BorderBrush", d ? C(0x24, 0x34, 0x4A) : C(0xDD, 0xDD, 0xDF));
+            Set(r, "SeparatorBrush", d ? C(0x1C, 0x2A, 0x3C) : CA(30, 0, 0, 0));
 
             // Input / Control backgrounds
-            Set(r, "InputBgBrush", d ? CA(20, 255, 255, 255) : C(0xFF, 0xFF, 0xFF));
+            Set(r, "InputBgBrush", d ? C(0x0C, 0x17, 0x26) : C(0xFF, 0xFF, 0xFF));
 
             // Search
             Set(r, "SearchPlaceholderFgBrush", d ? C(0x63, 0x63, 0x66) : C(0xAE, 0xAE, 0xB4));
             Set(r, "SearchTextFgBrush", d ? C(0xFF, 0xFF, 0xFF) : C(0x1D, 0x1D, 0x1F));
 
             // Hover / Selected states (semi-transparent)
-            Set(r, "HoverBgBrush", d ? CA(26, 255, 255, 255) : CA(20, 0, 0, 0));
-            Set(r, "SelectedBgBrush", d ? CA(26, 10, 132, 255) : CA(20, 0, 102, 204));
-            Set(r, "SelectedBgBrush2", d ? CA(34, 10, 132, 255) : CA(30, 0, 102, 204));
+            Set(r, "HoverBgBrush", d ? C(0x17, 0x26, 0x3A) : CA(20, 0, 0, 0));
+            Set(r, "SelectedBgBrush", d ? C(0x17, 0x3A, 0x6F) : CA(20, 0, 102, 204));
+            Set(r, "SelectedBgBrush2", d ? C(0x17, 0x41, 0x7D) : CA(30, 0, 102, 204));
 
             // Success
             Set(r, "SuccessBgBrush", d ? CA(30, 48, 209, 88) : CA(30, 48, 209, 88));
