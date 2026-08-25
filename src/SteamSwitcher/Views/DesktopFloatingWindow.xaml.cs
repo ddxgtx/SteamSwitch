@@ -463,13 +463,19 @@ namespace SteamSwitcher.Views
                 var g = baseColor.G;
                 var b = baseColor.B;
 
+                // Keep the user-selected tint while anchoring the glass on a dark
+                // surface so white labels stay legible over bright wallpapers.
+                var tintR = (byte)Math.Clamp((r * 0.34) + 12, 0, 255);
+                var tintG = (byte)Math.Clamp((g * 0.34) + 18, 0, 255);
+                var tintB = (byte)Math.Clamp((b * 0.34) + 28, 0, 255);
+
                 RootGlass.Background = new LinearGradientBrush(
-                    Color.FromArgb(120, 255, 255, 255),
-                    Color.FromArgb(85, r, g, b),
+                    Color.FromArgb(228, tintR, tintG, tintB),
+                    Color.FromArgb(202, (byte)Math.Max(8, tintR - 8), (byte)Math.Max(12, tintG - 8), (byte)Math.Max(18, tintB - 8)),
                     new Point(0, 0), new Point(1, 1));
                 RootGlass.BorderBrush = new LinearGradientBrush(
-                    Color.FromArgb(140, 255, 255, 255),
-                    Color.FromArgb(40, r, g, b),
+                    Color.FromArgb(108, 255, 255, 255),
+                    Color.FromArgb(92, r, g, b),
                     new Point(0, 0), new Point(0, 1));
             }
             else
@@ -762,7 +768,7 @@ namespace SteamSwitcher.Views
                 VerticalAlignment = VerticalAlignment.Center
             };
             if (!string.IsNullOrEmpty(text) && text[0] >= '\uE000' && text[0] <= '\uF8FF')
-                textBlock.FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets");
+                textBlock.FontFamily = new FontFamily("Segoe MDL2 Assets");
             return textBlock;
         }
 

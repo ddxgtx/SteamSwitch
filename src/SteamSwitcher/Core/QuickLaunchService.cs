@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using SteamSwitcher.Models;
 using SteamSwitcher.Services;
@@ -18,6 +19,7 @@ namespace SteamSwitcher.Core
         private readonly string _configPath;
         private readonly ConcurrentDictionary<string, QuickLaunchItem> _items = new();
         private readonly object _saveLock = new();
+        private readonly SemaphoreSlim _saveGate = new(1, 1);
 
         public event EventHandler? ItemsChanged;
 
@@ -34,8 +36,7 @@ namespace SteamSwitcher.Core
             {
                 if (File.Exists(_configPath))
                 {
-                    var json = await File.ReadAllTextAsync(_configPath);
-                    var loaded = JsonSerializer.Deserialize<List<QuickLaunchItem>>(json) ?? new();
+                    var loaded = await AtomicJsonFile.ReadAsync<List<QuickLaunchItem>>(_configPath) ?? new();
                     _items.Clear();
                     foreach (var item in loaded)
                         _items.TryAdd(item.Id, item);
@@ -51,16 +52,22 @@ namespace SteamSwitcher.Core
         {
             try
             {
-                var dir = Path.GetDirectoryName(_configPath);
-                if (!Directory.Exists(dir))
-                    Directory.CreateDirectory(dir!);
-
                 List<QuickLaunchItem> snapshot;
                 lock (_saveLock)
                     snapshot = _items.Values.OrderBy(x => x.SortOrder).ToList();
 
-                var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true });
-                await File.WriteAllTextAsync(_configPath, json);
+                await _saveGate.WaitAsync();
+                try
+                {
+                    await AtomicJsonFile.WriteAsync(
+                        _configPath,
+                        snapshot,
+                        new JsonSerializerOptions { WriteIndented = true });
+                }
+                finally
+                {
+                    _saveGate.Release();
+                }
             }
             catch (Exception ex)
             {
@@ -309,7 +316,8 @@ namespace SteamSwitcher.Core
 
         public void Dispose()
         {
-            // Nothing to dispose
+            // The semaphore intentionally lives for the process lifetime so an in-flight save
+            // can complete safely while the window is closing.
         }
     }
 }

@@ -27,10 +27,18 @@ namespace SteamSwitcher.Services
         private static int _writeCount;
         private static bool _directoryCreated;
 
-        public static string LogDirectory => _cachedLogDirectory ??= Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "SteamSwitch",
-            "logs");
+        public static string LogDirectory => _cachedLogDirectory ??= ResolveLogDirectory();
+
+        private static string ResolveLogDirectory()
+        {
+            var overrideDirectory = Environment.GetEnvironmentVariable("STEAMSWITCH_LOG_DIRECTORY");
+            return string.IsNullOrWhiteSpace(overrideDirectory)
+                ? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "SteamSwitch",
+                    "logs")
+                : Path.GetFullPath(overrideDirectory);
+        }
 
         public static string CurrentLogPath
         {

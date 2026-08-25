@@ -13,6 +13,8 @@ namespace SteamSwitcher.Core
     public class SteamCEFInjector : IDisposable
     {
         private readonly int _debugPort;
+        private readonly int _webSocketPort;
+        private readonly string _webSocketToken;
         private readonly GameAccountBinding _binding;
         private readonly AccountManager _accountManager;
         private CancellationTokenSource? _scanCts;
@@ -22,11 +24,18 @@ namespace SteamSwitcher.Core
         public bool IsConnected => _isConnected;
         public event EventHandler<string>? StatusChanged;
 
-        public SteamCEFInjector(GameAccountBinding binding, AccountManager accountManager, int debugPort = 8080)
+        public SteamCEFInjector(
+            GameAccountBinding binding,
+            AccountManager accountManager,
+            int debugPort,
+            int webSocketPort,
+            string webSocketToken)
         {
             _binding = binding;
             _accountManager = accountManager;
             _debugPort = debugPort;
+            _webSocketPort = webSocketPort;
+            _webSocketToken = webSocketToken;
         }
 
         public async Task<bool> ConnectAsync()
@@ -333,15 +342,19 @@ namespace SteamSwitcher.Core
         window.__steamswitch_target_app_id = injectedTargetAppId;
     }
 
-    if (window.__steamswitch_injected_v12) {
+    if (window.__steamswitch_injected_v13) {
         if (typeof window.__steamswitch_forceInjectGameDetail === 'function') {
             window.__steamswitch_forceInjectGameDetail();
         }
         return;
     }
-    window.__steamswitch_injected_v12 = true;
+    if (window.__steamswitch_injected_v12 && typeof window.__steamswitch_cleanup === 'function') {
+        try { window.__steamswitch_cleanup(); } catch(e) {}
+    }
+    window.__steamswitch_injected_v12 = false;
+    window.__steamswitch_injected_v13 = true;
 
-    const WS_URL = 'ws://localhost:8081';
+    const WS_URL = __WS_URL__;
     const WS_MAX_RETRIES = 10;
     const ACCOUNTS = __ACCOUNTS__;
     const BINDINGS = __BINDINGS__;
@@ -972,7 +985,10 @@ namespace SteamSwitcher.Core
 "
                 .Replace("__ACCOUNTS__", accountsJson)
                 .Replace("__BINDINGS__", bindingsJson)
-                .Replace("__STYLE__", cssJson);
+                .Replace("__STYLE__", cssJson)
+                .Replace(
+                    "__WS_URL__",
+                    JsonSerializer.Serialize($"ws://localhost:{_webSocketPort}/?token={Uri.EscapeDataString(_webSocketToken)}"));
 
             AppLogger.Info($"Inject script built. Accounts={accountDtos.Count}, Bindings={bindingDtos.Count}");
             return js;

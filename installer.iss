@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Steam Switch"
-#define MyAppVersion "2.7"
+#define MyAppVersion "3.0"
 #define MyAppPublisher "ddxgtx"
 #define MyAppURL "https://github.com/ddxgtx/SteamSwitch"
 #define MyAppExeName "SteamSwitch.exe"
@@ -30,6 +30,9 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+CloseApplications=yes
+CloseApplicationsFilter=SteamSwitch.exe
+RestartApplications=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName={#MyAppName}
@@ -51,7 +54,6 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 Name: "startwithwindows"; Description: "{cm:AutoStartProgram,{#MyAppName}}"; GroupDescription: "{cm:AutoStartProgramGroupDescription}"
 
 [Files]
-Source: "publish_zip\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "publish_zip\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -72,47 +74,3 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-autostart"; RunOnce
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{localappdata}\SteamSwitch"
-
-[Code]
-// 检查是否已安装
-function GetUninstallString(): String;
-var
-  sUnInstPath: String;
-  sUnInstallString: String;
-begin
-  sUnInstPath := ExpandConstant('Software\Microsoft\Windows\CurrentVersion\Uninstall\{#emit SetupSetting("AppId")}_is1');
-  sUnInstallString := '';
-  if not RegQueryStringValue(HKLM, sUnInstPath, 'UninstallString', sUnInstallString) then
-    RegQueryStringValue(HKCU, sUnInstPath, 'UninstallString', sUnInstallString);
-  Result := sUnInstallString;
-end;
-
-function IsUpgrade(): Boolean;
-begin
-  Result := (GetUninstallString() <> '');
-end;
-
-function UnInstallOldVersion(): Integer;
-var
-  sUnInstallString: String;
-  iResultCode: Integer;
-begin
-  Result := 0;
-  sUnInstallString := GetUninstallString();
-  if sUnInstallString <> '' then begin
-    sUnInstallString := RemoveQuotes(sUnInstallString);
-    if Exec(sUnInstallString, '/SILENT /NORESTART /SUPPRESSMSGBOXES','', SW_SHOW, ewWaitUntilTerminated, iResultCode) then
-      Result := 3
-    else
-      Result := 2;
-  end else
-    Result := 1;
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if (CurStep=ssInstall) then begin
-    if (IsUpgrade()) then
-      UnInstallOldVersion();
-  end;
-end;

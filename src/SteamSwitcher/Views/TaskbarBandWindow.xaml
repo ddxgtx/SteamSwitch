@@ -9,8 +9,74 @@
         Topmost="True"
         ResizeMode="NoResize"
         SizeToContent="WidthAndHeight"
+        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI, sans-serif"
         SnapsToDevicePixels="True"
-        UseLayoutRounding="True">
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        TextOptions.TextHintingMode="Fixed">
+
+    <Window.Resources>
+        <Style x:Key="MediaControlButton" TargetType="Button">
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Margin" Value="1,0"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#E0FFFFFF"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="MediaButtonBorder" Background="{TemplateBinding Background}" CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="MediaButtonBorder" Property="Background" Value="#38FFFFFF"/>
+                                <Setter Property="Foreground" Value="#00F0FF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="MediaButtonBorder" Property="Background" Value="#65FFFFFF"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.3"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PlayPauseControlButton" TargetType="Button" BasedOn="{StaticResource MediaControlButton}">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="PlayButtonBorder" Background="#28FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1" CornerRadius="15">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PlayButtonBorder" Property="Background" Value="#4500D2FF"/>
+                                <Setter TargetName="PlayButtonBorder" Property="BorderBrush" Value="#8000E5FF"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="PlayButtonBorder" Property="Background" Value="#700A84FF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
 
     <Grid>
         <Border x:Name="GlassBorder"
@@ -18,18 +84,184 @@
                 BorderThickness="1"
                 ClipToBounds="True">
             <Border.Effect>
-                <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="1" Opacity="0.15"/>
+                <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="2" Opacity="0.2"/>
             </Border.Effect>
 
             <DockPanel x:Name="ContentPanel" LastChildFill="False">
-                <StackPanel DockPanel.Dock="Right" x:Name="AvatarPanel" Orientation="Horizontal"/>
+                <!-- 左侧：独立歌词岛 (无边框直接融入任务栏，放大字号与封面) -->
+                <Border DockPanel.Dock="Left"
+                        x:Name="LyricsHost"
+                        Height="40"
+                        Margin="0,0,14,0"
+                        BorderBrush="#55FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="13"
+                        Visibility="Collapsed"
+                        Cursor="Hand"
+                        AutomationProperties.Name="任务栏歌词与媒体控制"
+                        MouseEnter="LyricsHost_MouseEnter"
+                        MouseLeave="LyricsHost_MouseLeave"
+                        MouseLeftButtonUp="LyricsHost_MouseLeftButtonUp"
+                        PreviewMouseWheel="LyricsHost_PreviewMouseWheel">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#A90A1320" Offset="0"/>
+                            <GradientStop Color="#B20F1B2B" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                    <Grid Margin="8,0,7,0" ClipToBounds="True">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 左侧/中间：放大双行歌词（右对齐，第一排歌词 + 第二排翻译）与悬停控制器 -->
+                        <Grid Grid.Column="0" VerticalAlignment="Center">
+                            <StackPanel x:Name="LyricsTextPanel" HorizontalAlignment="Right" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                                <StackPanel.RenderTransform><TranslateTransform x:Name="LyricsTranslate" Y="0"/></StackPanel.RenderTransform>
+                                <!-- 第一排：14px 半粗体主歌词，清晰突出但不过度拥挤 -->
+                                <TextBlock x:Name="LyricText" Text="等待媒体播放" Foreground="#FFFFFF" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Right" TextAlignment="Right" TextTrimming="CharacterEllipsis">
+                                    <TextBlock.Effect>
+                                        <DropShadowEffect Color="#000000" BlurRadius="6" ShadowDepth="1" Opacity="0.65"/>
+                                    </TextBlock.Effect>
+                                </TextBlock>
+                                <!-- 第二排：增大歌手、专辑、翻译或下一句的信息层级 -->
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,1,0,0">
+                                    <TextBlock x:Name="MediaIcon" Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" Foreground="#B8DDFF" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0">
+                                        <TextBlock.Effect>
+                                            <DropShadowEffect Color="#000000" BlurRadius="4" ShadowDepth="1" Opacity="0.5"/>
+                                        </TextBlock.Effect>
+                                    </TextBlock>
+                                    <TextBlock x:Name="MediaText" Text="打开播放器后将在此显示歌词" Foreground="#E8F3FF" FontSize="11.5" FontWeight="Medium" HorizontalAlignment="Right" TextAlignment="Right" TextTrimming="CharacterEllipsis">
+                                        <TextBlock.Effect>
+                                            <DropShadowEffect Color="#000000" BlurRadius="5" ShadowDepth="1" Opacity="0.55"/>
+                                        </TextBlock.Effect>
+                                    </TextBlock>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- 框内悬停磨砂亚克力媒体控制器 (上一首、播放/暂停、下一首 - 去除停止按键) -->
+                            <Border x:Name="LyricsControlsGlass" HorizontalAlignment="Right" VerticalAlignment="Center" CornerRadius="16" Padding="4,2" BorderThickness="1" Opacity="0" IsHitTestVisible="False">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#F40E1624" Offset="0"/>
+                                        <GradientStop Color="#E818273D" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <Border.BorderBrush>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#75FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#20FFFFFF" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.BorderBrush>
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="LyricsControlsTranslate" X="6"/>
+                                </Border.RenderTransform>
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="2" Opacity="0.55"/>
+                                </Border.Effect>
+                                <StackPanel x:Name="LyricsControls" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button x:Name="PrevButton" Content="&#xE892;" Click="PreviousTrack_Click" ToolTip="上一首" Style="{StaticResource MediaControlButton}" AutomationProperties.Name="上一首"/>
+                                    <Button x:Name="PlayPauseButton" Content="&#xE768;" Click="PlayPause_Click" ToolTip="播放 / 暂停" Style="{StaticResource PlayPauseControlButton}" AutomationProperties.Name="播放或暂停"/>
+                                    <Button x:Name="NextButton" Content="&#xE893;" Click="NextTrack_Click" ToolTip="下一首" Style="{StaticResource MediaControlButton}" AutomationProperties.Name="下一首"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- 右侧：36x36 放大高清圆角专辑封面 + 悬浮音波律动徽章 -->
+                        <Grid Grid.Column="1" VerticalAlignment="Center" Margin="9,0,1,0" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
+                                <ScaleTransform x:Name="ArtworkScale" ScaleX="1" ScaleY="1"/>
+                            </Grid.RenderTransform>
+                            <Border x:Name="ArtworkBorder" Width="36" Height="36" CornerRadius="8" BorderBrush="#35FFFFFF" BorderThickness="1" ClipToBounds="True">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#30FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#18FFFFFF" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#000000" BlurRadius="8" ShadowDepth="1.5" Opacity="0.38"/>
+                                </Border.Effect>
+                                <Grid>
+                                    <TextBlock x:Name="ArtworkFallback" Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" Foreground="#DFFFFFFF" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <Image x:Name="AlbumArtwork" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="当前专辑封面"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- 悬浮律动音波小徽章 -->
+                            <Border x:Name="VisualizerBadge" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Background="#85000000" CornerRadius="3" Padding="2,1">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
+                                    <Border x:Name="VisualizerBar1" Width="2" Height="4" CornerRadius="1" Margin="0.5,0">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                                                <GradientStop Color="#00D2FF" Offset="0"/>
+                                                <GradientStop Color="#FFFFFF" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <Border x:Name="VisualizerBar2" Width="2" Height="7" CornerRadius="1" Margin="0.5,0">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                                                <GradientStop Color="#00D2FF" Offset="0"/>
+                                                <GradientStop Color="#FFFFFF" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <Border x:Name="VisualizerBar3" Width="2" Height="5" CornerRadius="1" Margin="0.5,0">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                                                <GradientStop Color="#00D2FF" Offset="0"/>
+                                                <GradientStop Color="#FFFFFF" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- 底部发光流动进度条 -->
+                        <ProgressBar x:Name="LyricsProgress" Grid.ColumnSpan="2" Height="2.5" Margin="0,0,0,0" VerticalAlignment="Bottom" Minimum="0" Maximum="1" Value="0" Background="#15FFFFFF" Foreground="#0A84FF" BorderThickness="0">
+                            <ProgressBar.Template>
+                                <ControlTemplate TargetType="ProgressBar">
+                                    <Grid ClipToBounds="True">
+                                        <Border Background="{TemplateBinding Background}" CornerRadius="1.2"/>
+                                        <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="1.2">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                    <GradientStop Color="#00E5FF" Offset="0"/>
+                                                    <GradientStop Color="#0A84FF" Offset="0.7"/>
+                                                    <GradientStop Color="#FFFFFF" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+                                    </Grid>
+                                </ControlTemplate>
+                            </ProgressBar.Template>
+                        </ProgressBar>
+                    </Grid>
+                </Border>
+
+                <!-- 右侧：独立游戏与头像管理玻璃框 (独立分离) -->
                 <Border DockPanel.Dock="Right"
-                        x:Name="GameAvatarSeparator"
-                        Width="1" Margin="4,6"
-                        Background="#60FFFFFF"
-                        Visibility="Collapsed"/>
-                <StackPanel DockPanel.Dock="Right" x:Name="GamePanel" Orientation="Horizontal"/>
+                        x:Name="GameAvatarContainer"
+                        VerticalAlignment="Center"
+                        BorderThickness="1"
+                        ClipToBounds="True">
+                    <Border.Effect>
+                        <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="1.5" Opacity="0.25"/>
+                    </Border.Effect>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel x:Name="GamePanel" Orientation="Horizontal"/>
+                        <Border x:Name="GameAvatarSeparator"
+                                Width="1" Margin="4,4"
+                                Background="#40FFFFFF"
+                                Visibility="Collapsed"/>
+                        <StackPanel x:Name="AvatarPanel" Orientation="Horizontal"/>
+                    </StackPanel>
+                </Border>
             </DockPanel>
         </Border>
     </Grid>
+
 </Window>

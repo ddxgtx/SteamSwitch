@@ -57,6 +57,7 @@ namespace SteamSwitcher.Core
         private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_FRAMECHANGED = 0x0020;
+        private const uint SWP_NOSENDCHANGING = 0x0400;
         private const int EdgeMargin = 8;
         private const int TrayReserveGap = 56;
 
@@ -78,6 +79,11 @@ namespace SteamSwitcher.Core
         private int _offsetX;
         private int _offsetY;
         private System.Windows.Threading.DispatcherTimer? _positionTimer;
+        private IntPtr _lastPositionHwnd;
+        private int _lastX = int.MinValue;
+        private int _lastY = int.MinValue;
+        private int _lastWidth = int.MinValue;
+        private int _lastHeight = int.MinValue;
 
         public bool IsEmbedded => _isEmbedded;
         public TaskbarPosition Position
@@ -85,6 +91,7 @@ namespace SteamSwitcher.Core
             get => _position;
             set
             {
+                if (_position == value) return;
                 _position = value;
                 if (_isEmbedded) UpdatePosition();
             }
@@ -94,6 +101,7 @@ namespace SteamSwitcher.Core
             get => _offsetX;
             set
             {
+                if (_offsetX == value) return;
                 _offsetX = value;
                 if (_isEmbedded) UpdatePosition();
             }
@@ -103,6 +111,7 @@ namespace SteamSwitcher.Core
             get => _offsetY;
             set
             {
+                if (_offsetY == value) return;
                 _offsetY = value;
                 if (_isEmbedded) UpdatePosition();
             }
@@ -128,7 +137,9 @@ namespace SteamSwitcher.Core
 
         public void UpdateWidth(int width)
         {
-            _width = Math.Max(1, width);
+            width = Math.Max(1, width);
+            if (_width == width) return;
+            _width = width;
             if (_isEmbedded) UpdatePosition();
         }
 
@@ -174,7 +185,8 @@ namespace SteamSwitcher.Core
                 _isEmbedded = true;
                 _parentHandle = taskbarHandle;
 
-                UpdatePosition();
+                ResetPositionCache();
+                UpdatePosition(forceFrameRefresh: true);
                 _embeddedWindow.Show();
             }
             catch (Exception ex)
@@ -204,6 +216,7 @@ namespace SteamSwitcher.Core
                 SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
 
                 _isEmbedded = false;
+                ResetPositionCache();
                 _embeddedWindow.Hide();
             }
             catch (Exception ex)
@@ -213,6 +226,11 @@ namespace SteamSwitcher.Core
         }
 
         public void UpdatePosition()
+        {
+            UpdatePosition(forceFrameRefresh: false);
+        }
+
+        private void UpdatePosition(bool forceFrameRefresh)
         {
             if (_embeddedWindow == null || !_isEmbedded) return;
 
@@ -243,15 +261,37 @@ namespace SteamSwitcher.Core
                 int height = Math.Clamp(desiredHeight, 24, availableHeight);
                 int y = Math.Max(2, (taskbarHeight - height) / 2) + _offsetY;
 
+                if (!forceFrameRefresh &&
+                    hwnd == _lastPositionHwnd &&
+                    x == _lastX && y == _lastY && width == _lastWidth && height == _lastHeight)
+                {
+                    return;
+                }
+
                 SetWindowPos(hwnd, IntPtr.Zero,
                              x, y,
                              width, height,
-                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING |
+                             (forceFrameRefresh ? SWP_FRAMECHANGED : 0));
+                _lastPositionHwnd = hwnd;
+                _lastX = x;
+                _lastY = y;
+                _lastWidth = width;
+                _lastHeight = height;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"UpdatePosition failed: {ex.Message}");
             }
+        }
+
+        private void ResetPositionCache()
+        {
+            _lastPositionHwnd = IntPtr.Zero;
+            _lastX = int.MinValue;
+            _lastY = int.MinValue;
+            _lastWidth = int.MinValue;
+            _lastHeight = int.MinValue;
         }
 
         private int GetEffectiveWidth(int taskbarWidth, int trayX, int desiredWidth)

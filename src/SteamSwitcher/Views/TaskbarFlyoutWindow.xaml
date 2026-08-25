@@ -1,0 +1,179 @@
+<Window x:Class="SteamSwitcher.Views.TaskbarFlyoutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Taskbar Media Flyout"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ShowActivated="False"
+        Focusable="False"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True"
+        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI, sans-serif"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        MouseEnter="Window_MouseEnter"
+        MouseLeave="Window_MouseLeave">
+
+    <Window.Resources>
+        <Style x:Key="FlyoutMediaButton" TargetType="Button">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="#E5FFFFFF"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="BtnBorder" Background="{TemplateBinding Background}" CornerRadius="16">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#38FFFFFF"/>
+                                <Setter Property="Foreground" Value="#00F0FF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#60FFFFFF"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.3"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="FlyoutPlayPauseButton" TargetType="Button" BasedOn="{StaticResource FlyoutMediaButton}">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="BtnBorder" CornerRadius="18" BorderThickness="1">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#50FFFFFF" Offset="0"/>
+                                    <GradientStop Color="#25FFFFFF" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <Border.BorderBrush>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#90FFFFFF" Offset="0"/>
+                                    <GradientStop Color="#30FFFFFF" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.BorderBrush>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#650A84FF"/>
+                                <Setter TargetName="BtnBorder" Property="BorderBrush" Value="#CC00F0FF"/>
+                                <Setter Property="Foreground" Value="#00F0FF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#990A84FF"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="12">
+        <!-- 模式 1：切歌悬浮岛 (上一首、播放/暂停、下一首 - 去除停止按键) -->
+        <Border x:Name="ControlsHost"
+                CornerRadius="18"
+                Padding="6,3"
+                BorderThickness="1"
+                Visibility="Collapsed"
+                RenderTransformOrigin="0.5,0.5">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#F80E182A" Offset="0"/>
+                    <GradientStop Color="#EE16243A" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Border.BorderBrush>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="#85FFFFFF" Offset="0"/>
+                    <GradientStop Color="#25FFFFFF" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.BorderBrush>
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="ControlsTranslate" Y="4"/>
+            </Border.RenderTransform>
+            <Border.Effect>
+                <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="3" Opacity="0.55"/>
+            </Border.Effect>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="PrevButton" Content="&#xE892;" Click="PrevButton_Click" ToolTip="上一首" Style="{StaticResource FlyoutMediaButton}"/>
+                <Button x:Name="PlayPauseButton" Content="&#xE768;" Click="PlayPauseButton_Click" ToolTip="播放 / 暂停" Style="{StaticResource FlyoutPlayPauseButton}"/>
+                <Button x:Name="NextButton" Content="&#xE893;" Click="NextButton_Click" ToolTip="下一首" Style="{StaticResource FlyoutMediaButton}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- 模式 2：音量调节 HUD 胶囊 (图标 + 流光进度条 + 百分比) -->
+        <Border x:Name="VolumeHost"
+                CornerRadius="18"
+                Padding="12,6"
+                BorderThickness="1"
+                Visibility="Collapsed"
+                RenderTransformOrigin="0.5,0.5">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#F80E182A" Offset="0"/>
+                    <GradientStop Color="#EE16243A" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Border.BorderBrush>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="#85FFFFFF" Offset="0"/>
+                    <GradientStop Color="#25FFFFFF" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.BorderBrush>
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="VolumeTranslate" Y="4"/>
+            </Border.RenderTransform>
+            <Border.Effect>
+                <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="3" Opacity="0.55"/>
+            </Border.Effect>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock x:Name="VolumeIcon" Text="&#xE767;" FontFamily="Segoe MDL2 Assets" Foreground="#00F0FF" FontSize="13.5" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ProgressBar x:Name="VolumeProgressBar" Width="84" Height="5" Minimum="0" Maximum="100" Value="50" Margin="0,0,10,0" Background="#35FFFFFF" Foreground="#00E5FF" BorderThickness="0">
+                    <ProgressBar.Template>
+                        <ControlTemplate TargetType="ProgressBar">
+                            <Grid ClipToBounds="True">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="2.5"/>
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="2.5">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="#00E5FF" Offset="0"/>
+                                            <GradientStop Color="#0A84FF" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                            </Grid>
+                        </ControlTemplate>
+                    </ProgressBar.Template>
+                </ProgressBar>
+                <TextBlock x:Name="VolumePercentText" Text="50%" Foreground="#FFFFFF" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Width="34" TextAlignment="Right"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

@@ -12,6 +12,7 @@ namespace SteamSwitcher
         private SingleInstanceManager? _singleInstance;
 
         public static bool IsAutorunLaunch { get; private set; }
+        public static bool SuppressFatalDialogs { get; set; }
 
         public App()
         {
@@ -47,7 +48,14 @@ namespace SteamSwitcher
                 _singleInstance = new SingleInstanceManager();
                 if (!_singleInstance.IsPrimaryInstance)
                 {
-                    _singleInstance.SignalPrimaryInstance();
+                    _singleInstance.SignalPrimaryInstance(e.Args);
+                    Shutdown();
+                    return;
+                }
+
+                if (e.Args.Any(arg => string.Equals(
+                        arg, "--shutdown-for-update", StringComparison.OrdinalIgnoreCase)))
+                {
                     Shutdown();
                     return;
                 }
@@ -55,22 +63,21 @@ namespace SteamSwitcher
                 var settings = SettingsService.Load();
                 ThemeManager.ApplyTheme(settings.Theme);
 
-                var mainWindow = new MainWindow(IsAutorunLaunch);
+                var mainWindow = new MainWindow(IsAutorunLaunch, e.Args);
                 MainWindow = mainWindow;
-                _singleInstance.StartListening(() =>
-                    Dispatcher.BeginInvoke(new Action(mainWindow.ActivateFromExternalRequest)));
+                _singleInstance.StartListening(arguments =>
+                    Dispatcher.BeginInvoke(new Action(() => mainWindow.HandleExternalRequest(arguments))));
                 mainWindow.Show();
             }
             catch (Exception ex)
             {
                 Dispatcher.BeginInvoke(new Action(() => Shutdown(-1)));
-                var logPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "SteamSwitch", "crash.log");
-                Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-                File.WriteAllText(logPath, FormatException(ex));
-                MessageBox.Show(FormatException(ex), "Steam Switch - 启动错误",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                WriteCrashLog(ex);
+                if (!SuppressFatalDialogs)
+                {
+                    MessageBox.Show(FormatException(ex), "Steam Switch - 启动错误",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
         }
 
@@ -95,17 +102,15 @@ namespace SteamSwitcher
 
         private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
         {
-            var logPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "SteamSwitch", "crash.log");
-            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-            File.WriteAllText(logPath, FormatException(e.Exception));
-
-            MessageBox.Show(
-                FormatException(e.Exception),
-                "Steam Switch - 错误",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            WriteCrashLog(e.Exception);
+            if (!SuppressFatalDialogs)
+            {
+                MessageBox.Show(
+                    FormatException(e.Exception),
+                    "Steam Switch - 错误",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
             e.Handled = true;
         }
 
@@ -113,11 +118,31 @@ namespace SteamSwitcher
         {
             if (e.ExceptionObject is Exception ex)
             {
-                MessageBox.Show(
-                    FormatException(ex),
-                    "Steam Switch - 严重错误",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
+                WriteCrashLog(ex);
+                if (!SuppressFatalDialogs)
+                {
+                    MessageBox.Show(
+                        FormatException(ex),
+                        "Steam Switch - 严重错误",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+            }
+        }
+
+        private static void WriteCrashLog(Exception ex)
+        {
+            try
+            {
+                var logPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "SteamSwitch", "crash.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+                File.WriteAllText(logPath, FormatException(ex));
+            }
+            catch
+            {
+                // Crash reporting must never trigger a second fatal exception.
             }
         }
     }

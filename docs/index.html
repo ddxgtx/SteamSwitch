@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Steam Switch v2.7：Windows 10/11 Steam 多账号切换、游戏账号绑定、快捷启动、任务栏常驻与桌面悬浮窗工具。">
+    <meta name="description" content="Steam Switch v3.0 测试版：Windows 10/11 Steam 多账号切换、游戏账号绑定、快捷启动、任务栏常驻与桌面悬浮窗工具。">
     <meta name="theme-color" content="#0a0a0f">
-    <meta property="og:title" content="Steam Switch v2.7">
+    <meta property="og:title" content="Steam Switch v3.0">
     <meta property="og:description" content="一站式 Steam 多账号切换、游戏绑定与快捷启动工具。">
     <meta property="og:type" content="website">
     <meta property="og:url" content="http://ddxgtx.fun/SteamSwitch/">
     <meta property="og:image" content="https://raw.githubusercontent.com/ddxgtx/SteamSwitch/main/docs/screenshots/screenshot_1.png">
     <link rel="icon" href="https://raw.githubusercontent.com/ddxgtx/SteamSwitch/main/icon.png">
-    <title>Steam Switch v2.7 - Steam 多账号管理工具</title>
+    <title>Steam Switch v3.0 测试版 - Steam 多账号管理工具</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
@@ -150,7 +150,7 @@
             transform: translateY(-2px);
         }
 
-        /* v2.7 发布亮点 */
+        /* v3.0 发布亮点 */
         .release-panel {
             max-width: 900px;
             margin: 0 auto;
@@ -350,7 +350,7 @@
             <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
             <img src="https://img.shields.io/badge/.NET-8.0-512BD4.svg" alt=".NET">
             <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4.svg" alt="Platform">
-            <img src="https://img.shields.io/badge/v2.7-Stable-green.svg" alt="Version">
+            <img src="https://img.shields.io/badge/v3.0-Beta-orange.svg" alt="Version">
         </div>
 
         <div class="hero-btns">
@@ -361,7 +361,7 @@
 
     <div class="release-panel">
         <div class="release-card">
-            <div class="release-version">v2.7</div>
+            <div class="release-version">v3.0</div>
             <div class="release-copy">
                 <h2>全新界面，更清晰的账号与游戏工作流</h2>
                 <p>重构四个核心页面，游戏直接显示启动账号；修复开机自启 UAC 冲突，并完善悬浮窗、任务栏常驻窗与后台任务的资源释放。</p>
@@ -376,7 +376,7 @@
             <div class="feature-card">
                 <div class="feature-icon">🎮</div>
                 <h3>账号切换</h3>
-                <p>自动读取本机 Steam 账号，一键切换并启动，支持系统托盘快速操作，切换时气泡提醒</p>
+                <p>自动读取本机 Steam 账号，一键切换并启动，支持系统托盘和无密码桌面快捷方式</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">🔗</div>
@@ -384,9 +384,24 @@
                 <p>扫描本机已安装游戏，为每个游戏绑定默认启动账号，支持程序快速启动和快捷入口一键启动</p>
             </div>
             <div class="feature-card">
+                <div class="feature-icon">💾</div>
+                <h3>游戏存档中心</h3>
+                <p>按账号检查 userdata 或自定义目录，支持 Steam 退出后自动备份、变化预览和去重，并可从保护版本安全恢复</p>
+            </div>
+            <div class="feature-card">
                 <div class="feature-icon">📌</div>
                 <h3>任务栏常驻</h3>
                 <p>将账号和游戏嵌入 Windows 任务栏，支持液态玻璃效果、圆角模式、位置调节</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎵</div>
+                <h3>任务栏歌词</h3>
+                <p>在账号切换区左侧显示同步歌词，并直接控制上一首、播放/暂停和下一首；支持系统媒体会话与可选 LRCLIB 在线歌词。</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">✨</div>
+                <h3>透明任务栏</h3>
+                <p>透明、模糊、亚克力、纯色与最大化窗口动态效果。功能灵感来源于 <a href="https://github.com/TranslucentTB/TranslucentTB" style="color:#75B7FF">TranslucentTB</a>（GPL-3.0），SteamSwitch 为独立实现。</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">🪟</div>
@@ -424,7 +439,7 @@
 
     <div class="screenshots" id="screenshots">
         <h2 class="section-title">界面预览</h2>
-        <p class="section-desc">v2.7 Windows 11 风格深色界面，账号与游戏状态一目了然</p>
+        <p class="section-desc">v3.0 Windows 11 风格深色界面，账号与游戏状态一目了然</p>
         
         <div class="screenshot-item">
             <h3>账号切换</h3>
@@ -446,15 +461,15 @@
 
     <div class="download-section" id="download">
         <h2 class="section-title">下载安装</h2>
-        <p class="section-desc">v2.7 · Windows 10/11 · .NET 8 自包含</p>
+        <p class="section-desc">v3.0 · Windows 10/11 · .NET 8 自包含</p>
         
         <div class="download-cards">
-            <a href="https://github.com/ddxgtx/SteamSwitch/releases/download/v2.7/SteamSwitch-v2.7-win-x64-setup.exe" class="download-card">
+            <a href="https://github.com/ddxgtx/SteamSwitch/releases/download/v3.0/SteamSwitch-v3.0-win-x64-setup.exe" class="download-card">
                 <div class="icon">📦</div>
                 <div class="title">安装包</div>
                 <div class="desc">推荐 · 支持中文 · 可选开机自启</div>
             </a>
-            <a href="https://github.com/ddxgtx/SteamSwitch/releases/download/v2.7/SteamSwitch-v2.7-win-x64-portable.zip" class="download-card">
+            <a href="https://github.com/ddxgtx/SteamSwitch/releases/download/v3.0/SteamSwitch-v3.0-win-x64-portable.zip" class="download-card">
                 <div class="icon">📁</div>
                 <div class="title">便携版</div>
                 <div class="desc">免安装 · 解压即用</div>

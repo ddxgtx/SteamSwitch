@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System;
 using System.ComponentModel;
 using System.IO;
@@ -11,6 +12,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using SteamSwitcher.Core;
+using SteamSwitcher.Models;
 using SteamSwitcher.Services;
 using SteamSwitcher.ViewModels;
 using SteamSwitcher.Views;
@@ -21,15 +23,29 @@ namespace SteamSwitcher
     {
         private readonly MainViewModel _viewModel;
         private readonly TrayIconService _trayIcon;
+        private readonly TaskbarAppearanceService _taskbarAppearanceService = new();
+        private readonly TaskbarOverlayService _taskbarOverlayService = new();
+        private readonly TranslucentTbEngine _ttbEngine = new();
+        private readonly DesktopIconService _desktopIconService = new();
         private TaskbarBandWindow? _taskbarBand;
         private DesktopFloatingWindow? _desktopFloatingWindow;
+        private GameSaveCenterWindow? _gameSaveCenterWindow;
+        private DragDropHelper? _quickLaunchDragDrop;
         private bool _gameSearchPlaceholder = true;
         private bool _accountSearchPlaceholder = true;
         private bool _exitRequested;
         private bool _shutdownStarted;
         private readonly bool _startHidden;
+        private string[] _startupArguments;
+        private bool _isInitialized;
         private const string GameSearchHint = "搜索游戏、AppID 或启动账号...";
         private const string AccountSearchHint = "搜索账号名称或登录名...";
+        private string _accountFilterMode = "All";
+        private string _accountSortMode = "Recent";
+        private bool _accountGridMode;
+        private bool _updatingTaskbarAppearance;
+        private Style? _accountListItemStyle;
+        private Style? _accountGridItemStyle;
 
         [DllImport("user32.dll")]
         private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
@@ -41,24 +57,37 @@ namespace SteamSwitcher
         private static extern bool DeleteObject(IntPtr hObject);
 
         [DllImport("dwmapi.dll")]
-        private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS margins);
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int valueSize);
 
-        [StructLayout(LayoutKind.Sequential)]
-        private struct MARGINS
-        {
-            public int cxLeftWidth;
-            public int cxRightWidth;
-            public int cyTopHeight;
-            public int cyBottomHeight;
-        }
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern uint RegisterWindowMessage(string lpString);
 
-        public MainWindow(bool startHidden = false)
+        private static readonly uint WmTaskbarCreated = RegisterWindowMessage("TaskbarCreated");
+
+        private const int DwmwaWindowCornerPreference = 33;
+        private const int DwmwaBorderColor = 34;
+        private const int DwmWindowCornerPreferenceRound = 2;
+        private const int DwmColorNone = unchecked((int)0xFFFFFFFE);
+
+        public MainWindow(bool startHidden = false, string[]? startupArguments = null)
         {
             _startHidden = startHidden;
+            _startupArguments = startupArguments ?? Array.Empty<string>();
             _viewModel = new MainViewModel();
             DataContext = _viewModel;
 
             InitializeComponent();
+            _accountListItemStyle = AccountListBox.ItemContainerStyle;
+            ApplyAccountSort();
+            _desktopIconService.IconVisibilityChanged += OnDesktopIconVisibilityChanged;
+            _desktopIconService.CountdownChanged += OnDesktopIconCountdownChanged;
+            if (_viewModel.DesktopIconsHiddenByApp)
+            {
+                if (_desktopIconService.RecoverIconsAfterUnexpectedShutdown())
+                    _viewModel.DesktopIconsHiddenByApp = false;
+            }
+            SyncDesktopEnhanceControls();
+            ConfigureDesktopEnhance();
 
             if (_startHidden)
             {
@@ -72,6 +101,7 @@ namespace SteamSwitcher
             _trayIcon.LaunchSteamRequested += OnTrayLaunchSteamRequested;
             _trayIcon.ExitRequested += (s, e) => RequestExit();
             _viewModel.GetAccountManager().CurrentAccountChanged += OnCurrentAccountChanged;
+            _viewModel.GetAccountManager().ConfirmForceCloseAfterTimeoutAsync = ConfirmForceCloseAfterTimeoutAsync;
 
             _viewModel.NotificationRequested += (s, message) =>
             {
@@ -90,22 +120,83 @@ namespace SteamSwitcher
             };
 
             Loaded += MainWindow_Loaded;
+            SourceInitialized += (_, _) => OnSourceInitialized();
             Closing += Window_Closing;
+            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
             StateChanged += Window_StateChanged;
             SizeChanged += MainWindow_SizeChanged;
         }
 
-        private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+        private void OnSourceInitialized()
         {
-            ApplyRoundedWindowRegion();
+            ApplyNativeWindowAppearance();
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                var source = HwndSource.FromHwnd(hwnd);
+                source?.AddHook(WndProc);
+            }
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         }
 
-        private void ApplyRoundedWindowRegion()
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if ((uint)msg == WmTaskbarCreated)
+            {
+                _taskbarAppearanceService.Refresh();
+                _taskbarBand?.Rebuild();
+            }
+            return IntPtr.Zero;
+        }
+
+        private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(() => _taskbarAppearanceService.Refresh()));
+        }
+
+        private void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(() => _taskbarAppearanceService.Refresh()));
+        }
+
+        private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            // Windows 11 DWM corners are size independent. Only the legacy GDI region
+            // needs to be rebuilt continuously while resizing on older systems.
+            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+            {
+                ApplyNativeWindowAppearance();
+            }
+        }
+
+        private void ApplyNativeWindowAppearance()
         {
             try
             {
                 var hwnd = new WindowInteropHelper(this).Handle;
                 if (hwnd == IntPtr.Zero) return;
+
+                // Windows 11 can draw the outer corner itself. Suppressing the DWM border
+                // also removes the bright strip that otherwise appears above a custom title bar.
+                if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+                {
+                    var cornerPreference = DwmWindowCornerPreferenceRound;
+                    DwmSetWindowAttribute(hwnd, DwmwaWindowCornerPreference, ref cornerPreference, sizeof(int));
+
+                    var borderColor = DwmColorNone;
+                    DwmSetWindowAttribute(hwnd, DwmwaBorderColor, ref borderColor, sizeof(int));
+
+                    // Clear the legacy region so DWM owns anti-aliased corners and maximized state.
+                    SetWindowRgn(hwnd, IntPtr.Zero, true);
+                    return;
+                }
+
+                if (WindowState == WindowState.Maximized)
+                {
+                    SetWindowRgn(hwnd, IntPtr.Zero, true);
+                    return;
+                }
 
                 var source = PresentationSource.FromVisual(this);
                 double dpiX = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
@@ -135,20 +226,10 @@ namespace SteamSwitcher
                 ShowInTaskbar = true;
             }
 
-            try
-            {
-                var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "icon.png");
-                if (System.IO.File.Exists(iconPath))
-                {
-                    var bitmap = new System.Windows.Media.Imaging.BitmapImage(new Uri(iconPath));
-                    Icon = bitmap;
-                }
-            }
-            catch { }
-
-            ApplyRoundedWindowRegion();
+            ApplyNativeWindowAppearance();
 
             await _viewModel.InitializeAsync();
+            _isInitialized = true;
             _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
 
             GameSearchBox.Text = GameSearchHint;
@@ -158,17 +239,12 @@ namespace SteamSwitcher
             AccountSearchBox.Foreground = (Brush)Application.Current.Resources["SearchPlaceholderFgBrush"];
             _accountSearchPlaceholder = true;
 
-            SettingsOffsetXSlider.Value = _viewModel.TaskbarOffsetX;
-            SettingsOffsetXText.Text = _viewModel.TaskbarOffsetX.ToString();
-            SettingsOffsetYSlider.Value = _viewModel.TaskbarOffsetY;
-            SettingsOffsetYText.Text = _viewModel.TaskbarOffsetY.ToString();
-            SettingsTaskbarAvatarSlider.Value = _viewModel.TaskbarAvatarSize;
-            SettingsTaskbarAvatarText.Text = _viewModel.TaskbarAvatarSize.ToString();
             SettingsFloatingAvatarSlider.Value = _viewModel.DesktopFloatingAvatarSize;
             SettingsFloatingAvatarText.Text = _viewModel.DesktopFloatingAvatarSize.ToString();
             SettingsFloatingOpacitySlider.Value = _viewModel.DesktopFloatingOpacity;
             SettingsFloatingOpacityText.Text = $"{_viewModel.DesktopFloatingOpacity}%";
-            SyncTaskbarPositionRadios();
+            SyncGameSaveSettingsUi();
+            ApplyTaskbarAppearance();
 
             if ((_viewModel.IsTaskbarPinned || _viewModel.DesktopFloatingEnabled) &&
                 _viewModel.GetSettings().PinnedGameIds.Count > 0 &&
@@ -188,6 +264,14 @@ namespace SteamSwitcher
             }
 
             SwitchToAccounts();
+            if (_startupArguments.Any(argument =>
+                    string.Equals(argument, "--switch-account", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(argument, "--launch-game", StringComparison.OrdinalIgnoreCase)))
+            {
+                var arguments = _startupArguments;
+                _startupArguments = Array.Empty<string>();
+                await HandleExternalRequestAsync(arguments);
+            }
         }
 
         public void ActivateFromExternalRequest()
@@ -205,6 +289,54 @@ namespace SteamSwitcher
             Activate();
         }
 
+        public async void HandleExternalRequest(string[] arguments)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                _ = Dispatcher.BeginInvoke(new Action(() => HandleExternalRequest(arguments)));
+                return;
+            }
+            await HandleExternalRequestAsync(arguments);
+        }
+
+        private async Task HandleExternalRequestAsync(string[] arguments)
+        {
+            if (arguments.Any(argument => string.Equals(
+                    argument, "--shutdown-for-update", StringComparison.OrdinalIgnoreCase)))
+            {
+                RequestExit();
+                return;
+            }
+
+            if (!_isInitialized)
+            {
+                _startupArguments = arguments;
+                return;
+            }
+
+            var switchIndex = Array.FindIndex(arguments, argument =>
+                string.Equals(argument, "--switch-account", StringComparison.OrdinalIgnoreCase));
+            var gameIndex = Array.FindIndex(arguments, argument =>
+                string.Equals(argument, "--launch-game", StringComparison.OrdinalIgnoreCase));
+            if (gameIndex >= 0 && gameIndex + 1 < arguments.Length &&
+                int.TryParse(arguments[gameIndex + 1], out var appId) && appId > 0)
+            {
+                await _viewModel.LaunchBoundGameAsync(appId);
+                return;
+            }
+            if (switchIndex >= 0 && switchIndex + 1 < arguments.Length)
+            {
+                var steamId = arguments[switchIndex + 1];
+                var launchSteam = arguments.Any(argument =>
+                    string.Equals(argument, "--launch-steam", StringComparison.OrdinalIgnoreCase));
+                await _viewModel.SwitchAccountBySteamIdAsync(steamId, launchSteam);
+                _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+                return;
+            }
+
+            ActivateFromExternalRequest();
+        }
+
         private void OnTrayAccountSelected(object? sender, string steamId)
         {
             var account = _viewModel.Accounts.FirstOrDefault(a => a.SteamId == steamId);
@@ -214,6 +346,27 @@ namespace SteamSwitcher
                 _ = _viewModel.AutoStartSteam
                     ? _viewModel.SwitchAndLaunchCommand.ExecuteAsync(null)
                     : _viewModel.SwitchOnlyCommand.ExecuteAsync(null);
+            }
+        }
+
+        private void CreateAccountShortcut_Click(object sender, RoutedEventArgs e)
+        {
+            var account = _viewModel.SelectedAccount;
+            if (account == null)
+            {
+                MessageBox.Show(this, "请先选择一个 Steam 账号。", "创建快捷方式", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                var shortcutPath = AccountShortcutService.CreateDesktopShortcut(account.Account);
+                _viewModel.StatusText = $"已创建桌面快捷方式：{Path.GetFileNameWithoutExtension(shortcutPath)}";
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Unable to create account desktop shortcut.", ex);
+                MessageBox.Show(this, ex.Message, "创建快捷方式失败", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -242,12 +395,26 @@ namespace SteamSwitcher
             }
         }
 
+        private void OnProcessExit(object? sender, EventArgs e) => _desktopIconService.ShowIcons();
+
         private void RequestExit()
         {
             _exitRequested = true;
             CleanupForExit();
             Close();
             Application.Current.Shutdown();
+        }
+
+        private Task<bool> ConfirmForceCloseAfterTimeoutAsync()
+        {
+            var result = MessageBox.Show(
+                this,
+                "Steam 在 20 秒内没有正常退出。\n\n可能仍在同步 Steam Cloud。是否立即强制结束 Steam 进程树？",
+                "Steam 尚未退出",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            return Task.FromResult(result == MessageBoxResult.Yes);
         }
 
         private void CleanupForExit()
@@ -264,15 +431,30 @@ namespace SteamSwitcher
             _desktopFloatingWindow = null;
 
             _viewModel.GetAccountManager().CurrentAccountChanged -= OnCurrentAccountChanged;
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
             taskbarBand?.Detach();
             taskbarBand?.Close();
             desktopFloatingWindow?.Close();
+            _gameSaveCenterWindow?.Dispose();
+            _gameSaveCenterWindow = null;
+            _desktopIconService.ShowIcons();
+            _viewModel.DesktopIconsHiddenByApp = false;
+            _desktopIconService.IconVisibilityChanged -= OnDesktopIconVisibilityChanged;
+            _desktopIconService.CountdownChanged -= OnDesktopIconCountdownChanged;
+            _desktopIconService.Dispose();
+            _taskbarAppearanceService.Dispose();
+            _taskbarOverlayService.Dispose();
+            _ttbEngine.Dispose();
             _trayIcon.Dispose();
             _viewModel.Dispose();
         }
 
         private void Window_StateChanged(object? sender, EventArgs e)
         {
+            ApplyNativeWindowAppearance();
+
             if (WindowState == WindowState.Minimized && _viewModel.MinimizeToTray)
             {
                 Hide();
@@ -347,7 +529,7 @@ namespace SteamSwitcher
             SwitchToSettings();
         }
 
-        private void SideAccounts_Click(object sender, RoutedEventArgs e)
+                private void SideAccounts_Click(object sender, RoutedEventArgs e)
         {
             SwitchToAccounts();
         }
@@ -357,6 +539,28 @@ namespace SteamSwitcher
             SwitchToGames();
         }
 
+        private void SideSaveCenter_Click(object sender, RoutedEventArgs e)
+        {
+            _gameSaveCenterWindow ??= new GameSaveCenterWindow(_viewModel);
+            SaveCenterHost.Content = _gameSaveCenterWindow;
+            SwitchToSaveCenter();
+        }
+
+        private void SideTransparentTaskbar_Click(object sender, RoutedEventArgs e)
+        {
+            SwitchToTransparentTaskbar();
+        }
+
+        private void SideTaskbarLyrics_Click(object sender, RoutedEventArgs e)
+        {
+            SwitchToTaskbarLyrics();
+        }
+
+        private void SideQuickLaunch_Click(object sender, RoutedEventArgs e)
+        {
+            SwitchToQuickLaunch();
+        }
+
         private void SideSettings_Click(object sender, RoutedEventArgs e)
         {
             SwitchToSettings();
@@ -364,28 +568,42 @@ namespace SteamSwitcher
 
         private void SwitchToAccounts()
         {
+            PageHeader.Visibility = Visibility.Collapsed;
             AccountView.Visibility = Visibility.Visible;
             GameView.Visibility = Visibility.Collapsed;
             QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Collapsed;
-            PageTitle.Text = "账号切换";
-            PageSubtitle.Text = "选择账号并安全切换 Steam 登录状态";
+            SaveCenterHost.Visibility = Visibility.Collapsed;
+            TransparentTaskbarView.Visibility = Visibility.Collapsed;
+            TaskbarLyricsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "账号管理";
+            PageSubtitle.Text = "双击卡片快速切换 Steam 身份，支持置顶常用账号。";
             SetSidebarActive(SideAccounts, SideAccentAccount,
                              SideGames, SideAccentGame,
+                             SideSaveCenter, SideAccentSave,
+                             SideTransparentTaskbar, SideAccentTransparentTaskbar,
+                             SideTaskbarLyrics, SideAccentTaskbarLyrics,
                              SideQuickLaunch, SideAccentQuickLaunch,
                              SideSettings, SideAccentSettings);
         }
 
         private void SwitchToGames()
         {
+            PageHeader.Visibility = Visibility.Visible;
             AccountView.Visibility = Visibility.Collapsed;
             GameView.Visibility = Visibility.Visible;
             QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Collapsed;
-            PageTitle.Text = "游戏绑定与启动";
-            PageSubtitle.Text = "将游戏绑定到指定账号，一步完成切换与启动";
+            SaveCenterHost.Visibility = Visibility.Collapsed;
+            TransparentTaskbarView.Visibility = Visibility.Collapsed;
+            TaskbarLyricsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "游戏库绑定";
+            PageSubtitle.Text = "智能扫描本机 Steam 游戏，为每个游戏绑定专属启动账号。";
             SetSidebarActive(SideGames, SideAccentGame,
                              SideAccounts, SideAccentAccount,
+                             SideSaveCenter, SideAccentSave,
+                             SideTransparentTaskbar, SideAccentTransparentTaskbar,
+                             SideTaskbarLyrics, SideAccentTaskbarLyrics,
                              SideQuickLaunch, SideAccentQuickLaunch,
                              SideSettings, SideAccentSettings);
 
@@ -412,25 +630,142 @@ namespace SteamSwitcher
             }
         }
 
+        private void SwitchToSaveCenter()
+        {
+            PageHeader.Visibility = Visibility.Visible;
+            AccountView.Visibility = Visibility.Collapsed;
+            GameView.Visibility = Visibility.Collapsed;
+            QuickLaunchView.Visibility = Visibility.Collapsed;
+            SettingsView.Visibility = Visibility.Collapsed;
+            SaveCenterHost.Visibility = Visibility.Visible;
+            TransparentTaskbarView.Visibility = Visibility.Collapsed;
+            TaskbarLyricsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "游戏存档中心";
+            PageSubtitle.Text = "按 Steam 账号与游戏目录智能检查、备份与安全恢复 userdata 存档。";
+            SetSidebarActive(SideSaveCenter, SideAccentSave,
+                             SideAccounts, SideAccentAccount,
+                             SideGames, SideAccentGame,
+                             SideTransparentTaskbar, SideAccentTransparentTaskbar,
+                             SideTaskbarLyrics, SideAccentTaskbarLyrics,
+                             SideQuickLaunch, SideAccentQuickLaunch,
+                             SideSettings, SideAccentSettings);
+        }
+
+        private void SwitchToTransparentTaskbar()
+        {
+            PageHeader.Visibility = Visibility.Visible;
+            AccountView.Visibility = Visibility.Collapsed;
+            GameView.Visibility = Visibility.Collapsed;
+            QuickLaunchView.Visibility = Visibility.Collapsed;
+            SettingsView.Visibility = Visibility.Collapsed;
+            SaveCenterHost.Visibility = Visibility.Collapsed;
+            TransparentTaskbarView.Visibility = Visibility.Visible;
+            TaskbarLyricsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "透明任务栏";
+            PageSubtitle.Text = "深度定制 Windows 任务栏视觉材质、动态变色与前台窗口场景保护。";
+            SyncTaskbarAppearanceMode();
+            SetSidebarActive(SideTransparentTaskbar, SideAccentTransparentTaskbar,
+                             SideAccounts, SideAccentAccount,
+                             SideGames, SideAccentGame,
+                             SideSaveCenter, SideAccentSave,
+                             SideTaskbarLyrics, SideAccentTaskbarLyrics,
+                             SideQuickLaunch, SideAccentQuickLaunch,
+                             SideSettings, SideAccentSettings);
+        }
+
+        private void SwitchToTaskbarLyrics()
+        {
+            PageHeader.Visibility = Visibility.Visible;
+            AccountView.Visibility = Visibility.Collapsed;
+            GameView.Visibility = Visibility.Collapsed;
+            QuickLaunchView.Visibility = Visibility.Collapsed;
+            SettingsView.Visibility = Visibility.Collapsed;
+            SaveCenterHost.Visibility = Visibility.Collapsed;
+            TransparentTaskbarView.Visibility = Visibility.Collapsed;
+            TaskbarLyricsView.Visibility = Visibility.Visible;
+            PageTitle.Text = "任务栏歌词";
+            PageSubtitle.Text = "在任务栏实时显示多平台同步歌词，支持媒体快捷控制与自适应宽度。";
+            if (TaskbarLyricsWidthText != null)
+                TaskbarLyricsWidthText.Text = $"{_viewModel.TaskbarLyricsWidth} px";
+            if (LyricOffsetText != null)
+                LyricOffsetText.Text = _viewModel.LyricOffsetMs >= 0 ? $"+{_viewModel.LyricOffsetMs} ms" : $"{_viewModel.LyricOffsetMs} ms";
+            SetSidebarActive(SideTaskbarLyrics, SideAccentTaskbarLyrics,
+                             SideAccounts, SideAccentAccount,
+                             SideGames, SideAccentGame,
+                             SideSaveCenter, SideAccentSave,
+                             SideTransparentTaskbar, SideAccentTransparentTaskbar,
+                             SideQuickLaunch, SideAccentQuickLaunch,
+                             SideSettings, SideAccentSettings);
+        }
+
+        private void SwitchToQuickLaunch()
+        {
+            PageHeader.Visibility = Visibility.Visible;
+            AccountView.Visibility = Visibility.Collapsed;
+            GameView.Visibility = Visibility.Collapsed;
+            QuickLaunchView.Visibility = Visibility.Visible;
+            SettingsView.Visibility = Visibility.Collapsed;
+            SaveCenterHost.Visibility = Visibility.Collapsed;
+            TransparentTaskbarView.Visibility = Visibility.Collapsed;
+            TaskbarLyricsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "快捷启动";
+            PageSubtitle.Text = "将常用账号、独立游戏与外部程序组织成桌面快捷面板，支持拖拽排序。";
+            SetSidebarActive(SideQuickLaunch, SideAccentQuickLaunch,
+                             SideAccounts, SideAccentAccount,
+                             SideGames, SideAccentGame,
+                             SideSaveCenter, SideAccentSave,
+                             SideTransparentTaskbar, SideAccentTransparentTaskbar,
+                             SideTaskbarLyrics, SideAccentTaskbarLyrics,
+                             SideSettings, SideAccentSettings);
+            QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            // Initialize drag-drop if not already done
+            if (_quickLaunchDragDrop == null)
+            {
+                _quickLaunchDragDrop = new DragDropHelper(QuickLaunchListBox, QuickLaunchDeleteZone);
+                _quickLaunchDragDrop.ItemDeleted += async (s, index) =>
+                {
+                    await _viewModel.DeleteQuickLaunchItemAsync(index);
+                    QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                };
+                _quickLaunchDragDrop.ItemMoved += async (s, args) =>
+                {
+                    await _viewModel.ReorderQuickLaunchItemAsync(args.fromIndex, args.toIndex);
+                };
+                _quickLaunchDragDrop.ItemClicked += (s, index) =>
+                {
+                    var items = _viewModel.QuickLaunchList;
+                    if (index >= 0 && index < items.Count)
+                    {
+                        _viewModel.LaunchQuickLaunchItem(items[index].Id);
+                    }
+                };
+                _quickLaunchDragDrop.Attach();
+            }
+        }
+
         private void SwitchToSettings()
         {
+            PageHeader.Visibility = Visibility.Visible;
             AccountView.Visibility = Visibility.Collapsed;
             GameView.Visibility = Visibility.Collapsed;
             QuickLaunchView.Visibility = Visibility.Collapsed;
             SettingsView.Visibility = Visibility.Visible;
-            PageTitle.Text = "设置与外观";
-            PageSubtitle.Text = "按工作流管理启动、通知、任务栏、悬浮窗和主题";
+            SaveCenterHost.Visibility = Visibility.Collapsed;
+            TransparentTaskbarView.Visibility = Visibility.Collapsed;
+            TaskbarLyricsView.Visibility = Visibility.Collapsed;
+            PageTitle.Text = "偏好设置";
+            PageSubtitle.Text = "集中管理开机自启、账号切换行为、任务栏与外观偏好。";
             SetSidebarActive(SideSettings, SideAccentSettings,
                              SideAccounts, SideAccentAccount,
                              SideGames, SideAccentGame,
+                             SideSaveCenter, SideAccentSave,
+                             SideTransparentTaskbar, SideAccentTransparentTaskbar,
+                             SideTaskbarLyrics, SideAccentTaskbarLyrics,
                              SideQuickLaunch, SideAccentQuickLaunch);
         }
 
-        private void SetSidebarActive(
-            Button active, Border activeAccent,
-            Button inactive1, Border inactiveAccent1,
-            Button inactive2, Border inactiveAccent2,
-            Button inactive3, Border inactiveAccent3)
+        private void SetSidebarActive(Button active, Border activeAccent, params object[] inactivePairs)
         {
             var res = Application.Current.Resources;
             active.Background = (Brush)res["SidebarActiveBgBrush"];
@@ -438,20 +773,15 @@ namespace SteamSwitcher
             active.FontWeight = FontWeights.SemiBold;
             activeAccent.Background = (Brush)res["SidebarActiveFgBrush"];
 
-            inactive1.Background = Brushes.Transparent;
-            inactive1.Foreground = (Brush)res["SidebarInactiveFgBrush"];
-            inactive1.FontWeight = FontWeights.Normal;
-            inactiveAccent1.Background = Brushes.Transparent;
-
-            inactive2.Background = Brushes.Transparent;
-            inactive2.Foreground = (Brush)res["SidebarInactiveFgBrush"];
-            inactive2.FontWeight = FontWeights.Normal;
-            inactiveAccent2.Background = Brushes.Transparent;
-
-            inactive3.Background = Brushes.Transparent;
-            inactive3.Foreground = (Brush)res["SidebarInactiveFgBrush"];
-            inactive3.FontWeight = FontWeights.Normal;
-            inactiveAccent3.Background = Brushes.Transparent;
+            for (var i = 0; i + 1 < inactivePairs.Length; i += 2)
+            {
+                if (inactivePairs[i] is not Button button || inactivePairs[i + 1] is not Border accent)
+                    continue;
+                button.Background = Brushes.Transparent;
+                button.Foreground = (Brush)res["SidebarInactiveFgBrush"];
+                button.FontWeight = FontWeights.Normal;
+                accent.Background = Brushes.Transparent;
+            }
         }
 
         private async void GameScan_Click(object sender, RoutedEventArgs e)
@@ -462,25 +792,204 @@ namespace SteamSwitcher
                 : "未找到已安装的游戏";
         }
 
-        private void AccountCollectionViewSource_Filter(object sender, FilterEventArgs e)
+        private async void AccountListBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            if (_accountSearchPlaceholder || string.IsNullOrWhiteSpace(AccountSearchBox?.Text))
+            if (e.ChangedButton != MouseButton.Left ||
+                e.OriginalSource is not DependencyObject source ||
+                FindVisualAncestor<System.Windows.Controls.Primitives.ButtonBase>(source) != null)
             {
-                e.Accepted = true;
                 return;
             }
 
+            var item = ItemsControl.ContainerFromElement(AccountListBox, source) as ListBoxItem;
+            if (item?.DataContext is not AccountViewModel account)
+                return;
+
+            _viewModel.SelectedAccount = account;
+            e.Handled = true;
+
+            if (_viewModel.AutoStartSteam)
+                await _viewModel.SwitchAndLaunchCommand.ExecuteAsync(null);
+            else
+                await _viewModel.SwitchOnlyCommand.ExecuteAsync(null);
+        }
+
+        private static T? FindVisualAncestor<T>(DependencyObject? element) where T : DependencyObject
+        {
+            while (element != null)
+            {
+                if (element is T match)
+                    return match;
+
+                element = VisualTreeHelper.GetParent(element);
+            }
+
+            return null;
+        }
+        private void AccountFilterButton_Click(object sender, RoutedEventArgs e)
+        {
+            OpenAccountToolbarMenu(sender as Button);
+        }
+
+        private void AccountSortButton_Click(object sender, RoutedEventArgs e)
+        {
+            OpenAccountToolbarMenu(sender as Button);
+        }
+
+        private static void OpenAccountToolbarMenu(Button? button)
+        {
+            if (button?.ContextMenu == null)
+                return;
+
+            button.ContextMenu.PlacementTarget = button;
+            button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            button.ContextMenu.IsOpen = true;
+        }
+
+        private void AccountFilterOption_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuItem { Tag: string mode })
+                return;
+
+            _accountFilterMode = mode;
+            AccountFilterText.Text = mode switch
+            {
+                "Current" => "当前账号",
+                "Pinned" => "已固定账号",
+                _ => "全部账号"
+            };
+            RefreshAccountFilter();
+        }
+
+        private void AccountSortOption_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuItem { Tag: string mode })
+                return;
+
+            _accountSortMode = mode;
+            AccountSortText.Text = mode switch
+            {
+                "Name" => "排序：账号名称",
+                "Pinned" => "排序：固定优先",
+                _ => "排序：最近登录"
+            };
+            ApplyAccountSort();
+        }
+
+        private void ApplyAccountSort()
+        {
+            if (Resources["FilteredAccounts"] is not CollectionViewSource source || source.View == null)
+                return;
+
+            using (source.View.DeferRefresh())
+            {
+                source.View.SortDescriptions.Clear();
+                switch (_accountSortMode)
+                {
+                    case "Name":
+                        source.View.SortDescriptions.Add(new SortDescription(nameof(AccountViewModel.DisplayName), ListSortDirection.Ascending));
+                        break;
+                    case "Pinned":
+                        source.View.SortDescriptions.Add(new SortDescription(nameof(AccountViewModel.IsPinned), ListSortDirection.Descending));
+                        source.View.SortDescriptions.Add(new SortDescription(nameof(AccountViewModel.LastLoginTimestamp), ListSortDirection.Descending));
+                        break;
+                    default:
+                        source.View.SortDescriptions.Add(new SortDescription(nameof(AccountViewModel.LastLoginTimestamp), ListSortDirection.Descending));
+                        break;
+                }
+
+                if (_accountSortMode != "Name")
+                    source.View.SortDescriptions.Add(new SortDescription(nameof(AccountViewModel.DisplayName), ListSortDirection.Ascending));
+            }
+        }
+
+        private void AccountListView_Click(object sender, RoutedEventArgs e)
+        {
+            SetAccountGridMode(false);
+        }
+
+        private void AccountGridView_Click(object sender, RoutedEventArgs e)
+        {
+            SetAccountGridMode(true);
+        }
+
+        private void SetAccountGridMode(bool useGrid)
+        {
+            if (_accountGridMode == useGrid)
+                return;
+
+            _accountGridMode = useGrid;
+            if (useGrid)
+            {
+                _accountGridItemStyle ??= CreateAccountGridItemStyle();
+                AccountListBox.ItemsPanel = (ItemsPanelTemplate)FindResource("AccountGridItemsPanel");
+                AccountListBox.ItemContainerStyle = _accountGridItemStyle;
+                AccountListBox.MaxHeight = 520;
+                Grid.SetColumnSpan(AccountListPanel, 2);
+                AccountListPanel.Margin = new Thickness(0);
+                AccountDetailPanel.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                AccountListBox.ItemsPanel = (ItemsPanelTemplate)FindResource("AccountListItemsPanel");
+                AccountListBox.ItemContainerStyle = _accountListItemStyle;
+                AccountListBox.MaxHeight = 270;
+                Grid.SetColumnSpan(AccountListPanel, 1);
+                AccountListPanel.Margin = new Thickness(0, 0, 24, 0);
+                AccountDetailPanel.Visibility = Visibility.Visible;
+            }
+
+            SetAccountViewButtonState(AccountListViewButton, !useGrid);
+            SetAccountViewButtonState(AccountGridViewButton, useGrid);
+        }
+
+        private Style CreateAccountGridItemStyle()
+        {
+            var style = new Style(typeof(ListBoxItem), _accountListItemStyle);
+            style.Setters.Add(new Setter(FrameworkElement.WidthProperty, double.NaN));
+            style.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(6)));
+            return style;
+        }
+
+        private static void SetAccountViewButtonState(Button button, bool active)
+        {
+            if (active)
+            {
+                button.SetResourceReference(Control.BackgroundProperty, "SelectedBgBrush");
+                button.SetResourceReference(Control.ForegroundProperty, "AccentBrush");
+            }
+            else
+            {
+                button.Background = Brushes.Transparent;
+                button.SetResourceReference(Control.ForegroundProperty, "TextSecondaryBrush");
+            }
+        }
+        private void AccountCollectionViewSource_Filter(object sender, FilterEventArgs e)
+        {
             if (e.Item is not AccountViewModel account)
             {
                 e.Accepted = false;
                 return;
             }
 
-            var query = AccountSearchBox.Text.Trim();
-            e.Accepted = account.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                         account.Username.Contains(query, StringComparison.OrdinalIgnoreCase);
-        }
+            bool matchesScope = _accountFilterMode switch
+            {
+                "Current" => account.IsCurrent,
+                "Pinned" => account.IsPinned,
+                _ => true
+            };
 
+            var accountSearchText = AccountSearchBox?.Text;
+            bool matchesSearch = _accountSearchPlaceholder || string.IsNullOrWhiteSpace(accountSearchText);
+            if (!matchesSearch)
+            {
+                var query = accountSearchText!.Trim();
+                matchesSearch = account.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                account.Username.Contains(query, StringComparison.OrdinalIgnoreCase);
+            }
+
+            e.Accepted = matchesScope && matchesSearch;
+        }
         private void AccountSearchBox_GotFocus(object sender, RoutedEventArgs e)
         {
             if (!_accountSearchPlaceholder) return;
@@ -594,6 +1103,46 @@ namespace SteamSwitcher
             }
         }
 
+        private void GameLaunchWorkflow_Click(object sender, RoutedEventArgs e)
+        {
+            var game = _viewModel.SelectedGame;
+            if (game == null || !_viewModel.SelectedGameHasBinding)
+            {
+                MessageBox.Show(this, "请先为游戏保存账号绑定。", "游戏启动工作流", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var dialog = new GameLaunchWorkflowWindow(_viewModel, game) { Owner = this };
+            if (dialog.ShowDialog() == true)
+                GameScanStatus.Text = $"已保存 {game.GameName} 的启动工作流";
+        }
+
+        private void GameCreateDesktopShortcut_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = _viewModel.SelectedGame;
+            if (selected == null || !selected.HasBinding)
+            {
+                MessageBox.Show(this, "请先为游戏保存账号绑定。", "创建游戏快捷方式", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var steamService = _viewModel.GetAccountManager().GetSteamService();
+            var game = steamService.GetInstalledGames().FirstOrDefault(item => item.AppId == selected.AppId);
+            if (game == null)
+            {
+                MessageBox.Show(this, "未找到该游戏的本地安装信息。", "创建游戏快捷方式", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            try
+            {
+                var shortcut = GameShortcutService.CreateDesktopShortcut(game, steamService.SteamPath ?? string.Empty);
+                GameScanStatus.Text = $"已创建桌面快捷方式：{Path.GetFileName(shortcut)}";
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Unable to create game desktop shortcut.", ex);
+                MessageBox.Show(this, ex.Message, "创建游戏快捷方式失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void GamePinToggle_Click(object sender, RoutedEventArgs e)
         {
             var game = _viewModel.SelectedGame;
@@ -692,21 +1241,6 @@ namespace SteamSwitcher
 
         private void SyncTaskbarPositionRadios()
         {
-            switch (_viewModel.TaskbarPosition)
-            {
-                case Core.TaskbarPosition.Left:
-                    SettingsPosLeft.IsChecked = true;
-                    break;
-                case Core.TaskbarPosition.Center:
-                    SettingsPosCenter.IsChecked = true;
-                    break;
-                case Core.TaskbarPosition.Right:
-                    SettingsPosRight.IsChecked = true;
-                    break;
-                default:
-                    SettingsPosAuto.IsChecked = true;
-                    break;
-            }
         }
 
         private void SettingsOffsetX_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -714,7 +1248,6 @@ namespace SteamSwitcher
             if (_viewModel == null) return;
             int val = (int)e.NewValue;
             _viewModel.TaskbarOffsetX = val;
-            SettingsOffsetXText.Text = val.ToString();
             if (_taskbarBand != null && _taskbarBand.IsPinned)
                 _taskbarBand.SetOffset(_viewModel.TaskbarOffsetX, _viewModel.TaskbarOffsetY);
         }
@@ -724,13 +1257,13 @@ namespace SteamSwitcher
             if (_viewModel == null) return;
             int val = (int)e.NewValue;
             _viewModel.TaskbarOffsetY = val;
-            SettingsOffsetYText.Text = val.ToString();
             if (_taskbarBand != null && _taskbarBand.IsPinned)
                 _taskbarBand.SetOffset(_viewModel.TaskbarOffsetX, _viewModel.TaskbarOffsetY);
         }
 
         private void ResetLayout_Click(object sender, RoutedEventArgs e)
         {
+            if (_viewModel == null) return;
             _viewModel.TaskbarPosition = Core.TaskbarPosition.Right;
             _viewModel.TaskbarOffsetX = 0;
             _viewModel.TaskbarOffsetY = 0;
@@ -742,12 +1275,8 @@ namespace SteamSwitcher
             _viewModel.DesktopFloatingTopmost = true;
             _viewModel.DesktopFloatingLocked = false;
 
-            SyncTaskbarPositionRadios();
-            SettingsOffsetXSlider.Value = _viewModel.TaskbarOffsetX;
-            SettingsOffsetYSlider.Value = _viewModel.TaskbarOffsetY;
-            SettingsTaskbarAvatarSlider.Value = _viewModel.TaskbarAvatarSize;
-            SettingsFloatingOpacitySlider.Value = _viewModel.DesktopFloatingOpacity;
-            SettingsFloatingAvatarSlider.Value = _viewModel.DesktopFloatingAvatarSize;
+            if (SettingsFloatingOpacitySlider != null) SettingsFloatingOpacitySlider.Value = _viewModel.DesktopFloatingOpacity;
+            if (SettingsFloatingAvatarSlider != null) SettingsFloatingAvatarSlider.Value = _viewModel.DesktopFloatingAvatarSize;
 
             _taskbarBand?.SetPosition(_viewModel.TaskbarPosition);
             _taskbarBand?.SetOffset(_viewModel.TaskbarOffsetX, _viewModel.TaskbarOffsetY);
@@ -767,7 +1296,6 @@ namespace SteamSwitcher
             if (_viewModel == null) return;
             int val = (int)e.NewValue;
             _viewModel.TaskbarAvatarSize = val;
-            SettingsTaskbarAvatarText.Text = val.ToString();
             if (_taskbarBand != null && _taskbarBand.IsPinned)
                 _taskbarBand.SetAvatarSize(val);
         }
@@ -820,6 +1348,397 @@ namespace SteamSwitcher
                 if (_taskbarBand != null && _taskbarBand.IsPinned)
                     _taskbarBand.SetRoundedMode(val);
             }
+        }
+
+        private void TaskbarAppearance_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded || _viewModel == null || _updatingTaskbarAppearance) return;
+            _updatingTaskbarAppearance = true;
+            try
+            {
+                if (sender is CheckBox cb)
+                    BindingOperations.GetBindingExpression(cb, CheckBox.IsCheckedProperty)?.UpdateSource();
+                if (!_viewModel.TaskbarAppearanceEnabled)
+                    _taskbarOverlayService.Disable();
+                ApplyTaskbarAppearance();
+            }
+            finally
+            {
+                _updatingTaskbarAppearance = false;
+            }
+        }
+        private void TaskbarLyrics_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            ApplyTaskbarLyricsSettings();
+        }
+
+        private void TaskbarLyricsWidth_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            var width = Math.Clamp((int)Math.Round(e.NewValue), 240, 520);
+            _viewModel.TaskbarLyricsWidth = width;
+            ApplyTaskbarLyricsSettings();
+        }
+
+        private void TaskbarLyricsPolling_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            _viewModel.TaskbarLyricsPollingIntervalMs = Math.Clamp((int)Math.Round(e.NewValue), 60, 500);
+            ApplyTaskbarLyricsSettings();
+        }
+
+        private void TaskbarLyricsVertical_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            _viewModel.TaskbarLyricsVerticalOffset = Math.Clamp((int)Math.Round(e.NewValue), -12, 12);
+            ApplyTaskbarLyricsSettings();
+        }
+
+        private void TaskbarLyricsFontSize_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            _viewModel.TaskbarLyricsFontSize = Math.Clamp((int)Math.Round(e.NewValue), 12, 18);
+            ApplyTaskbarLyricsSettings();
+        }
+
+        private void TaskbarLyricsFontFamily_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!IsLoaded || _viewModel == null || sender is not ComboBox { SelectedValue: string fontFamily })
+                return;
+
+            _viewModel.TaskbarLyricsFontFamily = fontFamily;
+            ApplyTaskbarLyricsSettings();
+        }
+
+        private void LyricOffsetSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            var offset = (int)Math.Round(e.NewValue);
+            _viewModel.LyricOffsetMs = offset;
+            ApplyTaskbarLyricsSettings();
+        }
+
+        private void ApplyTaskbarLyricsSettings()
+        {
+            if (_viewModel.TaskbarLyricsEnabled || _viewModel.IsTaskbarPinned)
+            {
+                if (_taskbarBand == null)
+                {
+                    AttachToTaskbar();
+                }
+                else
+                {
+                    _taskbarBand.SetLyricsSettings(
+                        _viewModel.TaskbarLyricsEnabled,
+                        _viewModel.TaskbarLyricsShowControls,
+                        _viewModel.TaskbarLyricsOnlineEnabled,
+                        _viewModel.TaskbarLyricsWidth,
+                        _viewModel.LyricSourceQQEnabled,
+                        _viewModel.LyricSourceNeteaseEnabled,
+                        _viewModel.LyricSourceKugouEnabled,
+                        _viewModel.LyricSourceLrclibEnabled,
+                        _viewModel.LyricOffsetMs,
+                        true,
+                        _viewModel.TaskbarLyricsArtworkRounded,
+                        _viewModel.TaskbarLyricsShowVisualizer,
+                        _viewModel.TaskbarLyricsAdaptiveWidth,
+                        _viewModel.TaskbarLyricsTrackInfoOnly,
+                        _viewModel.TaskbarLyricsShowSecondaryLine,
+                        _viewModel.TaskbarLyricsPollingIntervalMs,
+                        _viewModel.TaskbarLyricsVerticalOffset,
+                        _viewModel.TaskbarLyricsFontSize,
+                        _viewModel.TaskbarLyricsTransparentBackground,
+                        _viewModel.TaskbarLyricsFontFamily);
+                }
+            }
+            else
+            {
+                if (_taskbarBand != null && !_viewModel.IsTaskbarPinned)
+                {
+                    DetachFromTaskbar();
+                }
+                else
+                {
+                    _taskbarBand?.SetLyricsSettings(
+                        _viewModel.TaskbarLyricsEnabled,
+                        _viewModel.TaskbarLyricsShowControls,
+                        _viewModel.TaskbarLyricsOnlineEnabled,
+                        _viewModel.TaskbarLyricsWidth,
+                        _viewModel.LyricSourceQQEnabled,
+                        _viewModel.LyricSourceNeteaseEnabled,
+                        _viewModel.LyricSourceKugouEnabled,
+                        _viewModel.LyricSourceLrclibEnabled,
+                        _viewModel.LyricOffsetMs,
+                        true,
+                        _viewModel.TaskbarLyricsArtworkRounded,
+                        _viewModel.TaskbarLyricsShowVisualizer,
+                        _viewModel.TaskbarLyricsAdaptiveWidth,
+                        _viewModel.TaskbarLyricsTrackInfoOnly,
+                        _viewModel.TaskbarLyricsShowSecondaryLine,
+                        _viewModel.TaskbarLyricsPollingIntervalMs,
+                        _viewModel.TaskbarLyricsVerticalOffset,
+                        _viewModel.TaskbarLyricsFontSize,
+                        _viewModel.TaskbarLyricsTransparentBackground,
+                        _viewModel.TaskbarLyricsFontFamily);
+                }
+            }
+        }
+
+        private void TaskbarAppearanceMode_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_updatingTaskbarAppearance ||
+                sender is not RadioButton { IsChecked: true, Tag: string modeName } ||
+                !Enum.TryParse<TaskbarAppearanceMode>(modeName, out var mode))
+                return;
+
+            _updatingTaskbarAppearance = true;
+            try
+            {
+                _viewModel.TaskbarAppearanceMode = mode;
+                if (IsLoaded) ApplyTaskbarAppearance();
+            }
+            finally
+            {
+                _updatingTaskbarAppearance = false;
+            }
+        }
+        private void TaskbarAppearanceOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_viewModel == null || _updatingTaskbarAppearance) return;
+            _updatingTaskbarAppearance = true;
+            try
+            {
+                var opacity = Math.Clamp((int)Math.Round(e.NewValue), 0, 100);
+                _viewModel.TaskbarAppearanceOpacity = opacity;
+                if (TaskbarAppearanceOpacityText != null) TaskbarAppearanceOpacityText.Text = $"{opacity}%";
+                if (IsLoaded) ApplyTaskbarAppearance();
+            }
+            finally
+            {
+                _updatingTaskbarAppearance = false;
+            }
+        }
+        private void TaskbarAppearanceColorPreset_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement { Tag: string color } || _viewModel == null) return;
+            _viewModel.TaskbarAppearanceColor = color;
+            if (TaskbarAppearanceColorBox != null) TaskbarAppearanceColorBox.Text = color;
+            ApplyTaskbarAppearance();
+        }
+
+        private void TaskbarAppearanceColor_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (TaskbarAppearanceColorBox == null || _viewModel == null) return;
+            var color = TaskbarAppearanceColorBox.Text.Trim();
+            if (!System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9A-Fa-f]{6}$"))
+            {
+                TaskbarAppearanceColorBox.Text = _viewModel.TaskbarAppearanceColor;
+                _viewModel.StatusText = "任务栏颜色格式应为 #RRGGBB";
+                return;
+            }
+
+            _viewModel.TaskbarAppearanceColor = color.ToUpperInvariant();
+            TaskbarAppearanceColorBox.Text = _viewModel.TaskbarAppearanceColor;
+            ApplyTaskbarAppearance();
+        }
+
+        private void TaskbarAppearanceRefresh_Click(object sender, RoutedEventArgs e)
+        {
+            if (_taskbarAppearanceService == null || _viewModel == null) return;
+            ApplyTaskbarAppearance();
+            _taskbarAppearanceService.Refresh();
+            _viewModel.StatusText = "已强制刷新 Windows 任务栏视觉样式";
+        }
+
+        private void DesktopEnhance_Changed(object sender, RoutedEventArgs e) => ConfigureDesktopEnhance();
+
+        private void DesktopHideMode_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is RadioButton { IsChecked: true, Tag: string value } &&
+                Enum.TryParse<DesktopIconHideMode>(value, out var mode))
+            {
+                _viewModel.DesktopIconHideMode = mode;
+                ConfigureDesktopEnhance();
+            }
+        }
+
+        private void DesktopHideNow_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_viewModel.DesktopAutoHideIconsEnabled)
+            {
+                _viewModel.StatusText = "请先开启桌面图标智能隐藏";
+                return;
+            }
+
+            _viewModel.StatusText = _desktopIconService.HideIcons()
+                ? "桌面图标已隐藏，可按设置的恢复方式重新显示"
+                : "未找到可控制的桌面图标窗口；请稍候重试或重启 Explorer";
+        }
+
+        private void DesktopShowNow_Click(object sender, RoutedEventArgs e)
+        {
+            _desktopIconService.ShowIcons();
+            _viewModel.StatusText = "桌面图标已恢复显示";
+        }
+
+        private void DesktopEnhanceReset_Click(object sender, RoutedEventArgs e)
+        {
+            _viewModel.DesktopAutoHideIconsEnabled = false;
+            _viewModel.DesktopIconHideMode = DesktopIconHideMode.Smart;
+            _viewModel.DesktopIconIdleSeconds = 30;
+            _viewModel.DesktopRestoreByMouseMove = true;
+            _viewModel.DesktopRestoreByTaskbarClick = true;
+            _viewModel.DesktopToggleIconsOnClick = false;
+            _viewModel.DesktopIconAnimationType = DesktopIconAnimationType.Fade;
+            _viewModel.DesktopIconAnimationDuration = 300;
+            _viewModel.DesktopImmersiveModeEnabled = false;
+            _desktopIconService.ShowIcons();
+            ConfigureDesktopEnhance();
+            _viewModel.StatusText = "智能桌面增强已恢复默认设置";
+        }
+
+        private void DesktopImmersiveMode_Click(object sender, RoutedEventArgs e)
+        {
+            _viewModel.DesktopImmersiveModeEnabled = true;
+            _viewModel.DesktopAutoHideIconsEnabled = true;
+            _viewModel.TaskbarAppearanceEnabled = true;
+            _viewModel.TaskbarAppearanceMode = TaskbarAppearanceMode.Clear;
+            _viewModel.TaskbarAppearanceOpacity = 0;
+            if (TaskbarAppearanceOpacitySlider != null) TaskbarAppearanceOpacitySlider.Value = 0;
+            SyncTaskbarAppearanceMode();
+            ConfigureDesktopEnhance();
+            ApplyTaskbarAppearance();
+            _viewModel.StatusText = "已进入沉浸桌面模式：透明任务栏与桌面图标自动隐藏已开启";
+        }
+
+        private void DesktopDelayPreset_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement { Tag: string value } || !int.TryParse(value, out var seconds)) return;
+            _viewModel.DesktopIconIdleSeconds = Math.Clamp(seconds, 5, 300);
+            ConfigureDesktopEnhance();
+        }
+
+        private void ConfigureDesktopEnhance() => _desktopIconService.Configure(_viewModel.CreateDesktopEnhanceSettings());
+
+        private void SyncDesktopEnhanceControls()
+        {
+            if (DesktopModeSmart != null) DesktopModeSmart.IsChecked = _viewModel.DesktopIconHideMode == DesktopIconHideMode.Smart;
+            if (DesktopModeTimed != null) DesktopModeTimed.IsChecked = _viewModel.DesktopIconHideMode == DesktopIconHideMode.Timed;
+            if (DesktopModeManual != null) DesktopModeManual.IsChecked = _viewModel.DesktopIconHideMode == DesktopIconHideMode.Manual;
+        }
+
+        private void OnDesktopIconVisibilityChanged(object? sender, bool visible) => Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _viewModel.DesktopIconsVisible = visible;
+            _viewModel.DesktopIconsHiddenByApp = !visible;
+        }));
+
+        private void OnDesktopIconCountdownChanged(object? sender, int seconds) => Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _viewModel.DesktopAutoHideCountdown = seconds;
+        }));
+
+        private void TaskbarAppearanceStartXamlEnhancer_Click(object sender, RoutedEventArgs e)
+        {
+            if (_viewModel == null) return;
+
+            _updatingTaskbarAppearance = true;
+            try
+            {
+                _viewModel.TaskbarAppearanceEnabled = true;
+                _viewModel.TaskbarAppearanceMode = TaskbarAppearanceMode.Clear;
+                _viewModel.TaskbarAppearanceOpacity = 0;
+                _viewModel.TaskbarAppearanceColor = "#000000";
+                if (TaskbarAppearanceOpacitySlider != null) TaskbarAppearanceOpacitySlider.Value = 0;
+                if (TaskbarAppearanceOpacityText != null) TaskbarAppearanceOpacityText.Text = "0%";
+                if (TaskbarAppearanceColorBox != null) TaskbarAppearanceColorBox.Text = "#000000";
+                SyncTaskbarAppearanceMode();
+            }
+            finally
+            {
+                _updatingTaskbarAppearance = false;
+            }
+
+            ApplyTaskbarAppearance();
+            _taskbarAppearanceService.ForceFullTransparent();
+            _taskbarOverlayService.EnableFullTransparent();
+            _viewModel.StatusText = _ttbEngine.IsRunning
+                ? "💎 TranslucentTB 深度渲染已启动 — 任务栏 100% 全透明已生效"
+                : "💎 原生多层透明引擎已启动 — 任务栏全透明已生效";
+        }
+        private void TaskbarStylePreset_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement { Tag: string presetTag } || _viewModel == null) return;
+            var parts = presetTag.Split(':');
+            if (parts.Length >= 3 && Enum.TryParse<TaskbarAppearanceMode>(parts[0], out var mode) && int.TryParse(parts[1], out var opacity))
+            {
+                var color = parts[2];
+                _viewModel.TaskbarAppearanceMode = mode;
+                _viewModel.TaskbarAppearanceOpacity = opacity;
+                _viewModel.TaskbarAppearanceColor = color;
+                if (TaskbarAppearanceOpacitySlider != null) TaskbarAppearanceOpacitySlider.Value = opacity;
+                if (TaskbarAppearanceOpacityText != null) TaskbarAppearanceOpacityText.Text = $"{opacity}%";
+                if (TaskbarAppearanceColorBox != null) TaskbarAppearanceColorBox.Text = color;
+                SyncTaskbarAppearanceMode();
+                ApplyTaskbarAppearance();
+            }
+        }
+
+                private void SyncTaskbarAppearanceMode()
+        {
+            if (TaskbarModeNormal != null) TaskbarModeNormal.IsChecked = _viewModel.TaskbarAppearanceMode == TaskbarAppearanceMode.Normal;
+            if (TaskbarModeClear != null) TaskbarModeClear.IsChecked = _viewModel.TaskbarAppearanceMode == TaskbarAppearanceMode.Clear;
+            if (TaskbarModeBlur != null) TaskbarModeBlur.IsChecked = _viewModel.TaskbarAppearanceMode == TaskbarAppearanceMode.Blur;
+            if (TaskbarModeAcrylic != null) TaskbarModeAcrylic.IsChecked = _viewModel.TaskbarAppearanceMode == TaskbarAppearanceMode.Acrylic;
+            if (TaskbarModeOpaque != null) TaskbarModeOpaque.IsChecked = _viewModel.TaskbarAppearanceMode == TaskbarAppearanceMode.Opaque;
+        }
+
+        private void ApplyTaskbarAppearance()
+        {
+            if (_viewModel.TaskbarAppearanceEnabled)
+            {
+                // Synchronize and start TranslucentTB engine
+                _ttbEngine.SyncConfiguration(
+                    _viewModel.TaskbarAppearanceMode,
+                    _viewModel.TaskbarAppearanceOpacity,
+                    _viewModel.TaskbarAppearanceColor,
+                    _viewModel.TaskbarDynamicMaximized,
+                    _viewModel.TaskbarMaximizedMode,
+                    _viewModel.TaskbarDynamicStartMenu,
+                    _viewModel.TaskbarStartMenuMode,
+                    _viewModel.TaskbarDynamicSearch,
+                    _viewModel.TaskbarSearchMode,
+                    _viewModel.TaskbarDynamicTaskView,
+                    _viewModel.TaskbarTaskViewMode);
+                _ttbEngine.Start();
+            }
+            else
+            {
+                _ttbEngine.Stop();
+                _taskbarOverlayService.Disable();
+            }
+
+            _taskbarAppearanceService.Configure(
+                _viewModel.TaskbarAppearanceEnabled,
+                _viewModel.TaskbarAppearanceMode,
+                _viewModel.TaskbarAppearanceColor,
+                _viewModel.TaskbarAppearanceOpacity,
+                _viewModel.TaskbarDynamicMaximized,
+                _viewModel.TaskbarMaximizedMode,
+                _viewModel.TaskbarDynamicStartMenu,
+                _viewModel.TaskbarStartMenuMode,
+                _viewModel.TaskbarDynamicSearch,
+                _viewModel.TaskbarSearchMode,
+                _viewModel.TaskbarDynamicTaskView,
+                _viewModel.TaskbarTaskViewMode);
+
+            if (_viewModel.TaskbarAppearanceEnabled &&
+                     _viewModel.TaskbarAppearanceMode == TaskbarAppearanceMode.Blur &&
+                     _taskbarAppearanceService.BlurCompatibilityFallback)
+                _viewModel.StatusText = "当前 Windows 版本使用亚克力兼容模式替代原生任务栏模糊";
+            else if (_viewModel.TaskbarAppearanceEnabled)
+                _viewModel.StatusText = $"已应用任务栏外观：{_viewModel.TaskbarAppearanceMode}";
         }
 
         private void SettingsFloatingRounded_Changed(object sender, RoutedEventArgs e)
@@ -925,6 +1844,81 @@ namespace SteamSwitcher
             }
         }
 
+        private void SyncGameSaveSettingsUi()
+        {
+            if (_viewModel == null) return;
+
+            // Sync interval combo
+            if (SettingsGameSaveIntervalCombo != null)
+            {
+                var interval = _viewModel.GameSavePeriodicIntervalMinutes;
+                foreach (ComboBoxItem item in SettingsGameSaveIntervalCombo.Items)
+                {
+                    if (item.Tag is string tag && int.TryParse(tag, out var val) && val == interval)
+                    {
+                        SettingsGameSaveIntervalCombo.SelectedItem = item;
+                        break;
+                    }
+                }
+                if (SettingsGameSaveIntervalCombo.SelectedItem == null && SettingsGameSaveIntervalCombo.Items.Count > 1)
+                    SettingsGameSaveIntervalCombo.SelectedIndex = 1; // Default 30 min
+            }
+
+            // Sync retention combo
+            if (SettingsGameSaveRetentionCombo != null)
+            {
+                var retention = _viewModel.GameSaveManualRetention;
+                foreach (ComboBoxItem item in SettingsGameSaveRetentionCombo.Items)
+                {
+                    if (item.Tag is string tag && int.TryParse(tag, out var val) && val == retention)
+                    {
+                        SettingsGameSaveRetentionCombo.SelectedItem = item;
+                        break;
+                    }
+                }
+                if (SettingsGameSaveRetentionCombo.SelectedItem == null && SettingsGameSaveRetentionCombo.Items.Count > 1)
+                    SettingsGameSaveRetentionCombo.SelectedIndex = 1; // Default 10 copies
+            }
+        }
+
+        private void SettingsGameSaveAutoBackup_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+                _viewModel.GameSaveAutoBackupEnabled = cb.IsChecked == true;
+        }
+
+        private void SettingsGameSavePeriodic_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+                _viewModel.GameSavePeriodicBackupEnabled = cb.IsChecked == true;
+        }
+
+        private void SettingsGameSaveInterval_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (SettingsGameSaveIntervalCombo?.SelectedItem is ComboBoxItem item &&
+                item.Tag is string tag && int.TryParse(tag, out var minutes) &&
+                _viewModel != null)
+            {
+                _viewModel.GameSavePeriodicIntervalMinutes = minutes;
+            }
+        }
+
+        private void SettingsGameSaveRetention_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (SettingsGameSaveRetentionCombo?.SelectedItem is ComboBoxItem item &&
+                item.Tag is string tag && int.TryParse(tag, out var count) &&
+                _viewModel != null)
+            {
+                _viewModel.GameSaveManualRetention = count;
+            }
+        }
+
+        private void SettingsSmartSaveDiscovery_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+                _viewModel.SmartSaveDiscoveryEnabled = cb.IsChecked == true;
+        }
+
         private void SettingsConfirmBeforeLaunch_Changed(object sender, RoutedEventArgs e)
         {
             if (sender is CheckBox cb && _viewModel != null)
@@ -949,6 +1943,14 @@ namespace SteamSwitcher
             {
                 bool val = cb.IsChecked == true;
                 _viewModel.SilentCloseSteam = val;
+            }
+        }
+
+        private void SettingsBetaUpdateChannel_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                _viewModel.UseBetaUpdateChannel = cb.IsChecked == true;
             }
         }
 
@@ -994,6 +1996,103 @@ namespace SteamSwitcher
             {
                 bool val = cb.IsChecked == true;
                 _viewModel.DesktopFloatingDockEnabled = val;
+            }
+        }
+
+        private void SettingsStartMinimized_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                _viewModel.StartMinimizedToTray = cb.IsChecked == true;
+            }
+        }
+
+        private void SettingsPlaySound_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                _viewModel.PlaySoundOnSwitch = cb.IsChecked == true;
+            }
+        }
+
+        private void SettingsShowSwitchNotification_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox cb && _viewModel != null)
+            {
+                _viewModel.ShowSwitchNotification = cb.IsChecked == true;
+            }
+        }
+
+        private void OpenAppData_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dir = SettingsService.SettingsDirectory;
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                Process.Start(new ProcessStartInfo("explorer.exe", dir) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                if (_viewModel != null) _viewModel.StatusText = $"打开目录失败: {ex.Message}";
+            }
+        }
+
+        private void OpenSteamDirectory_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var path = _viewModel?.GetAccountManager()?.GetSteamService()?.SteamPath;
+                if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
+                {
+                    Process.Start(new ProcessStartInfo("explorer.exe", path) { UseShellExecute = true });
+                }
+                else
+                {
+                    if (_viewModel != null) _viewModel.StatusText = "未找到 Steam 安装路径";
+                }
+            }
+            catch (Exception ex)
+            {
+                if (_viewModel != null) _viewModel.StatusText = $"打开 Steam 目录失败: {ex.Message}";
+            }
+        }
+
+        private async void ClearCache_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var cacheDir = Path.Combine(SettingsService.SettingsDirectory, "Cache");
+                var artworkDir = Path.Combine(SettingsService.SettingsDirectory, "ArtworkCache");
+                var lyricsDir = Path.Combine(SettingsService.SettingsDirectory, "LyricsCache");
+
+                await Task.Run(() =>
+                {
+                    foreach (var dir in new[] { cacheDir, artworkDir, lyricsDir })
+                    {
+                        if (Directory.Exists(dir))
+                        {
+                            try { Directory.Delete(dir, true); } catch { }
+                        }
+                    }
+                });
+
+                if (_viewModel != null) _viewModel.StatusText = "已成功清理本地封面与歌词缓存";
+            }
+            catch (Exception ex)
+            {
+                if (_viewModel != null) _viewModel.StatusText = $"清理缓存失败: {ex.Message}";
+            }
+        }
+
+        private async void RedetectSteam_Click(object sender, RoutedEventArgs e)
+        {
+            if (_viewModel != null)
+            {
+                await _viewModel.InitializeAsync();
+                if (_viewModel.AutoScanGamesOnStartup)
+                {
+                    await _viewModel.ScanGamesAsync();
+                }
             }
         }
 
@@ -1109,6 +2208,27 @@ namespace SteamSwitcher
             _taskbarBand.SetAvatarSize(_viewModel.TaskbarAvatarSize);
             _taskbarBand.SetGlassEnabled(_viewModel.TaskbarGlassEnabled);
             _taskbarBand.SetRoundedMode(_viewModel.TaskbarRoundedMode);
+            _taskbarBand.SetLyricsSettings(
+                _viewModel.TaskbarLyricsEnabled,
+                _viewModel.TaskbarLyricsShowControls,
+                _viewModel.TaskbarLyricsOnlineEnabled,
+                _viewModel.TaskbarLyricsWidth,
+                _viewModel.LyricSourceQQEnabled,
+                _viewModel.LyricSourceNeteaseEnabled,
+                _viewModel.LyricSourceKugouEnabled,
+                _viewModel.LyricSourceLrclibEnabled,
+                _viewModel.LyricOffsetMs,
+                true,
+                _viewModel.TaskbarLyricsArtworkRounded,
+                _viewModel.TaskbarLyricsShowVisualizer,
+                _viewModel.TaskbarLyricsAdaptiveWidth,
+                _viewModel.TaskbarLyricsTrackInfoOnly,
+                _viewModel.TaskbarLyricsShowSecondaryLine,
+                _viewModel.TaskbarLyricsPollingIntervalMs,
+                _viewModel.TaskbarLyricsVerticalOffset,
+                _viewModel.TaskbarLyricsFontSize,
+                _viewModel.TaskbarLyricsTransparentBackground,
+                _viewModel.TaskbarLyricsFontFamily);
             
             _taskbarBand.Attach();
 
@@ -1261,51 +2381,6 @@ namespace SteamSwitcher
         }
 
         // Quick Launch event handlers
-        private DragDropHelper? _quickLaunchDragDrop;
-
-        private void SideQuickLaunch_Click(object sender, RoutedEventArgs e)
-        {
-            SwitchToQuickLaunch();
-        }
-
-        private void SwitchToQuickLaunch()
-        {
-            AccountView.Visibility = Visibility.Collapsed;
-            GameView.Visibility = Visibility.Collapsed;
-            QuickLaunchView.Visibility = Visibility.Visible;
-            SettingsView.Visibility = Visibility.Collapsed;
-            PageTitle.Text = "快速启动";
-            PageSubtitle.Text = "集中管理常用程序、快捷方式和固定入口";
-            SetSidebarActive(SideQuickLaunch, SideAccentQuickLaunch,
-                             SideAccounts, SideAccentAccount,
-                             SideGames, SideAccentGame,
-                             SideSettings, SideAccentSettings);
-            QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-            // Initialize drag-drop if not already done
-            if (_quickLaunchDragDrop == null)
-            {
-                _quickLaunchDragDrop = new DragDropHelper(QuickLaunchListBox, QuickLaunchDeleteZone);
-                _quickLaunchDragDrop.ItemDeleted += async (s, index) =>
-                {
-                    await _viewModel.DeleteQuickLaunchItemAsync(index);
-                    QuickLaunchEmptyHint.Visibility = _viewModel.QuickLaunchList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-                };
-                _quickLaunchDragDrop.ItemMoved += async (s, args) =>
-                {
-                    await _viewModel.ReorderQuickLaunchItemAsync(args.fromIndex, args.toIndex);
-                };
-                _quickLaunchDragDrop.ItemClicked += (s, index) =>
-                {
-                    var items = _viewModel.QuickLaunchList;
-                    if (index >= 0 && index < items.Count)
-                    {
-                        _viewModel.LaunchQuickLaunchItem(items[index].Id);
-                    }
-                };
-                _quickLaunchDragDrop.Attach();
-            }
-        }
 
         private async void QuickLaunchAdd_Click(object sender, RoutedEventArgs e)
         {
@@ -1385,5 +2460,39 @@ namespace SteamSwitcher
             }
         }
 
-}
+
+        private void CopyDiagnostics_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"SteamSwitch Version: {System.Reflection.Assembly.GetExecutingAssembly().GetName().Version}");
+                sb.AppendLine($"OS: {Environment.OSVersion}");
+                sb.AppendLine($".NET Runtime: {Environment.Version}");
+                sb.AppendLine($"Steam Path: {_viewModel?.GetAccountManager()?.GetSteamService()?.SteamPath ?? "N/A"}");
+                sb.AppendLine($"Account Count: {_viewModel?.Accounts?.Count ?? 0}");
+                sb.AppendLine($"Game Count: {_viewModel?.GameList?.Count ?? 0}");
+                sb.AppendLine($"Auto Backup Enabled: {_viewModel?.GameSaveAutoBackupEnabled ?? false}");
+                sb.AppendLine($"Periodic Backup Enabled: {_viewModel?.GameSavePeriodicBackupEnabled ?? false} ({_viewModel?.GameSavePeriodicIntervalMinutes ?? 30} min)");
+                sb.AppendLine($"Retention Limit: {_viewModel?.GameSaveManualRetention ?? 30}");
+                Clipboard.SetText(sb.ToString());
+                if (_viewModel != null) _viewModel.StatusText = "已将诊断信息复制到剪贴板";
+            }
+            catch (Exception ex)
+            {
+                if (_viewModel != null) _viewModel.StatusText = $"复制诊断失败: {ex.Message}";
+            }
+        }
+
+        private void ResetWindowLayout_Click(object sender, RoutedEventArgs e)
+        {
+            Width = 980;
+            Height = 680;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
+            Top = (SystemParameters.PrimaryScreenHeight - Height) / 2;
+            if (_viewModel != null) _viewModel.StatusText = "已重置主窗口默认尺寸与居中位置";
+        }
+
+    }
 }

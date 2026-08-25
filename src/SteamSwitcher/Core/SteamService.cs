@@ -137,32 +137,21 @@ namespace SteamSwitcher.Core
                 }
                 else
                 {
-                    // Graceful mode: hide, try -shutdown, then force kill if needed
-                    HideSteamWindows();
-                    await Task.Delay(200);
-
-                    try
+                    // Graceful mode deliberately never escalates to termination.
+                    // Steam Cloud and the client may need time to flush data.
+                    if (string.IsNullOrEmpty(SteamExePath) || !File.Exists(SteamExePath))
                     {
-                        if (!string.IsNullOrEmpty(SteamExePath) && File.Exists(SteamExePath))
-                        {
-                            AppLogger.Info($"Starting shutdown command: {SteamExePath} -shutdown");
-                            var shutdownProc = Process.Start(SteamExePath, "-shutdown");
-                            shutdownProc?.Dispose();
-                            await Task.Delay(3000);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        AppLogger.Error("Steam -shutdown failed.", ex);
+                        AppLogger.Warn("Graceful Steam shutdown is unavailable because steam.exe was not found.");
+                        return false;
                     }
 
-                    if (IsSteamRunning())
-                    {
-                        HideSteamWindows();
-                        await ForceKillSteamProcessesAsync();
-                        HideSteamWindows();
-                        await Task.Delay(200);
-                    }
+                    AppLogger.Info($"Starting graceful shutdown command: {SteamExePath} -shutdown");
+                    var shutdownProc = Process.Start(SteamExePath, "-shutdown");
+                    shutdownProc?.Dispose();
+                    var exitedGracefully = await WaitForSteamExitAsync(TimeSpan.FromSeconds(20));
+                    if (!exitedGracefully)
+                        AppLogger.Warn("Steam did not exit within the 20-second graceful shutdown window.");
+                    return exitedGracefully;
                 }
 
                 var closed = !IsSteamRunning();
@@ -174,6 +163,18 @@ namespace SteamSwitcher.Core
                 AppLogger.Error("CloseSteamAsync failed.", ex);
                 return false;
             }
+        }
+
+        private async Task<bool> WaitForSteamExitAsync(TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!IsSteamRunning())
+                    return true;
+                await Task.Delay(500);
+            }
+            return !IsSteamRunning();
         }
 
         private void HideSteamWindows()
@@ -314,7 +315,11 @@ namespace SteamSwitcher.Core
             return StartSteam(username, enableDebugging: true, debugPort: debugPort);
         }
 
-        public bool StartGame(int appId, bool silent = false)
+        public bool StartGame(
+            int appId,
+            bool silent = false,
+            string? launchArguments = null,
+            bool startInBigPicture = false)
         {
             if (appId <= 0)
                 return false;
@@ -323,9 +328,21 @@ namespace SteamSwitcher.Core
             {
                 if (!string.IsNullOrEmpty(SteamExePath) && File.Exists(SteamExePath))
                 {
-                    var args = silent ? $"-silent steam://run/{appId}" : $"steam://run/{appId}";
-                    AppLogger.Info($"Starting game via steam.exe. Silent={silent}, appId={appId}");
-                    var proc = Process.Start(SteamExePath, args);
+                    if (launchArguments?.Length > 2048 || launchArguments?.Any(char.IsControl) == true)
+                        throw new ArgumentException("启动参数包含无效字符或超过 2048 个字符。", nameof(launchArguments));
+                    var launchUri = string.IsNullOrWhiteSpace(launchArguments)
+                        ? $"steam://run/{appId}"
+                        : $"steam://run/{appId}//{Uri.EscapeDataString(launchArguments.Trim())}/";
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = SteamExePath,
+                        UseShellExecute = false
+                    };
+                    if (silent) startInfo.ArgumentList.Add("-silent");
+                    if (startInBigPicture) startInfo.ArgumentList.Add("-bigpicture");
+                    startInfo.ArgumentList.Add(launchUri);
+                    AppLogger.Info($"Starting game via steam.exe. Silent={silent}, BigPicture={startInBigPicture}, appId={appId}");
+                    var proc = Process.Start(startInfo);
                     proc?.Dispose();
                     return true;
                 }
@@ -530,7 +547,38 @@ namespace SteamSwitcher.Core
 
         private string? ResolveManifestIconPath(Dictionary<string, object> appState, int appId)
         {
-            // Use the icon from library cache
+            if (!string.IsNullOrWhiteSpace(SteamPath))
+            {
+                var appCacheDir = Path.Combine(SteamPath, "appcache", "librarycache", appId.ToString());
+                foreach (var key in new[] { "clienticon", "icon" })
+                {
+                    if (!appState.TryGetValue(key, out var value) || value is not string hash ||
+                        string.IsNullOrWhiteSpace(hash))
+                        continue;
+
+                    var directCandidates = new[]
+                    {
+                        Path.Combine(SteamPath, "steam", "games", $"{hash}.ico"),
+                        Path.Combine(appCacheDir, $"{hash}.jpg"),
+                        Path.Combine(appCacheDir, $"{hash}.png"),
+                        Path.Combine(appCacheDir, $"{hash}.ico")
+                    };
+                    var direct = directCandidates.FirstOrDefault(File.Exists);
+                    if (direct != null)
+                        return direct;
+
+                    if (Directory.Exists(appCacheDir))
+                    {
+                        var matching = Directory.EnumerateFiles(appCacheDir)
+                            .FirstOrDefault(path => IsSupportedImage(path) &&
+                                Path.GetFileNameWithoutExtension(path)
+                                    .Contains(hash, StringComparison.OrdinalIgnoreCase));
+                        if (matching != null)
+                            return matching;
+                    }
+                }
+            }
+
             return GetGameIconPath(appId);
         }
 

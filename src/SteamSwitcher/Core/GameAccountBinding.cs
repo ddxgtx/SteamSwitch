@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using SteamSwitcher.Services;
 
@@ -16,6 +17,11 @@ namespace SteamSwitcher.Core
         public string? AccountName { get; set; }
         public bool AutoSwitch { get; set; } = true;
         public DateTime? LastPlayed { get; set; }
+        public string LaunchArguments { get; set; } = string.Empty;
+        public bool BackupBeforeLaunch { get; set; }
+        public bool BackupAfterExit { get; set; }
+        public bool CloseSteamAfterExit { get; set; }
+        public bool StartInBigPicture { get; set; }
     }
 
     public class GameAccountBinding
@@ -23,6 +29,7 @@ namespace SteamSwitcher.Core
         private readonly string _configPath;
         private readonly ConcurrentDictionary<int, GameBinding> _bindings = new();
         private readonly object _saveLock = new();
+        private readonly SemaphoreSlim _saveGate = new(1, 1);
 
         public event EventHandler? BindingsChanged;
         public string ConfigPath => _configPath;
@@ -41,8 +48,7 @@ namespace SteamSwitcher.Core
             {
                 if (File.Exists(_configPath))
                 {
-                    var json = await File.ReadAllTextAsync(_configPath);
-                    var loaded = JsonSerializer.Deserialize<Dictionary<int, GameBinding>>(json) 
+                    var loaded = await AtomicJsonFile.ReadAsync<Dictionary<int, GameBinding>>(_configPath)
                                ?? new Dictionary<int, GameBinding>();
                     _bindings.Clear();
                     foreach (var kvp in loaded)
@@ -62,21 +68,24 @@ namespace SteamSwitcher.Core
         {
             try
             {
-                var dir = Path.GetDirectoryName(_configPath);
-                if (!Directory.Exists(dir))
-                    Directory.CreateDirectory(dir!);
-
                 Dictionary<int, GameBinding> snapshot;
                 lock (_saveLock)
                 {
                     snapshot = new Dictionary<int, GameBinding>(_bindings);
                 }
 
-                var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+                await _saveGate.WaitAsync();
+                try
                 {
-                    WriteIndented = true
-                });
-                await File.WriteAllTextAsync(_configPath, json);
+                    await AtomicJsonFile.WriteAsync(
+                        _configPath,
+                        snapshot,
+                        new JsonSerializerOptions { WriteIndented = true });
+                }
+                finally
+                {
+                    _saveGate.Release();
+                }
             }
             catch (Exception ex)
             {
@@ -104,7 +113,12 @@ namespace SteamSwitcher.Core
                 AccountSteamId = accountSteamId,
                 AccountName = accountName,
                 AutoSwitch = true,
-                LastPlayed = previous?.LastPlayed
+                LastPlayed = previous?.LastPlayed,
+                LaunchArguments = previous?.LaunchArguments ?? string.Empty,
+                BackupBeforeLaunch = previous?.BackupBeforeLaunch ?? false,
+                BackupAfterExit = previous?.BackupAfterExit ?? false,
+                CloseSteamAfterExit = previous?.CloseSteamAfterExit ?? false,
+                StartInBigPicture = previous?.StartInBigPicture ?? false
             };
             await SaveAsync();
             BindingsChanged?.Invoke(this, EventArgs.Empty);
@@ -148,5 +162,26 @@ namespace SteamSwitcher.Core
                 await SaveAsync();
             }
         }
+
+        public async Task SetLaunchWorkflowAsync(
+            int appId,
+            string launchArguments,
+            bool backupBeforeLaunch,
+            bool backupAfterExit,
+            bool closeSteamAfterExit,
+            bool startInBigPicture)
+        {
+            if (!_bindings.TryGetValue(appId, out var binding))
+                throw new InvalidOperationException("请先为该游戏保存账号绑定。");
+
+            binding.LaunchArguments = launchArguments.Trim();
+            binding.BackupBeforeLaunch = backupBeforeLaunch;
+            binding.BackupAfterExit = backupAfterExit;
+            binding.CloseSteamAfterExit = closeSteamAfterExit;
+            binding.StartInBigPicture = startInBigPicture;
+            await SaveAsync();
+            BindingsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
     }
 }

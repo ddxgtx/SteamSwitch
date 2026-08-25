@@ -5,6 +5,7 @@ using System.IO;
 using System.Text.Json;
 using Microsoft.Win32;
 using SteamSwitcher.Core;
+using SteamSwitcher.Models;
 
 namespace SteamSwitcher.Services
 {
@@ -13,6 +14,9 @@ namespace SteamSwitcher.Services
         public bool AutoStartSteam { get; set; } = true;
         public bool MinimizeToTray { get; set; } = true;
         public bool StartWithWindows { get; set; }
+        public bool StartMinimizedToTray { get; set; } = false;
+        public bool PlaySoundOnSwitch { get; set; } = true;
+        public bool ShowSwitchNotification { get; set; } = true;
         public bool TaskbarPinned { get; set; }
         public TaskbarPosition TaskbarPosition { get; set; } = TaskbarPosition.Right;
         public int TaskbarOffsetX { get; set; }
@@ -21,6 +25,48 @@ namespace SteamSwitcher.Services
         public int TaskbarAvatarSize { get; set; } = 38;
         public bool TaskbarGlassEnabled { get; set; } = true;
         public bool TaskbarRoundedMode { get; set; } = true;
+        public bool TaskbarAppearanceEnabled { get; set; }
+        public TaskbarAppearanceMode TaskbarAppearanceMode { get; set; } = TaskbarAppearanceMode.Clear;
+        public string TaskbarAppearanceColor { get; set; } = "#000000";
+        public int TaskbarAppearanceOpacity { get; set; } = 0;
+        public bool TaskbarDynamicMaximized { get; set; } = false;
+        public TaskbarAppearanceMode TaskbarMaximizedMode { get; set; } = TaskbarAppearanceMode.Opaque;
+        public bool TaskbarDynamicStartMenu { get; set; } = false;
+        public TaskbarAppearanceMode TaskbarStartMenuMode { get; set; } = TaskbarAppearanceMode.Normal;
+        public bool TaskbarDynamicSearch { get; set; } = false;
+        public TaskbarAppearanceMode TaskbarSearchMode { get; set; } = TaskbarAppearanceMode.Normal;
+        public bool TaskbarDynamicTaskView { get; set; } = false;
+        public TaskbarAppearanceMode TaskbarTaskViewMode { get; set; } = TaskbarAppearanceMode.Normal;
+        public DesktopEnhanceSettings DesktopEnhance { get; set; } = new();
+        public bool DesktopIconsHiddenByApp { get; set; }
+        public bool TaskbarLyricsEnabled { get; set; }
+        public bool TaskbarLyricsShowControls { get; set; } = true;
+        public bool TaskbarLyricsOnlineEnabled { get; set; } = true;
+        public bool TaskbarLyricsArtworkRounded { get; set; } = true;
+        public bool TaskbarLyricsShowVisualizer { get; set; } = true;
+        public bool TaskbarLyricsTransparentBackground { get; set; } = true;
+        public bool TaskbarLyricsAdaptiveWidth { get; set; } = true;
+        public int TaskbarLyricsWidth { get; set; } = 320;
+        public int TaskbarLyricsFontSize { get; set; } = 14;
+        public string TaskbarLyricsFontFamily { get; set; } = "Segoe UI Variable Text";
+        public bool TaskbarLyricsTrackInfoOnly { get; set; }
+        public bool TaskbarLyricsShowSecondaryLine { get; set; } = true;
+        public int TaskbarLyricsPollingIntervalMs { get; set; } = 120;
+        public int TaskbarLyricsVerticalOffset { get; set; }
+        public bool LyricSourceQQEnabled { get; set; } = true;
+        public bool LyricSourceNeteaseEnabled { get; set; } = true;
+        public bool LyricSourceKugouEnabled { get; set; } = true;
+        public bool LyricSourceLrclibEnabled { get; set; } = true;
+        public int LyricOffsetMs { get; set; } = 0;
+        public bool LyricSplitLongLines { get; set; } = false;
+        public int GameSaveManualRetention { get; set; } = 10;
+        public int GameSaveSafetyRetention { get; set; } = 5;
+        public List<CustomGameSaveDefinition> CustomGameSaveFolders { get; set; } = new();
+        public bool GameSaveAutoBackupEnabled { get; set; }
+        public bool GameSavePeriodicBackupEnabled { get; set; } = true;
+        public int GameSavePeriodicIntervalMinutes { get; set; } = 30;
+        public bool SmartSaveDiscoveryEnabled { get; set; } = true;
+        public DateTime? GameSaveLastAutoBackup { get; set; }
         public bool DesktopFloatingEnabled { get; set; }
         public bool DesktopFloatingTopmost { get; set; } = true;
         public bool DesktopFloatingLocked { get; set; }
@@ -35,6 +81,7 @@ namespace SteamSwitcher.Services
         public bool AutoScanGamesOnStartup { get; set; }
         public bool ConfirmBeforeGameLaunch { get; set; } = true;
         public bool SilentCloseSteam { get; set; } = true;
+        public bool UseBetaUpdateChannel { get; set; } = true;
         public bool CheckUpdateOnStartup { get; set; } = true;
         public bool AutoInstallUpdates { get; set; }
         public bool ShowNotificationOnSteamClose { get; set; }
@@ -50,47 +97,145 @@ namespace SteamSwitcher.Services
 
     public static class SettingsService
     {
+        private static readonly object FileLock = new();
+
         public static string SettingsDirectory => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SteamSwitch");
 
         public static string SettingsPath => Path.Combine(SettingsDirectory, "settings.json");
+        public static string BackupSettingsPath => SettingsPath + ".bak";
 
         public static AppSettings Load()
         {
-            try
+            lock (FileLock)
             {
-                if (File.Exists(SettingsPath))
+                if (TryLoad(SettingsPath, out var settings))
+                    return Normalize(settings);
+
+                if (TryLoad(BackupSettingsPath, out settings))
                 {
-                    var json = File.ReadAllText(SettingsPath);
-                    return JsonSerializer.Deserialize<AppSettings>(json,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new AppSettings();
+                    AppLogger.Warn("Primary settings file is unavailable; recovered the previous settings backup.");
+                    return Normalize(settings);
                 }
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("Failed to load settings.", ex);
             }
             return new AppSettings();
         }
 
         public static void Save(AppSettings settings)
         {
+            lock (FileLock)
+            {
+                string? temporaryPath = null;
+                try
+                {
+                    Directory.CreateDirectory(SettingsDirectory);
+                    var normalized = Normalize(settings);
+                    var json = JsonSerializer.Serialize(normalized, new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    });
+                    temporaryPath = Path.Combine(SettingsDirectory, $"settings.{Guid.NewGuid():N}.tmp");
+                    using (var stream = new FileStream(
+                               temporaryPath,
+                               FileMode.CreateNew,
+                               FileAccess.Write,
+                               FileShare.None,
+                               16 * 1024,
+                               FileOptions.WriteThrough))
+                    using (var writer = new StreamWriter(stream))
+                    {
+                        writer.Write(json);
+                        writer.Flush();
+                        stream.Flush(flushToDisk: true);
+                    }
+
+                    ReplaceFileWithBackup(temporaryPath, SettingsPath, BackupSettingsPath);
+                    temporaryPath = null;
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error("Failed to save settings.", ex);
+                }
+                finally
+                {
+                    if (!string.IsNullOrWhiteSpace(temporaryPath))
+                    {
+                        try { File.Delete(temporaryPath); } catch { }
+                    }
+                }
+            }
+        }
+
+        public static AppSettings Normalize(AppSettings? settings)
+        {
+            settings ??= new AppSettings();
+            settings.CustomGameSaveFolders ??= new List<CustomGameSaveDefinition>();
+            settings.PinnedAccountIds ??= new List<string>();
+            settings.PinnedGameIds ??= new List<int>();
+            settings.PinnedPanelItemOrder ??= new List<string>();
+            settings.CustomSteamPath ??= string.Empty;
+            settings.CustomLoginUsersPath ??= string.Empty;
+            settings.DesktopEnhance ??= new DesktopEnhanceSettings();
+            settings.DesktopEnhance.IdleSeconds = Math.Clamp(settings.DesktopEnhance.IdleSeconds, 5, 300);
+            settings.DesktopEnhance.AnimationDuration = Math.Clamp(settings.DesktopEnhance.AnimationDuration, 200, 1000);
+            settings.TaskbarLyricsWidth = Math.Clamp(settings.TaskbarLyricsWidth, 240, 520);
+            settings.TaskbarLyricsPollingIntervalMs = Math.Clamp(settings.TaskbarLyricsPollingIntervalMs, 60, 1000);
+            settings.TaskbarLyricsVerticalOffset = Math.Clamp(settings.TaskbarLyricsVerticalOffset, -12, 12);
+            settings.TaskbarLyricsFontSize = settings.TaskbarLyricsFontSize <= 12
+                ? 14
+                : Math.Clamp(settings.TaskbarLyricsFontSize, 12, 18);
+            settings.TaskbarLyricsFontFamily = string.IsNullOrWhiteSpace(settings.TaskbarLyricsFontFamily)
+                ? "Segoe UI Variable Text"
+                : settings.TaskbarLyricsFontFamily.Trim();
+            settings.Theme = string.Equals(settings.Theme, "Light", StringComparison.OrdinalIgnoreCase)
+                ? "Light"
+                : "Dark";
+            return settings;
+        }
+
+        private static bool TryLoad(string path, out AppSettings settings)
+        {
+            settings = null!;
+            if (!File.Exists(path)) return false;
             try
             {
-                var dir = Path.GetDirectoryName(SettingsPath);
-                if (!Directory.Exists(dir))
-                    Directory.CreateDirectory(dir!);
-
-                var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
-                {
-                    WriteIndented = true
-                });
-                File.WriteAllText(SettingsPath, json);
+                var json = File.ReadAllText(path);
+                settings = JsonSerializer.Deserialize<AppSettings>(json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+                return settings != null;
             }
             catch (Exception ex)
             {
-                AppLogger.Error("Failed to save settings.", ex);
+                AppLogger.Warn($"Unable to load settings file {Path.GetFileName(path)}: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static void ReplaceFileWithBackup(string temporaryPath, string destinationPath, string backupPath)
+        {
+            if (!File.Exists(destinationPath))
+            {
+                File.Move(temporaryPath, destinationPath);
+                return;
+            }
+
+            var transientBackup = $"{backupPath}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.Replace(temporaryPath, destinationPath, transientBackup, ignoreMetadataErrors: true);
+                try
+                {
+                    File.Move(transientBackup, backupPath, overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Warn($"Settings were saved, but the previous-version backup could not be rotated: {ex.Message}");
+                }
+            }
+            finally
+            {
+                try { if (File.Exists(transientBackup)) File.Delete(transientBackup); } catch { }
             }
         }
 

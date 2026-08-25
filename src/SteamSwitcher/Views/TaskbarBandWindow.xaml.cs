@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -17,12 +21,12 @@ namespace SteamSwitcher.Views
     {
         private readonly AccountManager _accountManager;
         private readonly TaskbarEmbedder _embedder;
+        private readonly TaskbarMediaService _mediaService = new();
         private MainViewModel? _viewModel;
         private List<SteamAccount> _pinnedAccounts = new();
         private List<GameListViewModel> _pinnedGames = new();
         private List<QuickLaunchItem> _pinnedQuickLaunchItems = new();
         private bool _isPinned;
-        private bool _layoutRefreshQueued;
         private EventHandler? _pinnedGamesChangedHandler;
         private EventHandler? _pinnedAccountsChangedHandler;
         private EventHandler? _quickLaunchChangedHandler;
@@ -36,6 +40,34 @@ namespace SteamSwitcher.Views
         private bool _roundedMode = true;
         private int _iconRadius = 27;
         private int _glassRadius = 31;
+        private bool _lyricsEnabled;
+        private bool _lyricsShowControls = true;
+        private bool _lyricsArtworkRounded = true;
+        private bool _lyricsShowVisualizer = true;
+        private bool _lyricsTransparentBackground = true;
+        private bool _lyricsAdaptiveWidth = true;
+        private int _lyricsWidth = 280;
+        private int _currentAdaptiveLyricsWidth = 280;
+        private bool _lyricsCompositeMode = true;
+        private bool _lyricsTrackInfoOnly;
+        private bool _lyricsShowSecondaryLine = true;
+        private int _lyricsVerticalOffset;
+        private int _lyricsFontSize = 14;
+        private string _lyricsFontFamily = "Segoe UI Variable Text";
+        private bool _adaptiveLayoutDirty = true;
+        private string _lastPresentationMode = string.Empty;
+        private System.Windows.Threading.DispatcherTimer? _visualizerTimer;
+        private System.Windows.Threading.DispatcherTimer? _volumeHideTimer;
+        private readonly TaskbarFlyoutWindow _volumeFlyout = new();
+        private readonly Random _random = new();
+        private bool _isPlaying;
+        private bool _isLyricsHovered;
+        private byte[]? _lastArtwork;
+        private string _lastLyricText = string.Empty;
+        private string _lastTrackKey = string.Empty;
+        private long _lastTrackVersion = -1;
+        private DateTimeOffset _trackChangedAt = DateTimeOffset.MinValue;
+        private TaskbarMediaSnapshot? _lastSnapshot;
 
         public event EventHandler<SteamAccount>? AccountSwitchRequested;
         public event EventHandler<int>? GameLaunchRequested;
@@ -55,19 +87,24 @@ namespace SteamSwitcher.Views
         public TaskbarBandWindow(AccountManager accountManager)
         {
             InitializeComponent();
+            AlbumArtwork.SizeChanged += (_, _) => UpdateArtworkClip();
+            ArtworkBorder.SizeChanged += (_, _) => UpdateArtworkClip();
             _accountManager = accountManager;
             _embedder = new TaskbarEmbedder();
+            _mediaService.StateChanged += MediaService_StateChanged;
             _currentAccountChangedHandler = (s, e) => Dispatcher.BeginInvoke(
                 new Action(() => UpdateCurrentAccount(_accountManager.CurrentAccount)));
             _accountManager.CurrentAccountChanged += _currentAccountChangedHandler;
             _embedder.TaskbarCreated += (s, e) => Application.Current.Dispatcher.Invoke(Rebuild);
-            Loaded += (s, e) => { UpdateGlass(); SetupDragDrop(); };
+            Loaded += (s, e) => { UpdateGlass(); SetupDragDrop(); UpdateArtworkClip(); };
             Closing += (s, e) => Detach();
             Closed += (s, e) =>
             {
                 if (_currentAccountChangedHandler != null)
                     _accountManager.CurrentAccountChanged -= _currentAccountChangedHandler;
                 DetachViewModelEvents();
+                try { _volumeFlyout.Close(); } catch { }
+                _mediaService.Dispose();
                 _embedder.Dispose();
             };
             MouseLeftButtonDown += TaskbarBandWindow_MouseLeftButtonDown;
@@ -314,6 +351,83 @@ namespace SteamSwitcher.Views
             Rebuild();
         }
 
+        public void SetLyricsSettings(
+            bool enabled,
+            bool showControls,
+            bool onlineLyrics,
+            int width,
+            bool sourceQQ = true,
+            bool sourceNetease = true,
+            bool sourceKugou = true,
+            bool sourceLrclib = true,
+            int offsetMs = 0,
+            bool compositeMode = true,
+            bool artworkRounded = true,
+            bool showVisualizer = true,
+            bool adaptiveWidth = true,
+            bool trackInfoOnly = false,
+            bool showSecondaryLine = true,
+            int pollingIntervalMs = 120,
+            int verticalOffset = 0,
+            int fontSize = 14,
+            bool transparentBackground = true,
+            string fontFamily = "Segoe UI Variable Text")
+        {
+            string normalizedFontFamily = string.IsNullOrWhiteSpace(fontFamily)
+                ? "Segoe UI Variable Text"
+                : fontFamily.Trim();
+            int normalizedWidth = Math.Clamp(width, 240, 520);
+            int normalizedFontSize = Math.Clamp(fontSize, 12, 18);
+            _adaptiveLayoutDirty |= normalizedWidth != _lyricsWidth
+                || normalizedFontSize != _lyricsFontSize
+                || !string.Equals(normalizedFontFamily, _lyricsFontFamily, StringComparison.Ordinal)
+                || adaptiveWidth != _lyricsAdaptiveWidth;
+
+            _lyricsEnabled = enabled;
+            _lyricsShowControls = showControls;
+            _lyricsWidth = normalizedWidth;
+            _lyricsCompositeMode = compositeMode;
+            _lyricsArtworkRounded = artworkRounded;
+            _lyricsShowVisualizer = showVisualizer;
+            _lyricsTransparentBackground = transparentBackground;
+            if (VisualizerBadge != null)
+                VisualizerBadge.Visibility = showVisualizer ? Visibility.Visible : Visibility.Collapsed;
+            if (!showVisualizer)
+            {
+                _visualizerTimer?.Stop();
+                StopVisualizer();
+            }
+            _lyricsAdaptiveWidth = adaptiveWidth;
+            _lyricsTrackInfoOnly = trackInfoOnly;
+            _lyricsShowSecondaryLine = showSecondaryLine;
+            _lyricsVerticalOffset = Math.Clamp(verticalOffset, -12, 12);
+            _lyricsFontSize = normalizedFontSize;
+            _lyricsFontFamily = normalizedFontFamily;
+            if (!_lyricsAdaptiveWidth)
+            {
+                _currentAdaptiveLyricsWidth = _lyricsWidth;
+            }
+            _mediaService.OnlineLyricsEnabled = onlineLyrics;
+            _mediaService.SourceQQEnabled = sourceQQ;
+            _mediaService.SourceNeteaseEnabled = sourceNetease;
+            _mediaService.SourceKugouEnabled = sourceKugou;
+            _mediaService.SourceLrclibEnabled = sourceLrclib;
+            _mediaService.OffsetMs = offsetMs;
+            _mediaService.PollingIntervalMs = pollingIntervalMs;
+            if (enabled)
+            {
+                _ = _mediaService.StartAsync();
+            }
+            else
+            {
+                _mediaService.Stop();
+                _visualizerTimer?.Stop();
+                StopVisualizer();
+            }
+            Rebuild();
+            UpdateMediaUi(_mediaService.Current);
+        }
+
         public void Attach()
         {
             if (_isPinned) return;
@@ -344,7 +458,7 @@ namespace SteamSwitcher.Views
 
         // --- Layout ---
 
-        private void Rebuild()
+        public void Rebuild()
         {
             int h = _iconSize + _glassPadding * 2;
             _iconRadius = _roundedMode ? _iconSize / 2 : 8;
@@ -379,24 +493,105 @@ namespace SteamSwitcher.Views
                 hasGames && _pinnedAccounts.Count > 0
                     ? Visibility.Visible : Visibility.Collapsed;
 
+            if (GameAvatarContainer != null)
+            {
+                GameAvatarContainer.Visibility = (hasGames || _pinnedAccounts.Count > 0)
+                    ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            LyricsHost.Visibility = _lyricsEnabled ? Visibility.Visible : Visibility.Collapsed;
+            LyricsHost.Width = (_lyricsAdaptiveWidth && _currentAdaptiveLyricsWidth > 0) ? _currentAdaptiveLyricsWidth : _lyricsWidth;
+            LyricsHost.Height = Math.Max(40, _iconSize + 8);
+            LyricsHost.CornerRadius = new CornerRadius(13);
+            LyricsHost.Background = _lyricsTransparentBackground
+                ? Brushes.Transparent
+                : new LinearGradientBrush(
+                    Color.FromArgb(0xA9, 0x0A, 0x13, 0x20),
+                    Color.FromArgb(0xB2, 0x0F, 0x1B, 0x2B),
+                    new Point(0, 0), new Point(1, 1));
+            LyricsHost.BorderBrush = _lyricsTransparentBackground
+                ? Brushes.Transparent
+                : new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF));
+            LyricsHost.BorderThickness = _lyricsTransparentBackground ? new Thickness(0) : new Thickness(1);
+            LyricsHost.RenderTransform = new TranslateTransform(0, _lyricsVerticalOffset);
+            var lyricsFont = new FontFamily(_lyricsFontFamily);
+            LyricText.FontFamily = lyricsFont;
+            MediaText.FontFamily = lyricsFont;
+            LyricText.FontSize = _lyricsFontSize;
+            MediaText.FontSize = Math.Max(11.5, _lyricsFontSize - 2.5);
+            MediaIcon.FontSize = Math.Max(10, _lyricsFontSize - 4);
+            if (ArtworkBorder != null)
+            {
+                ArtworkBorder.CornerRadius = _lyricsArtworkRounded ? new CornerRadius(8) : new CornerRadius(0);
+                UpdateArtworkClip();
+            }
+            if (!_lyricsShowControls && LyricsControlsGlass != null)
+            {
+                LyricsControlsGlass.Opacity = 0;
+                LyricsControlsGlass.IsHitTestVisible = false;
+            }
+
             ApplyLayout();
+        }
+
+        private void UpdateArtworkClip()
+        {
+            if (AlbumArtwork == null)
+            {
+                return;
+            }
+
+            if (!_lyricsArtworkRounded)
+            {
+                ArtworkBorder.Clip = null;
+                AlbumArtwork.Clip = null;
+                return;
+            }
+
+            double containerWidth = ArtworkBorder.ActualWidth;
+            double containerHeight = ArtworkBorder.ActualHeight;
+            if (containerWidth > 0 && containerHeight > 0)
+            {
+                double containerRadius = Math.Min(8d, Math.Min(containerWidth, containerHeight) / 2d);
+                ArtworkBorder.Clip = new RectangleGeometry(
+                    new Rect(0, 0, containerWidth, containerHeight),
+                    containerRadius,
+                    containerRadius);
+            }
+
+            double width = AlbumArtwork.ActualWidth;
+            double height = AlbumArtwork.ActualHeight;
+            if (width <= 0 || height <= 0)
+            {
+                return;
+            }
+
+            double radius = Math.Min(8d, Math.Min(width, height) / 2d);
+            AlbumArtwork.Clip = new RectangleGeometry(new Rect(0, 0, width, height), radius, radius);
         }
 
         private void ApplyLayout()
         {
             int w = CalcWidth();
-            int h = _iconSize + _glassPadding * 2;
+            int h = Math.Max(_iconSize + _glassPadding * 2, _lyricsEnabled ? 42 : 36);
 
             Width = w;
             Height = h;
 
-            GlassBorder.CornerRadius = new CornerRadius(_glassRadius);
-            GlassBorder.Padding = new Thickness(_glassPadding);
+            GlassBorder.Background = Brushes.Transparent;
+            GlassBorder.BorderThickness = new Thickness(0);
+            GlassBorder.CornerRadius = new CornerRadius(0);
+            GlassBorder.Padding = new Thickness(0);
+
+            if (GameAvatarContainer != null)
+            {
+                GameAvatarContainer.CornerRadius = new CornerRadius(_glassRadius);
+                GameAvatarContainer.Padding = new Thickness(_glassPadding, Math.Max(2, _glassPadding - 1), _glassPadding, Math.Max(2, _glassPadding - 1));
+            }
 
             if (_isPinned)
             {
                 _embedder.UpdateWidth(w);
-                QueuePosRefresh();
             }
         }
 
@@ -404,14 +599,554 @@ namespace SteamSwitcher.Views
         {
             int gc = _pinnedGames.Count + _pinnedQuickLaunchItems.Count;
             int ac = _pinnedAccounts.Count;
-            if (gc == 0 && ac == 0) ac = 1;
-
             int item = _iconSize + 4;
             int total = gc * item;
             if (gc > 0 && ac > 0) total += 10;
             total += ac * item;
-            return total + _glassPadding * 2 + 4;
+
+            if (total > 0)
+            {
+                total += _glassPadding * 2 + 6;
+            }
+
+            if (_lyricsEnabled)
+            {
+                int curLyricsW = (_lyricsAdaptiveWidth && _currentAdaptiveLyricsWidth > 0)
+                    ? _currentAdaptiveLyricsWidth
+                    : _lyricsWidth;
+                total += curLyricsW + ((gc > 0 || ac > 0) ? 14 : 0);
+            }
+            else if (gc == 0 && ac == 0)
+            {
+                total = item;
+            }
+
+            return total + 6;
         }
+
+        private void MediaService_StateChanged(object? sender, TaskbarMediaSnapshot snapshot)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => UpdateMediaUi(snapshot)));
+                return;
+            }
+            UpdateMediaUi(snapshot);
+        }
+
+        private void VisualizerTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_isPlaying && VisualizerBar1 != null && VisualizerBar2 != null && VisualizerBar3 != null)
+            {
+                var h1 = 3 + _random.Next(2, 9);
+                var h2 = 4 + _random.Next(3, 11);
+                var h3 = 2 + _random.Next(2, 8);
+                VisualizerBar1.BeginAnimation(FrameworkElement.HeightProperty, new DoubleAnimation(h1, TimeSpan.FromMilliseconds(120)));
+                VisualizerBar2.BeginAnimation(FrameworkElement.HeightProperty, new DoubleAnimation(h2, TimeSpan.FromMilliseconds(120)));
+                VisualizerBar3.BeginAnimation(FrameworkElement.HeightProperty, new DoubleAnimation(h3, TimeSpan.FromMilliseconds(120)));
+            }
+        }
+
+        private void StopVisualizer()
+        {
+            if (VisualizerBar1 != null && VisualizerBar2 != null && VisualizerBar3 != null)
+            {
+                VisualizerBar1.BeginAnimation(FrameworkElement.HeightProperty, new DoubleAnimation(3, TimeSpan.FromMilliseconds(150)));
+                VisualizerBar2.BeginAnimation(FrameworkElement.HeightProperty, new DoubleAnimation(3, TimeSpan.FromMilliseconds(150)));
+                VisualizerBar3.BeginAnimation(FrameworkElement.HeightProperty, new DoubleAnimation(3, TimeSpan.FromMilliseconds(150)));
+            }
+        }
+
+        private void UpdateMediaUi(TaskbarMediaSnapshot snapshot)
+        {
+            // Session callbacks can arrive from a background thread. Ignore queued
+            // snapshots from an older song so their artwork cannot overwrite the new one.
+            if (snapshot.TrackVersion < _lastTrackVersion)
+                return;
+
+            _lastTrackVersion = snapshot.TrackVersion;
+            _lastSnapshot = snapshot;
+            if (LyricText == null)
+                return;
+
+            _isPlaying = snapshot.IsPlaying && snapshot.HasSession;
+            if (_isPlaying && _lyricsShowVisualizer)
+            {
+                if (_visualizerTimer == null)
+                {
+                    _visualizerTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(130) };
+                    _visualizerTimer.Tick += VisualizerTimer_Tick;
+                }
+                if (!_visualizerTimer.IsEnabled)
+                    _visualizerTimer.Start();
+            }
+            else
+            {
+                _visualizerTimer?.Stop();
+                StopVisualizer();
+            }
+
+            // 检测切歌，重置封面与歌词状态
+            var currentTrackKey = string.IsNullOrWhiteSpace(snapshot.TrackKey)
+                ? $"{snapshot.Title}\u001f{snapshot.Artist}\u001f{snapshot.Album}"
+                : snapshot.TrackKey;
+            bool trackChanged = !string.Equals(_lastTrackKey, currentTrackKey, StringComparison.Ordinal);
+            if (trackChanged)
+            {
+                _lastTrackKey = currentTrackKey;
+                _trackChangedAt = DateTimeOffset.Now;
+                _lastArtwork = null;
+                _lastLyricText = string.Empty;
+                AlbumArtwork.Source = null;
+                AlbumArtwork.Visibility = Visibility.Collapsed;
+                ArtworkFallback.Visibility = Visibility.Visible;
+            }
+
+            // 专辑封面展示逻辑 (Lyricify 严谨标准)
+            if (snapshot.Artwork is { Length: > 0 })
+            {
+                if (trackChanged || !ReferenceEquals(_lastArtwork, snapshot.Artwork) || AlbumArtwork.Source == null)
+                {
+                    _lastArtwork = snapshot.Artwork;
+                    var bmp = LoadArtwork(snapshot.Artwork);
+                    if (bmp != null)
+                    {
+                        AlbumArtwork.Source = bmp;
+                        AlbumArtwork.Visibility = Visibility.Visible;
+                        ArtworkFallback.Visibility = Visibility.Collapsed;
+                    }
+                    else
+                    {
+                        AlbumArtwork.Source = null;
+                        AlbumArtwork.Visibility = Visibility.Collapsed;
+                        ArtworkFallback.Visibility = Visibility.Visible;
+                    }
+                }
+            }
+            else
+            {
+                _lastArtwork = null;
+                AlbumArtwork.Source = null;
+                AlbumArtwork.Visibility = Visibility.Collapsed;
+                ArtworkFallback.Visibility = Visibility.Visible;
+            }
+
+            // ── 稳定显示状态机 ────────────────────────────────────────────────────
+            // 1. 无媒体会话             → 占位提示
+            // 2. 切歌后的短暂识别阶段   → 歌名 + 歌手/专辑
+            // 3. 有同步歌词             → 当前歌词 + 翻译/下一句
+            // 4. 前奏、间奏或无歌词     → 歌名 + 稳定的曲目信息
+            // 宽度只在切歌或设置变化时计算，避免逐句歌词触发嵌入窗口重排和闪烁。
+            bool inTrackChangeBanner = (DateTimeOffset.Now - _trackChangedAt).TotalSeconds < 2.2;
+
+            string primaryText;
+            string compositeText;
+            string iconGlyph;
+            string presentationMode;
+            var artistAlbum = string.Join(" · ", new[] { snapshot.Artist, snapshot.Album }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+
+            if (!snapshot.HasSession)
+            {
+                presentationMode = "idle";
+                primaryText = "等待媒体播放";
+                iconGlyph = "\uE8D6";
+                compositeText = "打开播放器后将在此显示歌曲与歌词";
+            }
+            else if (_lyricsTrackInfoOnly && !string.IsNullOrWhiteSpace(snapshot.Title))
+            {
+                presentationMode = "track";
+                primaryText = snapshot.Title;
+                iconGlyph = "\uE8D6";
+                compositeText = string.IsNullOrWhiteSpace(artistAlbum) ? snapshot.SourceText : artistAlbum;
+            }
+            else if (inTrackChangeBanner && !string.IsNullOrWhiteSpace(snapshot.Title))
+            {
+                presentationMode = "track";
+                primaryText = snapshot.Title;
+                iconGlyph = "\uE8D6";
+                compositeText = string.IsNullOrWhiteSpace(artistAlbum) ? snapshot.SourceText : artistAlbum;
+            }
+            else if (!string.IsNullOrWhiteSpace(snapshot.CurrentLyric))
+            {
+                presentationMode = "lyric";
+                primaryText = snapshot.CurrentLyric;
+
+                if (!string.IsNullOrWhiteSpace(snapshot.CurrentTranslation))
+                {
+                    iconGlyph = string.Empty;
+                    compositeText = snapshot.CurrentTranslation;
+                }
+                else if (!string.IsNullOrWhiteSpace(snapshot.NextText)
+                    && !string.Equals(snapshot.NextText, snapshot.CurrentLyric, StringComparison.Ordinal))
+                {
+                    iconGlyph = "\uE893";
+                    compositeText = snapshot.NextText;
+                }
+                else
+                {
+                    iconGlyph = "\uE8D6";
+                    compositeText = string.IsNullOrWhiteSpace(artistAlbum)
+                        ? (string.IsNullOrWhiteSpace(snapshot.TimeString) ? snapshot.SourceText : snapshot.TimeString)
+                        : artistAlbum;
+                }
+            }
+            else
+            {
+                presentationMode = "track";
+                primaryText = string.IsNullOrWhiteSpace(snapshot.Title) ? "正在播放" : snapshot.Title;
+                if (!string.IsNullOrWhiteSpace(snapshot.NextText))
+                {
+                    iconGlyph = "\uE893";
+                    compositeText = $"即将播放 · {snapshot.NextText}";
+                }
+                else
+                {
+                    iconGlyph = "\uE8D6";
+                    compositeText = string.IsNullOrWhiteSpace(artistAlbum)
+                        ? (string.IsNullOrWhiteSpace(snapshot.TimeString) ? snapshot.SourceText : snapshot.TimeString)
+                        : artistAlbum;
+                }
+            }
+
+            bool presentationModeChanged = !string.Equals(
+                _lastPresentationMode, presentationMode, StringComparison.Ordinal);
+            _lastPresentationMode = presentationMode;
+
+            if (_lyricsAdaptiveWidth && _lyricsEnabled && !_isLyricsHovered)
+            {
+                if (trackChanged || _adaptiveLayoutDirty)
+                {
+                    double secondaryFontSize = Math.Max(11.5, _lyricsFontSize - 2.5);
+                    var primaryCandidates = new[] { primaryText, snapshot.Title, snapshot.CurrentLyric, snapshot.NextText };
+                    var secondaryCandidates = new[] { compositeText, artistAlbum, snapshot.CurrentTranslation };
+                    double primaryWidth = primaryCandidates
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Select(value => MeasureTextWidth(value, _lyricsFontSize, FontWeights.SemiBold))
+                        .DefaultIfEmpty(0)
+                        .Max();
+                    double secondaryWidth = secondaryCandidates
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Select(value => MeasureTextWidth(value, secondaryFontSize, FontWeights.Medium) + 16)
+                        .DefaultIfEmpty(0)
+                        .Max();
+                    int targetLyricsWidth = (int)Math.Ceiling(Math.Max(primaryWidth, secondaryWidth) + 82);
+                    targetLyricsWidth = Math.Clamp(targetLyricsWidth, 240, _lyricsWidth);
+
+                    if (Math.Abs(targetLyricsWidth - _currentAdaptiveLyricsWidth) >= 8)
+                    {
+                        _currentAdaptiveLyricsWidth = targetLyricsWidth;
+                        LyricsHost.Width = targetLyricsWidth;
+                        ApplyLayout();
+                    }
+                    _adaptiveLayoutDirty = false;
+                }
+            }
+            else if (!_lyricsAdaptiveWidth && LyricsHost.Width != _lyricsWidth)
+            {
+                LyricsHost.Width = _lyricsWidth;
+                _currentAdaptiveLyricsWidth = _lyricsWidth;
+                ApplyLayout();
+            }
+
+            // 逐句歌词只替换文字，不再改变整个面板透明度或尺寸。
+            // 仅在切歌或展示模式变化时使用轻微位移动效。
+            if (!string.Equals(_lastLyricText, primaryText, StringComparison.Ordinal))
+            {
+                _lastLyricText = primaryText;
+                LyricText.Text = primaryText;
+                bool animateModeTransition = trackChanged || presentationModeChanged;
+
+                LyricsTextPanel.BeginAnimation(OpacityProperty, null);
+                LyricsTextPanel.Opacity = _isLyricsHovered && _lyricsShowControls && LyricsControls?.IsEnabled == true
+                    ? 0.18
+                    : 1;
+
+                if (animateModeTransition)
+                {
+                    LyricsTranslate.BeginAnimation(
+                        TranslateTransform.YProperty,
+                        new DoubleAnimation(2, 0, TimeSpan.FromMilliseconds(160))
+                        {
+                            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                        });
+                }
+                else
+                {
+                    LyricsTranslate.BeginAnimation(TranslateTransform.YProperty, null);
+                    LyricsTranslate.Y = 0;
+                }
+            }
+
+            // 2. 副行图标与文本更新
+            if (MediaIcon != null)
+            {
+                MediaIcon.Text = iconGlyph;
+                MediaIcon.Visibility = _lyricsShowSecondaryLine && !string.IsNullOrWhiteSpace(iconGlyph)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+            if (MediaText != null)
+            {
+                MediaText.Text = compositeText;
+                MediaText.Visibility = _lyricsShowSecondaryLine ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            LyricsHost.ToolTip = string.Join("\n", new[]
+            {
+                $"🎵 歌曲：{snapshot.Title}",
+                $"👤 歌手：{snapshot.Artist}",
+                string.IsNullOrWhiteSpace(snapshot.Album) ? null : $"💽 专辑：{snapshot.Album}",
+                string.IsNullOrWhiteSpace(snapshot.CurrentLyric) ? null : $"📝 歌词：{snapshot.CurrentLyric}",
+                string.IsNullOrWhiteSpace(snapshot.CurrentTranslation) ? null : $"🌐 翻译：{snapshot.CurrentTranslation}",
+                string.IsNullOrWhiteSpace(snapshot.NextText) ? null : $"⏩ 下一句：{snapshot.NextText}",
+                string.IsNullOrWhiteSpace(snapshot.TimeString) ? null : $"⏱ 进度：{snapshot.TimeString}",
+                $"🏷 音源：{snapshot.SourceText}",
+                "🖱️ 点击：唤醒置顶当前播放器"
+            }.Where(s => s != null));
+
+            LyricsProgress.Value = snapshot.Progress;
+            _isPlaying = snapshot.IsPlaying;
+            if (PlayPauseButton != null)
+            {
+                PlayPauseButton.Content = snapshot.IsPlaying ? "\uE769" : "\uE768";
+            }
+            if (LyricsControls != null)
+            {
+                LyricsControls.IsEnabled = snapshot.HasSession;
+            }
+        }
+
+        public void SetPreviewMedia(TaskbarMediaSnapshot snapshot) => UpdateMediaUi(snapshot);
+
+        public void SetPreviewControlsVisible(bool visible)
+        {
+            if (LyricsControlsGlass != null)
+            {
+                LyricsControlsGlass.IsHitTestVisible = visible;
+                LyricsControlsGlass.Opacity = visible ? 1 : 0;
+            }
+        }
+
+        private double MeasureTextWidth(string text, double fontSize, FontWeight fontWeight)
+        {
+            if (string.IsNullOrEmpty(text) || LyricText == null) return 0;
+            try
+            {
+                var typeface = new Typeface(LyricText.FontFamily, LyricText.FontStyle, fontWeight, LyricText.FontStretch);
+                var formattedText = new FormattedText(
+                    text,
+                    CultureInfo.CurrentCulture,
+                    FlowDirection.LeftToRight,
+                    typeface,
+                    fontSize,
+                    Brushes.White,
+                    VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                return formattedText.WidthIncludingTrailingWhitespace;
+            }
+            catch
+            {
+                return text.Length * (fontSize * 0.95);
+            }
+        }
+
+        private static BitmapImage? LoadArtwork(byte[]? bytes)
+        {
+            if (bytes is not { Length: > 0 }) return null;
+            try
+            {
+                using var stream = new MemoryStream(bytes, writable: false);
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.DecodePixelWidth = 96;
+                bitmap.StreamSource = stream;
+                bitmap.EndInit();
+                bitmap.Freeze();
+                return bitmap;
+            }
+            catch { return null; }
+        }
+
+        private void LyricsHost_MouseEnter(object sender, MouseEventArgs e)
+        {
+            _isLyricsHovered = true;
+            ArtworkScale?.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1.06, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+            ArtworkScale?.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1.06, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+
+            if (_lyricsShowControls && LyricsControls != null && LyricsControls.IsEnabled)
+            {
+                if (LyricsControlsGlass != null)
+                {
+                    LyricsControlsGlass.IsHitTestVisible = true;
+                    LyricsControlsGlass.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(180))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    });
+                    LyricsControlsTranslate?.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(180))
+                    {
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    });
+                }
+                LyricsTextPanel?.BeginAnimation(OpacityProperty, new DoubleAnimation(0.18, TimeSpan.FromMilliseconds(120)));
+            }
+        }
+
+        private void LyricsHost_MouseLeave(object sender, MouseEventArgs e)
+        {
+            _isLyricsHovered = false;
+            ArtworkScale?.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+            ArtworkScale?.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+
+            if (LyricsControlsGlass != null)
+            {
+                LyricsControlsGlass.IsHitTestVisible = false;
+                LyricsControlsGlass.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(140)));
+                LyricsControlsTranslate?.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(6, TimeSpan.FromMilliseconds(140)));
+            }
+            LyricsTextPanel?.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(160)));
+        }
+
+        private static void AnimateButtonClick(Button? btn)
+        {
+            if (btn == null) return;
+            var scale = new ScaleTransform(0.88, 0.88);
+            btn.RenderTransformOrigin = new Point(0.5, 0.5);
+            btn.RenderTransform = scale;
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.88, 1.0, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new ElasticEase { Oscillations = 1, Springiness = 4, EasingMode = EasingMode.EaseOut }
+            });
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.88, 1.0, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new ElasticEase { Oscillations = 1, Springiness = 4, EasingMode = EasingMode.EaseOut }
+            });
+        }
+
+        private async void PreviousTrack_Click(object sender, RoutedEventArgs e)
+        {
+            e.Handled = true;
+            AnimateButtonClick(sender as Button);
+            await _mediaService.SkipPreviousAsync();
+        }
+
+        private async void PlayPause_Click(object sender, RoutedEventArgs e)
+        {
+            e.Handled = true;
+            AnimateButtonClick(sender as Button);
+            await _mediaService.TogglePlayPauseAsync();
+        }
+
+        private async void NextTrack_Click(object sender, RoutedEventArgs e)
+        {
+            e.Handled = true;
+            AnimateButtonClick(sender as Button);
+            await _mediaService.SkipNextAsync();
+        }
+
+        private void LyricsHost_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            e.Handled = true;
+            float step = e.Delta > 0 ? 0.02f : -0.02f;
+            float newVol = SystemVolumeService.AdjustVolume(step);
+            bool isMuted = SystemVolumeService.IsMuted();
+            ShowSeparatedVolumeHud(newVol, isMuted);
+        }
+
+        private void ShowSeparatedVolumeHud(float volume, bool isMuted)
+        {
+            try
+            {
+                Point topLeft = LyricsHost.PointToScreen(new Point(0, 0));
+                Point center = new Point(topLeft.X + (LyricsHost.ActualWidth / 2), topLeft.Y);
+                _volumeFlyout.ShowVolume(center, topLeft.Y, volume, isMuted);
+
+                if (_volumeHideTimer == null)
+                {
+                    _volumeHideTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1300) };
+                    _volumeHideTimer.Tick += (s, e) =>
+                    {
+                        _volumeHideTimer.Stop();
+                        _volumeFlyout.HideFlyout();
+                    };
+                }
+                _volumeHideTimer.Stop();
+                _volumeHideTimer.Start();
+            }
+            catch { }
+        }
+
+        private void LyricsHost_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (LyricsControlsGlass != null && LyricsControlsGlass.IsMouseOver)
+                return;
+            ActivateActivePlayer();
+        }
+
+        public static void ActivateActivePlayer()
+        {
+            try
+            {
+                var knownProcs = new[]
+                {
+                    "cloudmusic", "qqmusic", "kugou", "kwmusic",
+                    "spotify", "yesplaymusic", "applemusic", "foobar2000",
+                    "aimp", "potplayer64", "potplayermini64"
+                };
+
+                foreach (var name in knownProcs)
+                {
+                    var procs = System.Diagnostics.Process.GetProcessesByName(name);
+                    try
+                    {
+                        foreach (var p in procs)
+                        {
+                            var hWnd = p.MainWindowHandle;
+                            if (hWnd != IntPtr.Zero)
+                            {
+                                if (IsIconic(hWnd))
+                                {
+                                    ShowWindow(hWnd, 9 /* SW_RESTORE */);
+                                }
+                                else
+                                {
+                                    ShowWindow(hWnd, 5 /* SW_SHOW */);
+                                }
+                                SetForegroundWindow(hWnd);
+                                return;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        foreach (var process in procs)
+                            process.Dispose();
+                    }
+                }
+            }
+            catch { }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
 
         // --- Glass ---
 
@@ -436,29 +1171,31 @@ namespace SteamSwitcher.Views
             if (GlassBorder == null) return;
             
             bool isLight = IsSystemInLightTheme();
+            Brush bg;
+            Brush border;
 
             if (_glassEnabled)
             {
                 if (isLight)
                 {
-                    GlassBorder.Background = new LinearGradientBrush(
+                    bg = new LinearGradientBrush(
                         Color.FromArgb(135, 255, 255, 255),
                         Color.FromArgb(75, 235, 245, 255),
                         new Point(0, 0), new Point(1, 1));
-                    GlassBorder.BorderBrush = new LinearGradientBrush(
+                    border = new LinearGradientBrush(
                         Color.FromArgb(160, 255, 255, 255),
                         Color.FromArgb(50, 100, 150, 220),
                         new Point(0, 0), new Point(0, 1));
                 }
                 else
                 {
-                    GlassBorder.Background = new LinearGradientBrush(
-                        Color.FromArgb(25, 255, 255, 255),
-                        Color.FromArgb(12, 0, 0, 0),
+                    bg = new LinearGradientBrush(
+                        Color.FromArgb(32, 255, 255, 255),
+                        Color.FromArgb(18, 0, 0, 0),
                         new Point(0, 0), new Point(1, 1));
-                    GlassBorder.BorderBrush = new LinearGradientBrush(
-                        Color.FromArgb(45, 255, 255, 255),
-                        Color.FromArgb(15, 255, 255, 255),
+                    border = new LinearGradientBrush(
+                        Color.FromArgb(55, 255, 255, 255),
+                        Color.FromArgb(20, 255, 255, 255),
                         new Point(0, 0), new Point(0, 1));
                 }
             }
@@ -466,14 +1203,25 @@ namespace SteamSwitcher.Views
             {
                 if (isLight)
                 {
-                    GlassBorder.Background = new SolidColorBrush(Color.FromArgb(235, 245, 250, 255));
-                    GlassBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(180, 225, 235, 245));
+                    bg = new SolidColorBrush(Color.FromArgb(235, 245, 250, 255));
+                    border = new SolidColorBrush(Color.FromArgb(180, 225, 235, 245));
                 }
                 else
                 {
-                    GlassBorder.Background = new SolidColorBrush(Color.FromArgb(235, 30, 30, 33));
-                    GlassBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(45, 255, 255, 255));
+                    bg = new SolidColorBrush(Color.FromArgb(235, 30, 30, 33));
+                    border = new SolidColorBrush(Color.FromArgb(45, 255, 255, 255));
                 }
+            }
+
+            if (GameAvatarContainer != null)
+            {
+                GameAvatarContainer.Background = bg;
+                GameAvatarContainer.BorderBrush = border;
+            }
+            else
+            {
+                GlassBorder.Background = bg;
+                GlassBorder.BorderBrush = border;
             }
         }
 
@@ -783,7 +1531,7 @@ namespace SteamSwitcher.Views
         private static UIElement FallbackIcon(int sz, string icon = "\uE7FC") => new TextBlock()
         {
             Text = icon,
-            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+            FontFamily = new FontFamily("Segoe MDL2 Assets"),
             FontSize = sz > 36 ? 16 : 14,
             Foreground = new SolidColorBrush(Color.FromRgb(0x25, 0x2A, 0x32)),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -806,15 +1554,5 @@ namespace SteamSwitcher.Views
             return string.IsNullOrWhiteSpace(n) ? "S" : n[..1].ToUpperInvariant();
         }
 
-        private void QueuePosRefresh()
-        {
-            if (_layoutRefreshQueued) return;
-            _layoutRefreshQueued = true;
-            Dispatcher.BeginInvoke(() =>
-            {
-                _layoutRefreshQueued = false;
-                _embedder.UpdateWidth((int)Math.Ceiling(ActualWidth > 0 ? ActualWidth : Width));
-            }, System.Windows.Threading.DispatcherPriority.ContextIdle);
-        }
     }
 }

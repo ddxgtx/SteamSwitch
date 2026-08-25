@@ -17,8 +17,11 @@ namespace SteamSwitcher.Views
             _updateService = updateService;
             _updateInfo = updateInfo;
 
-            VersionText.Text = $"v{updateInfo.Version}";
-            CurrentVersionText.Text = $"当前版本：v{UpdateService.GetCurrentVersion()}";
+            VersionText.Text = $"v{updateInfo.Version}{(updateInfo.IsPrerelease ? " · 测试版" : "")}";
+            CurrentVersionText.Text = $"当前版本：v{UpdateService.GetCurrentVersion()} · 测试版";
+            IntegrityText.Text = updateInfo.CanVerifyIntegrity
+                ? "GitHub 官方源 · SHA-256 完整性校验可用"
+                : "此版本缺少完整性摘要，只能前往 GitHub 手动下载";
             ChangelogText.Text = string.IsNullOrWhiteSpace(updateInfo.Changelog)
                 ? "暂无更新说明"
                 : updateInfo.Changelog;
@@ -29,6 +32,7 @@ namespace SteamSwitcher.Views
 
             Closing += (s, e) =>
             {
+                _updateService.CancelDownload();
                 _updateService.DownloadProgress -= OnDownloadProgress;
                 _updateService.DownloadCompleted -= OnDownloadCompleted;
                 _updateService.DownloadFailed -= OnDownloadFailed;
@@ -115,7 +119,7 @@ namespace SteamSwitcher.Views
         {
             if (!string.IsNullOrEmpty(_downloadedFilePath))
             {
-                UpdateService.LaunchInstaller(_downloadedFilePath);
+                UpdateService.LaunchInstaller(_downloadedFilePath, _updateInfo.ExpectedSha256);
             }
         }
 

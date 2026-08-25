@@ -18,6 +18,7 @@ namespace SteamSwitcher.Core
         private readonly VdfParser _vdfParser;
         private readonly RegistryHelper _registryHelper;
         private readonly HttpClient _httpClient;
+        private readonly SemaphoreSlim _switchGate = new(1, 1);
         private CancellationTokenSource? _avatarDownloadCts;
         private bool _disposed;
 
@@ -26,6 +27,8 @@ namespace SteamSwitcher.Core
 
         public event EventHandler? AccountsChanged;
         public event EventHandler? CurrentAccountChanged;
+        public Func<SteamAccount?, Task>? BeforeAccountSwitchAsync { get; set; }
+        public Func<Task<bool>>? ConfirmForceCloseAfterTimeoutAsync { get; set; }
 
         public AccountManager()
         {
@@ -36,6 +39,66 @@ namespace SteamSwitcher.Core
         }
 
         public SteamService GetSteamService() => _steamService;
+
+        /// <summary>
+        /// Uses Steam's current login state to refresh the active account without
+        /// rebuilding the account list or starting avatar downloads.
+        /// </summary>
+        public bool RefreshCurrentAccountFromSteamSession()
+        {
+            if (_disposed || Accounts.Count == 0)
+                return false;
+
+            var autoLoginUser = _registryHelper.GetAutoLoginUser();
+            string? mostRecentSteamId = null;
+            try
+            {
+                var loginUsersPath = _steamService.GetLoginUsersPath();
+                if (File.Exists(loginUsersPath))
+                {
+                    var data = _vdfParser.Parse(loginUsersPath);
+                    if (data.TryGetValue("users", out var usersObj) &&
+                        usersObj is Dictionary<string, object> users)
+                    {
+                        mostRecentSteamId = users.FirstOrDefault(entry =>
+                            entry.Value is Dictionary<string, object> userData &&
+                            GetValue(userData, "MostRecent") == "1").Key;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to refresh the active Steam account from loginusers.vdf: {ex.Message}");
+            }
+
+            var resolved = Accounts.FirstOrDefault(account =>
+                !string.IsNullOrWhiteSpace(autoLoginUser) &&
+                string.Equals(account.AccountName, autoLoginUser, StringComparison.OrdinalIgnoreCase))
+                ?? Accounts.FirstOrDefault(account =>
+                    !string.IsNullOrWhiteSpace(mostRecentSteamId) &&
+                    string.Equals(account.SteamId, mostRecentSteamId, StringComparison.OrdinalIgnoreCase))
+                ?? Accounts.FirstOrDefault(account => account.MostRecent);
+
+            // Steam rewrites loginusers.vdf in place while signing in/out. During that
+            // short window both the registry value and MostRecent flag can be absent.
+            // Keep the last verified account instead of making the UI flicker to an
+            // unauthenticated state; a subsequent poll will resolve the new account.
+            if (resolved == null)
+            {
+                AppLogger.Debug(
+                    $"Active Steam account could not be resolved temporarily; retaining " +
+                    $"{CurrentAccount?.AccountName ?? "<none>"}.");
+                return false;
+            }
+
+            if (AreSameAccount(CurrentAccount, resolved))
+                return false;
+
+            CurrentAccount = resolved;
+            AppLogger.Info($"Refreshed current Steam account: registry={autoLoginUser ?? "<none>"}, mostRecent={mostRecentSteamId ?? "<none>"}, current={resolved?.AccountName ?? "<none>"}");
+            CurrentAccountChanged?.Invoke(this, EventArgs.Empty);
+            return true;
+        }
 
         public async Task<bool> InitializeAsync()
         {
@@ -160,11 +223,42 @@ namespace SteamSwitcher.Core
 
         public async Task<bool> SwitchAccountAsync(SteamAccount account, bool forceClose = false)
         {
+            await _switchGate.WaitAsync();
+            try
+            {
+                return await SwitchAccountCoreAsync(account, forceClose);
+            }
+            finally
+            {
+                _switchGate.Release();
+            }
+        }
+
+        private async Task<bool> SwitchAccountCoreAsync(SteamAccount account, bool forceClose)
+        {
             if (_steamService.IsSteamRunning())
             {
                 var closed = await _steamService.CloseSteamAsync(forceClose: forceClose);
+                if (!closed && !forceClose && ConfirmForceCloseAfterTimeoutAsync != null &&
+                    await ConfirmForceCloseAfterTimeoutAsync())
+                {
+                    closed = await _steamService.CloseSteamAsync(forceClose: true);
+                }
                 if (!closed)
                     return false;
+            }
+
+            if (BeforeAccountSwitchAsync != null)
+            {
+                try
+                {
+                    await BeforeAccountSwitchAsync(CurrentAccount);
+                }
+                catch (Exception ex)
+                {
+                    // A backup problem must not strand the user between accounts.
+                    AppLogger.Error("Before-account-switch operation failed; continuing with account switch.", ex);
+                }
             }
 
             try
@@ -175,7 +269,15 @@ namespace SteamSwitcher.Core
                     return false;
                 }
 
-                _registryHelper.SetAutoLoginUser(account.AccountName);
+                try
+                {
+                    _registryHelper.SetAutoLoginUser(account.AccountName);
+                }
+                catch
+                {
+                    TryRestoreLoginUsersBackup();
+                    throw;
+                }
 
                 account.MostRecent = true;
                 account.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -202,9 +304,13 @@ namespace SteamSwitcher.Core
             return _steamService.StartSteam(silent: silent);
         }
 
-        public bool LaunchGame(int appId, bool silent = false)
+        public bool LaunchGame(
+            int appId,
+            bool silent = false,
+            string? launchArguments = null,
+            bool startInBigPicture = false)
         {
-            return _steamService.StartGame(appId, silent);
+            return _steamService.StartGame(appId, silent, launchArguments, startInBigPicture);
         }
 
         private async Task<bool> UpdateLoginUsersVdfAsync(string activeSteamId)
@@ -216,7 +322,8 @@ namespace SteamSwitcher.Core
                 return false;
             }
 
-            var tempPath = loginUsersPath + ".steamswitch.tmp";
+            var tempPath = loginUsersPath + $".steamswitch.{Guid.NewGuid():N}.tmp";
+            var backupPath = loginUsersPath + ".steamswitch.bak";
 
             try
             {
@@ -254,8 +361,42 @@ namespace SteamSwitcher.Core
                 }
 
                 var content = _vdfParser.Serialize(data);
-                await File.WriteAllTextAsync(tempPath, content);
-                File.Move(tempPath, loginUsersPath, overwrite: true);
+                await using (var stream = new FileStream(
+                                 tempPath,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 16 * 1024,
+                                 FileOptions.Asynchronous | FileOptions.WriteThrough))
+                await using (var writer = new StreamWriter(stream))
+                {
+                    await writer.WriteAsync(content);
+                    await writer.FlushAsync();
+                    stream.Flush(flushToDisk: true);
+                }
+
+                var validation = _vdfParser.Parse(tempPath);
+                if (!validation.TryGetValue("users", out var validationUsers) ||
+                    validationUsers is not Dictionary<string, object>)
+                    throw new InvalidDataException("生成的 loginusers.vdf 未通过重新解析校验。");
+
+                var transientBackup = $"{backupPath}.{Guid.NewGuid():N}.tmp";
+                try
+                {
+                    File.Replace(tempPath, loginUsersPath, transientBackup, ignoreMetadataErrors: true);
+                    try
+                    {
+                        File.Move(transientBackup, backupPath, overwrite: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Warn($"loginusers.vdf 已更新，但上一版本备份轮换失败：{ex.Message}");
+                    }
+                }
+                finally
+                {
+                    try { if (File.Exists(transientBackup)) File.Delete(transientBackup); } catch { }
+                }
                 return true;
             }
             catch (Exception ex)
@@ -274,6 +415,30 @@ namespace SteamSwitcher.Core
                 {
                     AppLogger.Warn($"Failed to clean temporary VDF file {tempPath}: {ex.Message}");
                 }
+            }
+        }
+
+        private void TryRestoreLoginUsersBackup()
+        {
+            var loginUsersPath = _steamService.GetLoginUsersPath();
+            var backupPath = loginUsersPath + ".steamswitch.bak";
+            if (!File.Exists(loginUsersPath) || !File.Exists(backupPath))
+                return;
+
+            var temporaryPath = loginUsersPath + $".steamswitch.rollback.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.Copy(backupPath, temporaryPath, overwrite: false);
+                File.Replace(temporaryPath, loginUsersPath, null, ignoreMetadataErrors: true);
+                AppLogger.Warn("Registry update failed; loginusers.vdf was restored from the pre-switch backup.");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Failed to roll back loginusers.vdf after a registry update failure.", ex);
+            }
+            finally
+            {
+                try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch { }
             }
         }
 
@@ -434,6 +599,8 @@ namespace SteamSwitcher.Core
         {
             if (!_disposed)
             {
+                BeforeAccountSwitchAsync = null;
+                ConfirmForceCloseAfterTimeoutAsync = null;
                 _avatarDownloadCts?.Cancel();
                 _avatarDownloadCts?.Dispose();
                 _avatarDownloadCts = null;

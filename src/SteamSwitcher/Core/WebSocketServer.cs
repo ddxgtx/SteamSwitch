@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -16,6 +17,9 @@ namespace SteamSwitcher.Core
         private readonly ConcurrentDictionary<string, WebSocket> _clients = new();
         private CancellationTokenSource? _cts;
         private readonly int _port;
+        private readonly string _accessToken;
+        private const int MaxClients = 4;
+        private const int MaxMessageBytes = 1024 * 1024;
 
         public event EventHandler<(string action, JsonElement data)>? MessageReceived;
         public event EventHandler<string>? ClientConnected;
@@ -24,9 +28,12 @@ namespace SteamSwitcher.Core
         public bool IsRunning { get; private set; }
         public int ClientCount => _clients.Count;
 
-        public WebSocketServer(int port = 8081)
+        public WebSocketServer(int port, string accessToken)
         {
             _port = port;
+            _accessToken = !string.IsNullOrWhiteSpace(accessToken)
+                ? accessToken
+                : throw new ArgumentException("WebSocket access token is required.", nameof(accessToken));
         }
 
         public Task StartAsync()
@@ -60,7 +67,17 @@ namespace SteamSwitcher.Core
                 {
                     var context = await _listener.GetContextAsync();
 
-                    if (context.Request.IsWebSocketRequest)
+                    if (!IsAuthorized(context.Request))
+                    {
+                        context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                        context.Response.Close();
+                    }
+                    else if (_clients.Count >= MaxClients)
+                    {
+                        context.Response.StatusCode = (int)HttpStatusCode.TooManyRequests;
+                        context.Response.Close();
+                    }
+                    else if (context.Request.IsWebSocketRequest)
                     {
                         _ = HandleWebSocketAsync(context);
                     }
@@ -92,24 +109,33 @@ namespace SteamSwitcher.Core
             {
                 var buffer = new byte[16384];
 
-                while (ws.State == WebSocketState.Open)
+                var cancellationToken = _cts?.Token ?? CancellationToken.None;
+                while (ws.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
                 {
                     using var ms = new System.IO.MemoryStream();
                     WebSocketReceiveResult result;
                     do
                     {
-                        result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                        result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
                         if (result.MessageType == WebSocketMessageType.Close)
                         {
                             break;
                         }
                         ms.Write(buffer, 0, result.Count);
+                        if (ms.Length > MaxMessageBytes)
+                        {
+                            await ws.CloseAsync(
+                                WebSocketCloseStatus.MessageTooBig,
+                                "Message exceeds 1 MB limit.",
+                                cancellationToken);
+                            break;
+                        }
                     }
                     while (!result.EndOfMessage);
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+                        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cancellationToken);
                     }
                     else if (ms.Length > 0)
                     {
@@ -117,6 +143,10 @@ namespace SteamSwitcher.Core
                         ProcessMessage(message);
                     }
                 }
+            }
+            catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+            {
+                // Expected while the local control channel is shutting down.
             }
             catch (Exception ex)
             {
@@ -135,13 +165,13 @@ namespace SteamSwitcher.Core
         {
             try
             {
-                AppLogger.Info($"WebSocket message: {message}");
                 using var doc = JsonDocument.Parse(message);
                 var root = doc.RootElement;
 
                 if (root.TryGetProperty("action", out var actionElement))
                 {
                     var action = actionElement.GetString() ?? "";
+                    AppLogger.Info($"WebSocket action received: {action}, bytes={Encoding.UTF8.GetByteCount(message)}");
                     var dataCopy = root.Clone();
                     MessageReceived?.Invoke(this, (action, dataCopy));
                 }
@@ -164,7 +194,11 @@ namespace SteamSwitcher.Core
                 {
                     if (client.Value.State == WebSocketState.Open)
                     {
-                        await client.Value.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
+                        await client.Value.SendAsync(
+                            segment,
+                            WebSocketMessageType.Text,
+                            true,
+                            _cts?.Token ?? CancellationToken.None);
                     }
                 }
                 catch (Exception ex)
@@ -180,11 +214,28 @@ namespace SteamSwitcher.Core
             await BroadcastAsync(message);
         }
 
+        private bool IsAuthorized(HttpListenerRequest request)
+        {
+            var suppliedToken = request.QueryString["token"];
+            if (string.IsNullOrEmpty(suppliedToken))
+                return false;
+
+            var expectedBytes = Encoding.UTF8.GetBytes(_accessToken);
+            var suppliedBytes = Encoding.UTF8.GetBytes(suppliedToken);
+            return expectedBytes.Length == suppliedBytes.Length &&
+                   CryptographicOperations.FixedTimeEquals(expectedBytes, suppliedBytes);
+        }
+
         public void Stop()
         {
             _cts?.Cancel();
-            _listener?.Stop();
+            var listener = _listener;
             _listener = null;
+            if (listener != null)
+            {
+                try { listener.Stop(); } catch (ObjectDisposedException) { }
+                try { listener.Close(); } catch (ObjectDisposedException) { }
+            }
             IsRunning = false;
             AppLogger.Info($"WebSocketServer stopped on port {_port}.");
         }

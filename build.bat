@@ -23,12 +23,28 @@ echo.
 echo Building Steam Switch...
 echo.
 
-REM Build the project
-dotnet build src\SteamSwitcher\SteamSwitcher.csproj -c Release
+REM Restore, build and test the complete solution
+dotnet restore SteamSwitch.sln --configfile NuGet.Config
+if errorlevel 1 (
+    echo.
+    echo RESTORE FAILED!
+    pause
+    exit /b 1
+)
+
+dotnet build SteamSwitch.sln -c Release --no-restore
 
 if errorlevel 1 (
     echo.
     echo BUILD FAILED!
+    pause
+    exit /b 1
+)
+
+dotnet test tests\SteamSwitcher.Tests\SteamSwitcher.Tests.csproj -c Release --no-build
+if errorlevel 1 (
+    echo.
+    echo TESTS FAILED!
     pause
     exit /b 1
 )
@@ -38,7 +54,7 @@ echo ========================================
 echo Build successful!
 echo ========================================
 echo.
-echo Output location: src\SteamSwitcher\bin\Release\net8.0-windows\
+echo Output location: src\SteamSwitcher\bin\Release\net8.0-windows10.0.19041.0\
 echo.
 
 REM Ask if user wants to publish as single file
@@ -46,7 +62,7 @@ set /p PUBLISH="Do you want to publish as a single executable? (Y/N): "
 if /i "%PUBLISH%"=="Y" (
     echo.
     echo Publishing single file executable...
-    dotnet publish src\SteamSwitcher\SteamSwitcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+    dotnet publish src\SteamSwitcher\SteamSwitcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish_zip
     
     if errorlevel 1 (
         echo.
@@ -59,7 +75,7 @@ if /i "%PUBLISH%"=="Y" (
     echo ========================================
     echo Published successfully!
     echo ========================================
-    echo Output: src\SteamSwitcher\bin\Release\net8.0-windows\win-x64\publish\SteamSwitch.exe
+    echo Output: publish_zip\SteamSwitch.exe
 )
 
 echo.
