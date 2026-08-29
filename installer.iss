@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Steam Switch"
-#define MyAppVersion "3.1.1"
+#define MyAppVersion "3.1.2"
 #define MyAppPublisher "ddxgtx"
 #define MyAppURL "https://github.com/ddxgtx/SteamSwitch"
 #define MyAppExeName "SteamSwitch.exe"
@@ -72,3 +72,23 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-autostart"; RunOnce
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+
+[Code]
+procedure RemoveMainDesktopShortcuts;
+begin
+  { Exact filename only: account shortcuts use "Steam - ..." and games use their titles. }
+  DeleteFile(ExpandConstant('{userdesktop}\{#MyAppName}.lnk'));
+  DeleteFile(ExpandConstant('{commondesktop}\{#MyAppName}.lnk'));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    RemoveMainDesktopShortcuts;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    RemoveMainDesktopShortcuts;
+end;

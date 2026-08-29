@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-08-29
+
+### Fixed
+- 升级安装前精确清理用户桌面与公共桌面中的旧 `Steam Switch.lnk`，再根据安装选项只创建一个主程序快捷方式，修复桌面出现两个相同图标。
+- 卸载时同步清理两个安装范围遗留的主程序快捷方式，不影响账号和游戏快捷入口。
+
 ## [3.1.1] - 2026-08-29
 
 ### Fixed
