@@ -229,6 +229,13 @@ namespace SteamSwitcher.Core
                 var color = ParseAbgr(_color, _opacity, mode);
                 var desired = new AppliedAppearance(mode, color);
 
+                // Dynamic states are polled frequently, but unchanged taskbars do not need a
+                // forced DWM frame redraw every 300 ms. Reassert the same state every ~6 seconds
+                // to recover from shell repaints while avoiding visible flicker and excess work.
+                var periodicReassert = _timerTick == 0 || _timerTick % 20 == 0;
+                if (!periodicReassert && _applied.TryGetValue(handle, out var current) && current == desired)
+                    continue;
+
                 if (Apply(handle, mode, color))
                     _applied[handle] = desired;
             }

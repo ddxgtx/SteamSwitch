@@ -24,10 +24,15 @@ namespace SteamSwitcher.Core
         public event EventHandler? ItemsChanged;
 
         public QuickLaunchService()
-        {
-            _configPath = Path.Combine(
+            : this(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "SteamSwitch", "quicklaunch.json");
+                "SteamSwitch", "quicklaunch.json"))
+        {
+        }
+
+        internal QuickLaunchService(string configPath)
+        {
+            _configPath = configPath;
         }
 
         public async Task LoadAsync()
@@ -52,13 +57,15 @@ namespace SteamSwitcher.Core
         {
             try
             {
-                List<QuickLaunchItem> snapshot;
-                lock (_saveLock)
-                    snapshot = _items.Values.OrderBy(x => x.SortOrder).ToList();
-
                 await _saveGate.WaitAsync();
                 try
                 {
+                    // Snapshot under the serialization gate so a delayed older caller cannot
+                    // overwrite the file after a newer mutation has already been persisted.
+                    List<QuickLaunchItem> snapshot;
+                    lock (_saveLock)
+                        snapshot = _items.Values.OrderBy(x => x.SortOrder).Select(CloneItem).ToList();
+
                     await AtomicJsonFile.WriteAsync(
                         _configPath,
                         snapshot,
@@ -83,11 +90,14 @@ namespace SteamSwitcher.Core
                 ExecutablePath = launchPath,
                 Arguments = args,
                 IconPath = iconPath ?? ExtractIconPath(launchPath),
-                WorkingDirectory = ResolveWorkingDirectory(launchPath),
-                SortOrder = _items.Count
+                WorkingDirectory = ResolveWorkingDirectory(launchPath)
             };
 
-            _items[item.Id] = item;
+            lock (_saveLock)
+            {
+                item.SortOrder = _items.Count;
+                _items[item.Id] = item;
+            }
             await SaveAsync();
             ItemsChanged?.Invoke(this, EventArgs.Empty);
             return item;
@@ -95,7 +105,9 @@ namespace SteamSwitcher.Core
 
         public async Task RemoveAsync(string id)
         {
-            if (_items.TryRemove(id, out _))
+            bool removed;
+            lock (_saveLock) removed = _items.TryRemove(id, out _);
+            if (removed)
             {
                 await SaveAsync();
                 ItemsChanged?.Invoke(this, EventArgs.Empty);
@@ -104,9 +116,17 @@ namespace SteamSwitcher.Core
 
         public async Task TogglePinAsync(string id)
         {
-            if (_items.TryGetValue(id, out var item))
+            var changed = false;
+            lock (_saveLock)
             {
-                item.IsPinned = !item.IsPinned;
+                if (_items.TryGetValue(id, out var item))
+                {
+                    item.IsPinned = !item.IsPinned;
+                    changed = true;
+                }
+            }
+            if (changed)
+            {
                 await SaveAsync();
                 ItemsChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -114,11 +134,12 @@ namespace SteamSwitcher.Core
 
         public async Task ReorderAsync(List<string> orderedIds)
         {
-            for (int i = 0; i < orderedIds.Count; i++)
+            lock (_saveLock)
             {
-                if (_items.TryGetValue(orderedIds[i], out var item))
+                for (int i = 0; i < orderedIds.Count; i++)
                 {
-                    item.SortOrder = i;
+                    if (_items.TryGetValue(orderedIds[i], out var item))
+                        item.SortOrder = i;
                 }
             }
             await SaveAsync();
@@ -139,6 +160,19 @@ namespace SteamSwitcher.Core
         {
             return _items.TryGetValue(id, out var item) ? item : null;
         }
+
+        private static QuickLaunchItem CloneItem(QuickLaunchItem value) => new()
+        {
+            Id = value.Id,
+            Name = value.Name,
+            ExecutablePath = value.ExecutablePath,
+            Arguments = value.Arguments,
+            IconPath = value.IconPath,
+            WorkingDirectory = value.WorkingDirectory,
+            IsPinned = value.IsPinned,
+            SortOrder = value.SortOrder,
+            DateAdded = value.DateAdded
+        };
 
         public bool Launch(QuickLaunchItem item)
         {

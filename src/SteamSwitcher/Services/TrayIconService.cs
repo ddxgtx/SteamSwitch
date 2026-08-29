@@ -21,10 +21,14 @@ namespace SteamSwitcher.Services
         private TrayMenuPalette _palette = TrayMenuPalette.FromApplication();
         private ObservableCollection<AccountViewModel>? _accounts;
         private AccountViewModel? _currentAccount;
+        private bool _taskbarLyricsEnabled;
+        private bool _taskbarAppearanceEnabled;
 
         public event EventHandler<string>? AccountSelected;
         public event EventHandler? LaunchSteamRequested;
         public event EventHandler? ExitRequested;
+        public event EventHandler<bool>? ToggleTaskbarLyricsRequested;
+        public event EventHandler<bool>? ToggleTaskbarAppearanceRequested;
 
         public TrayIconService(Window ownerWindow)
         {
@@ -154,6 +158,12 @@ namespace SteamSwitcher.Services
             _contextMenu.Items.Add(exitItem);
         }
 
+        public void UpdateFeatureStates(bool taskbarLyricsEnabled, bool taskbarAppearanceEnabled)
+        {
+            _taskbarLyricsEnabled = taskbarLyricsEnabled;
+            _taskbarAppearanceEnabled = taskbarAppearanceEnabled;
+        }
+
         private void ShowContextMenu()
         {
             System.Windows.Application.Current.Dispatcher.Invoke(() =>
@@ -167,6 +177,10 @@ namespace SteamSwitcher.Services
                     refresh: null,
                     detach: null,
                     showDetach: false,
+                    isTaskbarLyricsEnabled: _taskbarLyricsEnabled,
+                    isTaskbarAppearanceEnabled: _taskbarAppearanceEnabled,
+                    toggleTaskbarLyrics: enabled => ToggleTaskbarLyricsRequested?.Invoke(this, enabled),
+                    toggleTaskbarAppearance: enabled => ToggleTaskbarAppearanceRequested?.Invoke(this, enabled),
                     exit: () => ExitRequested?.Invoke(this, EventArgs.Empty));
 
                 menu.IsOpen = true;

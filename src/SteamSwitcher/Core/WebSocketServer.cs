@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Net;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
@@ -15,7 +16,11 @@ namespace SteamSwitcher.Core
     {
         private HttpListener? _listener;
         private readonly ConcurrentDictionary<string, WebSocket> _clients = new();
+        private readonly ConcurrentDictionary<string, Task> _clientTasks = new();
+        private readonly SemaphoreSlim _clientSlots = new(MaxClients, MaxClients);
+        private readonly SemaphoreSlim _broadcastGate = new(1, 1);
         private CancellationTokenSource? _cts;
+        private Task? _listenerTask;
         private readonly int _port;
         private readonly string _accessToken;
         private const int MaxClients = 4;
@@ -49,7 +54,7 @@ namespace SteamSwitcher.Core
                 _listener.Start();
                 IsRunning = true;
                 AppLogger.Info($"WebSocketServer started on port {_port}.");
-                _ = ListenAsync(_cts.Token);
+                _listenerTask = ListenAsync(_cts.Token);
                 return Task.CompletedTask;
             }
             catch (Exception ex)
@@ -72,14 +77,28 @@ namespace SteamSwitcher.Core
                         context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
                         context.Response.Close();
                     }
-                    else if (_clients.Count >= MaxClients)
-                    {
-                        context.Response.StatusCode = (int)HttpStatusCode.TooManyRequests;
-                        context.Response.Close();
-                    }
                     else if (context.Request.IsWebSocketRequest)
                     {
-                        _ = HandleWebSocketAsync(context);
+                        if (!_clientSlots.Wait(0))
+                        {
+                            context.Response.StatusCode = (int)HttpStatusCode.TooManyRequests;
+                            context.Response.Close();
+                            continue;
+                        }
+
+                        var operationId = Guid.NewGuid().ToString("N");
+                        var clientTask = HandleWebSocketAsync(context, operationId);
+                        _clientTasks[operationId] = clientTask;
+                        _ = clientTask.ContinueWith(
+                            completed =>
+                            {
+                                _clientTasks.TryRemove(operationId, out _);
+                                if (completed.IsFaulted)
+                                    AppLogger.Error($"WebSocket client task failed: {operationId}", completed.Exception);
+                            },
+                            CancellationToken.None,
+                            TaskContinuationOptions.ExecuteSynchronously,
+                            TaskScheduler.Default);
                     }
                     else
                     {
@@ -87,7 +106,11 @@ namespace SteamSwitcher.Core
                         context.Response.Close();
                     }
                 }
-                catch (Exception ex) when (!ct.IsCancellationRequested)
+                catch (Exception) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
                 {
                     AppLogger.Error("WebSocket listen error.", ex);
                     System.Diagnostics.Debug.WriteLine($"WebSocket listen error: {ex.Message}");
@@ -95,18 +118,20 @@ namespace SteamSwitcher.Core
             }
         }
 
-        private async Task HandleWebSocketAsync(HttpListenerContext context)
+        private async Task HandleWebSocketAsync(HttpListenerContext context, string operationId)
         {
-            var wsContext = await context.AcceptWebSocketAsync(null);
-            var ws = wsContext.WebSocket;
-            var clientId = Guid.NewGuid().ToString();
-
-            _clients.TryAdd(clientId, ws);
-            AppLogger.Info($"WebSocket client connected: {clientId}");
-            ClientConnected?.Invoke(this, clientId);
+            WebSocket? ws = null;
+            var clientId = operationId;
 
             try
             {
+                var wsContext = await context.AcceptWebSocketAsync(null);
+                ws = wsContext.WebSocket;
+                if (!_clients.TryAdd(clientId, ws))
+                    throw new InvalidOperationException("Unable to register WebSocket client.");
+
+                AppLogger.Info($"WebSocket client connected: {clientId}");
+                ClientConnected?.Invoke(this, clientId);
                 var buffer = new byte[16384];
 
                 var cancellationToken = _cts?.Token ?? CancellationToken.None;
@@ -154,10 +179,13 @@ namespace SteamSwitcher.Core
             }
             finally
             {
-                _clients.TryRemove(clientId, out _);
-                AppLogger.Info($"WebSocket client disconnected: {clientId}");
-                ClientDisconnected?.Invoke(this, clientId);
-                ws.Dispose();
+                if (_clients.TryRemove(clientId, out _))
+                {
+                    AppLogger.Info($"WebSocket client disconnected: {clientId}");
+                    ClientDisconnected?.Invoke(this, clientId);
+                }
+                ws?.Dispose();
+                _clientSlots.Release();
             }
         }
 
@@ -187,24 +215,35 @@ namespace SteamSwitcher.Core
         {
             var data = Encoding.UTF8.GetBytes(message);
             var segment = new ArraySegment<byte>(data);
-
-            foreach (var client in _clients)
+            await _broadcastGate.WaitAsync(_cts?.Token ?? CancellationToken.None);
+            try
             {
-                try
+                foreach (var client in _clients)
                 {
-                    if (client.Value.State == WebSocketState.Open)
+                    try
                     {
-                        await client.Value.SendAsync(
-                            segment,
-                            WebSocketMessageType.Text,
-                            true,
-                            _cts?.Token ?? CancellationToken.None);
+                        if (client.Value.State == WebSocketState.Open)
+                        {
+                            await client.Value.SendAsync(
+                                segment,
+                                WebSocketMessageType.Text,
+                                true,
+                                _cts?.Token ?? CancellationToken.None);
+                        }
+                    }
+                    catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Error($"Broadcast failed for client {client.Key}.", ex);
                     }
                 }
-                catch (Exception ex)
-                {
-                    AppLogger.Error($"Broadcast failed for client {client.Key}.", ex);
-                }
+            }
+            finally
+            {
+                _broadcastGate.Release();
             }
         }
 
@@ -236,6 +275,10 @@ namespace SteamSwitcher.Core
                 try { listener.Stop(); } catch (ObjectDisposedException) { }
                 try { listener.Close(); } catch (ObjectDisposedException) { }
             }
+            foreach (var client in _clients.Values)
+            {
+                try { client.Abort(); } catch (ObjectDisposedException) { }
+            }
             IsRunning = false;
             AppLogger.Info($"WebSocketServer stopped on port {_port}.");
         }
@@ -243,6 +286,10 @@ namespace SteamSwitcher.Core
         public void Dispose()
         {
             Stop();
+            try { _listenerTask?.Wait(TimeSpan.FromSeconds(1)); }
+            catch (AggregateException ex) { AppLogger.Warn($"WebSocket listener stopped with an error: {ex.GetBaseException().Message}"); }
+            try { Task.WaitAll(_clientTasks.Values.ToArray(), TimeSpan.FromSeconds(1)); }
+            catch (AggregateException ex) { AppLogger.Warn($"WebSocket clients stopped with an error: {ex.GetBaseException().Message}"); }
             _cts?.Dispose();
 
             foreach (var client in _clients)

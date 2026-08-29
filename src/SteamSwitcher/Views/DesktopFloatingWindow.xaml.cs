@@ -62,6 +62,8 @@ namespace SteamSwitcher.Views
         public event EventHandler<bool>? ToggleDesktopFloatingRequested;
         public event EventHandler<bool>? ToggleDesktopFloatingTopmostRequested;
         public event EventHandler<bool>? ToggleTaskbarPinnedRequested;
+        public event EventHandler<bool>? ToggleTaskbarLyricsRequested;
+        public event EventHandler<bool>? ToggleTaskbarAppearanceRequested;
         public event EventHandler? ExitRequested;
         public event EventHandler<IReadOnlyList<string>>? PanelItemOrderChanged;
         public event EventHandler<IReadOnlyList<string>>? AccountOrderChanged;
@@ -440,6 +442,10 @@ namespace SteamSwitcher.Views
                 toggleDesktopFloating: enabled => ToggleDesktopFloatingRequested?.Invoke(this, enabled),
                 toggleDesktopFloatingTopmost: enabled => ToggleDesktopFloatingTopmostRequested?.Invoke(this, enabled),
                 toggleTaskbarPinned: enabled => ToggleTaskbarPinnedRequested?.Invoke(this, enabled),
+                isTaskbarLyricsEnabled: _viewModel?.TaskbarLyricsEnabled ?? false,
+                isTaskbarAppearanceEnabled: _viewModel?.TaskbarAppearanceEnabled ?? false,
+                toggleTaskbarLyrics: enabled => ToggleTaskbarLyricsRequested?.Invoke(this, enabled),
+                toggleTaskbarAppearance: enabled => ToggleTaskbarAppearanceRequested?.Invoke(this, enabled),
                 exit: () => ExitRequested?.Invoke(this, EventArgs.Empty)
             );
             menu.IsOpen = true;

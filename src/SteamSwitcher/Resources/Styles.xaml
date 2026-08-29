@@ -656,7 +656,6 @@
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <ToggleButton x:Name="HeaderToggle" Height="40" Padding="12,0"
                                           Background="Transparent" BorderThickness="0" Cursor="Hand"
-                                          FocusVisualStyle="{x:Null}"
                                           IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
                                           Content="{TemplateBinding Header}">
                                 <ToggleButton.Template>

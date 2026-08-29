@@ -14,11 +14,11 @@ namespace SteamSwitcher.Services
         public bool AutoStartSteam { get; set; } = true;
         public bool MinimizeToTray { get; set; } = true;
         public bool StartWithWindows { get; set; }
-        public bool StartMinimizedToTray { get; set; } = false;
         public bool PlaySoundOnSwitch { get; set; } = true;
         public bool ShowSwitchNotification { get; set; } = true;
         public bool TaskbarPinned { get; set; }
         public TaskbarPosition TaskbarPosition { get; set; } = TaskbarPosition.Right;
+        public int TaskbarMonitorIndex { get; set; }
         public int TaskbarOffsetX { get; set; }
         public int TaskbarOffsetY { get; set; }
         public int TaskbarWindowSize { get; set; } = 2;
@@ -81,7 +81,7 @@ namespace SteamSwitcher.Services
         public bool AutoScanGamesOnStartup { get; set; }
         public bool ConfirmBeforeGameLaunch { get; set; } = true;
         public bool SilentCloseSteam { get; set; } = true;
-        public bool UseBetaUpdateChannel { get; set; } = true;
+        public bool UseBetaUpdateChannel { get; set; }
         public bool CheckUpdateOnStartup { get; set; } = true;
         public bool AutoInstallUpdates { get; set; }
         public bool ShowNotificationOnSteamClose { get; set; }
@@ -179,7 +179,8 @@ namespace SteamSwitcher.Services
             settings.DesktopEnhance ??= new DesktopEnhanceSettings();
             settings.DesktopEnhance.IdleSeconds = Math.Clamp(settings.DesktopEnhance.IdleSeconds, 5, 300);
             settings.DesktopEnhance.AnimationDuration = Math.Clamp(settings.DesktopEnhance.AnimationDuration, 200, 1000);
-            settings.TaskbarLyricsWidth = Math.Clamp(settings.TaskbarLyricsWidth, 240, 520);
+            settings.TaskbarMonitorIndex = Math.Clamp(settings.TaskbarMonitorIndex, 0, 8);
+            settings.TaskbarLyricsWidth = Math.Clamp(settings.TaskbarLyricsWidth, 240, 720);
             settings.TaskbarLyricsPollingIntervalMs = Math.Clamp(settings.TaskbarLyricsPollingIntervalMs, 60, 1000);
             settings.TaskbarLyricsVerticalOffset = Math.Clamp(settings.TaskbarLyricsVerticalOffset, -12, 12);
             settings.TaskbarLyricsFontSize = settings.TaskbarLyricsFontSize <= 12

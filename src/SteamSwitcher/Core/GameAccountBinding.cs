@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,11 +36,16 @@ namespace SteamSwitcher.Core
         public string ConfigPath => _configPath;
 
         public GameAccountBinding()
-        {
-            _configPath = Path.Combine(
+            : this(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "SteamSwitch",
-                "gamebindings.json");
+                "gamebindings.json"))
+        {
+        }
+
+        internal GameAccountBinding(string configPath)
+        {
+            _configPath = configPath;
         }
 
         public async Task LoadAsync()
@@ -68,15 +74,17 @@ namespace SteamSwitcher.Core
         {
             try
             {
-                Dictionary<int, GameBinding> snapshot;
-                lock (_saveLock)
-                {
-                    snapshot = new Dictionary<int, GameBinding>(_bindings);
-                }
-
                 await _saveGate.WaitAsync();
                 try
                 {
+                    // Capture only after entering the write gate. Otherwise an older caller can
+                    // take a stale snapshot, lose the scheduling race, and overwrite a newer save.
+                    Dictionary<int, GameBinding> snapshot;
+                    lock (_saveLock)
+                    {
+                        snapshot = _bindings.ToDictionary(pair => pair.Key, pair => CloneBinding(pair.Value));
+                    }
+
                     await AtomicJsonFile.WriteAsync(
                         _configPath,
                         snapshot,
@@ -105,50 +113,56 @@ namespace SteamSwitcher.Core
 
         public async Task SetBindingAsync(int appId, string gameName, string accountSteamId, string accountName)
         {
-            var previous = GetBinding(appId);
-            _bindings[appId] = new GameBinding
+            lock (_saveLock)
             {
-                AppId = appId,
-                GameName = gameName,
-                AccountSteamId = accountSteamId,
-                AccountName = accountName,
-                AutoSwitch = true,
-                LastPlayed = previous?.LastPlayed,
-                LaunchArguments = previous?.LaunchArguments ?? string.Empty,
-                BackupBeforeLaunch = previous?.BackupBeforeLaunch ?? false,
-                BackupAfterExit = previous?.BackupAfterExit ?? false,
-                CloseSteamAfterExit = previous?.CloseSteamAfterExit ?? false,
-                StartInBigPicture = previous?.StartInBigPicture ?? false
-            };
+                var previous = GetBinding(appId);
+                _bindings[appId] = new GameBinding
+                {
+                    AppId = appId,
+                    GameName = gameName,
+                    AccountSteamId = accountSteamId,
+                    AccountName = accountName,
+                    AutoSwitch = true,
+                    LastPlayed = previous?.LastPlayed,
+                    LaunchArguments = previous?.LaunchArguments ?? string.Empty,
+                    BackupBeforeLaunch = previous?.BackupBeforeLaunch ?? false,
+                    BackupAfterExit = previous?.BackupAfterExit ?? false,
+                    CloseSteamAfterExit = previous?.CloseSteamAfterExit ?? false,
+                    StartInBigPicture = previous?.StartInBigPicture ?? false
+                };
+            }
             await SaveAsync();
             BindingsChanged?.Invoke(this, EventArgs.Empty);
         }
 
         public async Task RemoveBindingAsync(int appId)
         {
-            _bindings.TryRemove(appId, out _);
+            lock (_saveLock) _bindings.TryRemove(appId, out _);
             await SaveAsync();
             BindingsChanged?.Invoke(this, EventArgs.Empty);
         }
 
         public async Task RecordPlayAsync(int appId, string accountSteamId, string accountName)
         {
-            if (_bindings.TryGetValue(appId, out var binding))
+            lock (_saveLock)
             {
-                binding.AccountSteamId = accountSteamId;
-                binding.AccountName = accountName;
-                binding.LastPlayed = DateTime.Now;
-            }
-            else
-            {
-                _bindings[appId] = new GameBinding
+                if (_bindings.TryGetValue(appId, out var binding))
                 {
-                    AppId = appId,
-                    AccountSteamId = accountSteamId,
-                    AccountName = accountName,
-                    AutoSwitch = true,
-                    LastPlayed = DateTime.Now
-                };
+                    binding.AccountSteamId = accountSteamId;
+                    binding.AccountName = accountName;
+                    binding.LastPlayed = DateTime.Now;
+                }
+                else
+                {
+                    _bindings[appId] = new GameBinding
+                    {
+                        AppId = appId,
+                        AccountSteamId = accountSteamId,
+                        AccountName = accountName,
+                        AutoSwitch = true,
+                        LastPlayed = DateTime.Now
+                    };
+                }
             }
             await SaveAsync();
             BindingsChanged?.Invoke(this, EventArgs.Empty);
@@ -156,9 +170,17 @@ namespace SteamSwitcher.Core
 
         public async Task SetAutoSwitchAsync(int appId, bool autoSwitch)
         {
-            if (_bindings.TryGetValue(appId, out var binding))
+            var changed = false;
+            lock (_saveLock)
             {
-                binding.AutoSwitch = autoSwitch;
+                if (_bindings.TryGetValue(appId, out var binding))
+                {
+                    binding.AutoSwitch = autoSwitch;
+                    changed = true;
+                }
+            }
+            if (changed)
+            {
                 await SaveAsync();
             }
         }
@@ -171,17 +193,35 @@ namespace SteamSwitcher.Core
             bool closeSteamAfterExit,
             bool startInBigPicture)
         {
-            if (!_bindings.TryGetValue(appId, out var binding))
-                throw new InvalidOperationException("请先为该游戏保存账号绑定。");
+            lock (_saveLock)
+            {
+                if (!_bindings.TryGetValue(appId, out var binding))
+                    throw new InvalidOperationException("请先为该游戏保存账号绑定。");
 
-            binding.LaunchArguments = launchArguments.Trim();
-            binding.BackupBeforeLaunch = backupBeforeLaunch;
-            binding.BackupAfterExit = backupAfterExit;
-            binding.CloseSteamAfterExit = closeSteamAfterExit;
-            binding.StartInBigPicture = startInBigPicture;
+                binding.LaunchArguments = launchArguments.Trim();
+                binding.BackupBeforeLaunch = backupBeforeLaunch;
+                binding.BackupAfterExit = backupAfterExit;
+                binding.CloseSteamAfterExit = closeSteamAfterExit;
+                binding.StartInBigPicture = startInBigPicture;
+            }
             await SaveAsync();
             BindingsChanged?.Invoke(this, EventArgs.Empty);
         }
+
+        private static GameBinding CloneBinding(GameBinding value) => new()
+        {
+            AppId = value.AppId,
+            GameName = value.GameName,
+            AccountSteamId = value.AccountSteamId,
+            AccountName = value.AccountName,
+            AutoSwitch = value.AutoSwitch,
+            LastPlayed = value.LastPlayed,
+            LaunchArguments = value.LaunchArguments,
+            BackupBeforeLaunch = value.BackupBeforeLaunch,
+            BackupAfterExit = value.BackupAfterExit,
+            CloseSteamAfterExit = value.CloseSteamAfterExit,
+            StartInBigPicture = value.StartInBigPicture
+        };
 
     }
 }

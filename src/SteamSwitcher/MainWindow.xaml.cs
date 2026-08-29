@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System;
 using System.ComponentModel;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -35,9 +37,12 @@ namespace SteamSwitcher
         private bool _accountSearchPlaceholder = true;
         private bool _exitRequested;
         private bool _shutdownStarted;
-        private readonly bool _startHidden;
-        private string[] _startupArguments;
+        private bool _isInteractiveSession;
         private bool _isInitialized;
+        private Task? _initializationTask;
+        private readonly Queue<string[]> _pendingExternalRequests = new();
+        private readonly SemaphoreSlim _externalRequestGate = new(1, 1);
+        private readonly SemaphoreSlim _accountInteractionGate = new(1, 1);
         private const string GameSearchHint = "搜索游戏、AppID 或启动账号...";
         private const string AccountSearchHint = "搜索账号名称或登录名...";
         private string _accountFilterMode = "All";
@@ -71,8 +76,10 @@ namespace SteamSwitcher
 
         public MainWindow(bool startHidden = false, string[]? startupArguments = null)
         {
-            _startHidden = startHidden;
-            _startupArguments = startupArguments ?? Array.Empty<string>();
+            _isInteractiveSession = !startHidden;
+            var initialArguments = startupArguments ?? Array.Empty<string>();
+            if (ContainsActionRequest(initialArguments))
+                _pendingExternalRequests.Enqueue(initialArguments.ToArray());
             _viewModel = new MainViewModel();
             DataContext = _viewModel;
 
@@ -81,24 +88,16 @@ namespace SteamSwitcher
             ApplyAccountSort();
             _desktopIconService.IconVisibilityChanged += OnDesktopIconVisibilityChanged;
             _desktopIconService.CountdownChanged += OnDesktopIconCountdownChanged;
-            if (_viewModel.DesktopIconsHiddenByApp)
-            {
-                if (_desktopIconService.RecoverIconsAfterUnexpectedShutdown())
-                    _viewModel.DesktopIconsHiddenByApp = false;
-            }
+            if (_desktopIconService.RecoverIconsAfterUnexpectedShutdown(_viewModel.DesktopIconsHiddenByApp))
+                _viewModel.DesktopIconsHiddenByApp = false;
             SyncDesktopEnhanceControls();
             ConfigureDesktopEnhance();
-
-            if (_startHidden)
-            {
-                ShowActivated = false;
-                ShowInTaskbar = false;
-                Opacity = 0;
-            }
 
             _trayIcon = new TrayIconService(this);
             _trayIcon.AccountSelected += OnTrayAccountSelected;
             _trayIcon.LaunchSteamRequested += OnTrayLaunchSteamRequested;
+            _trayIcon.ToggleTaskbarLyricsRequested += (s, enabled) => SetTaskbarLyricsEnabled(enabled);
+            _trayIcon.ToggleTaskbarAppearanceRequested += (s, enabled) => SetTaskbarAppearanceEnabled(enabled);
             _trayIcon.ExitRequested += (s, e) => RequestExit();
             _viewModel.GetAccountManager().CurrentAccountChanged += OnCurrentAccountChanged;
             _viewModel.GetAccountManager().ConfirmForceCloseAfterTimeoutAsync = ConfirmForceCloseAfterTimeoutAsync;
@@ -112,6 +111,12 @@ namespace SteamSwitcher
             {
                 Dispatcher.Invoke(() =>
                 {
+                    if (!_isInteractiveSession)
+                    {
+                        _trayIcon.ShowNotification("Steam Switch", "发现新版本，可打开主界面检查更新", 2000);
+                        return;
+                    }
+
                     using var updateService = new UpdateService();
                     var dialog = new Views.UpdateDialog(updateService, updateInfo);
                     dialog.Owner = this;
@@ -219,18 +224,39 @@ namespace SteamSwitcher
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            if (_startHidden)
+            EnterInteractiveMode();
+            await EnsureInitializedAsync();
+        }
+
+        public async void StartInBackground()
+        {
+            try
             {
-                Hide();
-                Opacity = 1;
-                ShowInTaskbar = true;
+                await EnsureInitializedAsync();
             }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Background startup failed.", ex);
+                Application.Current.Shutdown(-1);
+            }
+        }
+
+        private Task EnsureInitializedAsync()
+        {
+            return _initializationTask ??= InitializeCoreAsync();
+        }
+
+        private async Task InitializeCoreAsync()
+        {
+            if (_isInitialized)
+                return;
 
             ApplyNativeWindowAppearance();
 
             await _viewModel.InitializeAsync();
             _isInitialized = true;
             _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+            SyncTrayFeatureStates();
 
             GameSearchBox.Text = GameSearchHint;
             GameSearchBox.Foreground = (Brush)Application.Current.Resources["SearchPlaceholderFgBrush"];
@@ -264,14 +290,22 @@ namespace SteamSwitcher
             }
 
             SwitchToAccounts();
-            if (_startupArguments.Any(argument =>
-                    string.Equals(argument, "--switch-account", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(argument, "--launch-game", StringComparison.OrdinalIgnoreCase)))
+            while (_pendingExternalRequests.Count > 0)
             {
-                var arguments = _startupArguments;
-                _startupArguments = Array.Empty<string>();
-                await HandleExternalRequestAsync(arguments);
+                var arguments = _pendingExternalRequests.Dequeue();
+                await ProcessExternalRequestSerializedAsync(arguments);
             }
+        }
+
+        private static bool ContainsActionRequest(string[] arguments) =>
+            arguments.Any(argument =>
+                string.Equals(argument, "--switch-account", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(argument, "--launch-game", StringComparison.OrdinalIgnoreCase));
+
+        private void EnterInteractiveMode()
+        {
+            _isInteractiveSession = true;
+            App.SuppressFatalDialogs = false;
         }
 
         public void ActivateFromExternalRequest()
@@ -282,6 +316,7 @@ namespace SteamSwitcher
                 return;
             }
 
+            EnterInteractiveMode();
             ShowInTaskbar = true;
             Show();
             if (WindowState == WindowState.Minimized)
@@ -296,11 +331,6 @@ namespace SteamSwitcher
                 _ = Dispatcher.BeginInvoke(new Action(() => HandleExternalRequest(arguments)));
                 return;
             }
-            await HandleExternalRequestAsync(arguments);
-        }
-
-        private async Task HandleExternalRequestAsync(string[] arguments)
-        {
             if (arguments.Any(argument => string.Equals(
                     argument, "--shutdown-for-update", StringComparison.OrdinalIgnoreCase)))
             {
@@ -310,9 +340,28 @@ namespace SteamSwitcher
 
             if (!_isInitialized)
             {
-                _startupArguments = arguments;
+                _pendingExternalRequests.Enqueue(arguments.ToArray());
                 return;
             }
+
+            await ProcessExternalRequestSerializedAsync(arguments);
+        }
+
+        private async Task ProcessExternalRequestSerializedAsync(string[] arguments)
+        {
+            await _externalRequestGate.WaitAsync();
+            try
+            {
+                await ProcessExternalRequestCoreAsync(arguments);
+            }
+            finally
+            {
+                _externalRequestGate.Release();
+            }
+        }
+
+        private async Task ProcessExternalRequestCoreAsync(string[] arguments)
+        {
 
             var switchIndex = Array.FindIndex(arguments, argument =>
                 string.Equals(argument, "--switch-account", StringComparison.OrdinalIgnoreCase));
@@ -331,6 +380,7 @@ namespace SteamSwitcher
                     string.Equals(argument, "--launch-steam", StringComparison.OrdinalIgnoreCase));
                 await _viewModel.SwitchAccountBySteamIdAsync(steamId, launchSteam);
                 _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+                SyncTrayFeatureStates();
                 return;
             }
 
@@ -1243,6 +1293,13 @@ namespace SteamSwitcher
         {
         }
 
+        private void TaskbarMonitor_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_viewModel == null || sender is not ComboBox combo || combo.SelectedIndex < 0) return;
+            _viewModel.TaskbarMonitorIndex = combo.SelectedIndex;
+            _taskbarBand?.SetMonitorIndex(combo.SelectedIndex);
+        }
+
         private void SettingsOffsetX_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (_viewModel == null) return;
@@ -1350,6 +1407,30 @@ namespace SteamSwitcher
             }
         }
 
+        private void SetTaskbarLyricsEnabled(bool enabled)
+        {
+            _viewModel.TaskbarLyricsEnabled = enabled;
+            ApplyTaskbarLyricsSettings();
+            SyncTrayFeatureStates();
+            _viewModel.StatusText = enabled ? "任务栏歌词已开启" : "任务栏歌词已关闭";
+        }
+
+        private void SetTaskbarAppearanceEnabled(bool enabled)
+        {
+            _viewModel.TaskbarAppearanceEnabled = enabled;
+            if (!enabled)
+                _taskbarOverlayService.Disable();
+            ApplyTaskbarAppearance();
+            SyncTrayFeatureStates();
+            _viewModel.StatusText = enabled ? "透明任务栏已开启" : "透明任务栏已关闭";
+        }
+
+        private void SyncTrayFeatureStates()
+        {
+            _trayIcon?.UpdateFeatureStates(
+                _viewModel.TaskbarLyricsEnabled,
+                _viewModel.TaskbarAppearanceEnabled);
+        }
         private void TaskbarAppearance_Changed(object sender, RoutedEventArgs e)
         {
             if (!IsLoaded || _viewModel == null || _updatingTaskbarAppearance) return;
@@ -1361,6 +1442,7 @@ namespace SteamSwitcher
                 if (!_viewModel.TaskbarAppearanceEnabled)
                     _taskbarOverlayService.Disable();
                 ApplyTaskbarAppearance();
+                SyncTrayFeatureStates();
             }
             finally
             {
@@ -1371,12 +1453,13 @@ namespace SteamSwitcher
         {
             if (!IsLoaded || _viewModel == null) return;
             ApplyTaskbarLyricsSettings();
+            SyncTrayFeatureStates();
         }
 
         private void TaskbarLyricsWidth_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (!IsLoaded || _viewModel == null) return;
-            var width = Math.Clamp((int)Math.Round(e.NewValue), 240, 520);
+            var width = Math.Clamp((int)Math.Round(e.NewValue), 240, 720);
             _viewModel.TaskbarLyricsWidth = width;
             ApplyTaskbarLyricsSettings();
         }
@@ -1483,6 +1566,7 @@ namespace SteamSwitcher
                         _viewModel.TaskbarLyricsFontFamily);
                 }
             }
+            SyncTrayFeatureStates();
         }
 
         private void TaskbarAppearanceMode_Changed(object sender, RoutedEventArgs e)
@@ -1662,10 +1746,7 @@ namespace SteamSwitcher
 
             ApplyTaskbarAppearance();
             _taskbarAppearanceService.ForceFullTransparent();
-            _taskbarOverlayService.EnableFullTransparent();
-            _viewModel.StatusText = _ttbEngine.IsRunning
-                ? "💎 TranslucentTB 深度渲染已启动 — 任务栏 100% 全透明已生效"
-                : "💎 原生多层透明引擎已启动 — 任务栏全透明已生效";
+            _viewModel.StatusText = "💎 原生任务栏引擎已应用 100% 全透明";
         }
         private void TaskbarStylePreset_Click(object sender, RoutedEventArgs e)
         {
@@ -1696,28 +1777,11 @@ namespace SteamSwitcher
 
         private void ApplyTaskbarAppearance()
         {
-            if (_viewModel.TaskbarAppearanceEnabled)
-            {
-                // Synchronize and start TranslucentTB engine
-                _ttbEngine.SyncConfiguration(
-                    _viewModel.TaskbarAppearanceMode,
-                    _viewModel.TaskbarAppearanceOpacity,
-                    _viewModel.TaskbarAppearanceColor,
-                    _viewModel.TaskbarDynamicMaximized,
-                    _viewModel.TaskbarMaximizedMode,
-                    _viewModel.TaskbarDynamicStartMenu,
-                    _viewModel.TaskbarStartMenuMode,
-                    _viewModel.TaskbarDynamicSearch,
-                    _viewModel.TaskbarSearchMode,
-                    _viewModel.TaskbarDynamicTaskView,
-                    _viewModel.TaskbarTaskViewMode);
-                _ttbEngine.Start();
-            }
-            else
-            {
-                _ttbEngine.Stop();
-                _taskbarOverlayService.Disable();
-            }
+            // One owner must control Explorer's composition attributes. Running the native
+            // service, TranslucentTB and an overlay concurrently causes continuous repainting,
+            // flicker and non-deterministic results after Explorer restarts.
+            _ttbEngine.Stop();
+            _taskbarOverlayService.Disable();
 
             _taskbarAppearanceService.Configure(
                 _viewModel.TaskbarAppearanceEnabled,
@@ -1739,6 +1803,7 @@ namespace SteamSwitcher
                 _viewModel.StatusText = "当前 Windows 版本使用亚克力兼容模式替代原生任务栏模糊";
             else if (_viewModel.TaskbarAppearanceEnabled)
                 _viewModel.StatusText = $"已应用任务栏外观：{_viewModel.TaskbarAppearanceMode}";
+            SyncTrayFeatureStates();
         }
 
         private void SettingsFloatingRounded_Changed(object sender, RoutedEventArgs e)
@@ -1999,14 +2064,6 @@ namespace SteamSwitcher
             }
         }
 
-        private void SettingsStartMinimized_Changed(object sender, RoutedEventArgs e)
-        {
-            if (sender is CheckBox cb && _viewModel != null)
-            {
-                _viewModel.StartMinimizedToTray = cb.IsChecked == true;
-            }
-        }
-
         private void SettingsPlaySound_Changed(object sender, RoutedEventArgs e)
         {
             if (sender is CheckBox cb && _viewModel != null)
@@ -2065,18 +2122,28 @@ namespace SteamSwitcher
                 var artworkDir = Path.Combine(SettingsService.SettingsDirectory, "ArtworkCache");
                 var lyricsDir = Path.Combine(SettingsService.SettingsDirectory, "LyricsCache");
 
-                await Task.Run(() =>
+                var failures = await Task.Run(() =>
                 {
+                    var failed = new List<string>();
                     foreach (var dir in new[] { cacheDir, artworkDir, lyricsDir })
                     {
-                        if (Directory.Exists(dir))
+                        if (!Directory.Exists(dir)) continue;
+                        try
                         {
-                            try { Directory.Delete(dir, true); } catch { }
+                            Directory.Delete(dir, true);
+                        }
+                        catch (Exception ex)
+                        {
+                            failed.Add($"{Path.GetFileName(dir)}：{ex.Message}");
                         }
                     }
+                    return failed;
                 });
 
-                if (_viewModel != null) _viewModel.StatusText = "已成功清理本地封面与歌词缓存";
+                if (_viewModel != null)
+                    _viewModel.StatusText = failures.Count == 0
+                        ? "已成功清理本地封面与歌词缓存"
+                        : $"缓存未完全清理：{string.Join("；", failures)}";
             }
             catch (Exception ex)
             {
@@ -2133,6 +2200,7 @@ namespace SteamSwitcher
         {
             base.OnStateChanged(e);
             _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+            SyncTrayFeatureStates();
         }
 
         private void TaskbarPin_Checked(object sender, RoutedEventArgs e)
@@ -2156,15 +2224,16 @@ namespace SteamSwitcher
 
             var pinnedAccounts = _viewModel.GetPinnedAccounts();
             var pinnedGames = _viewModel.GetPinnedGames();
-            if (pinnedAccounts.Count == 0 && pinnedGames.Count == 0)
+            if (pinnedAccounts.Count == 0 && pinnedGames.Count == 0 && !_viewModel.TaskbarLyricsEnabled)
             {
-                _viewModel.StatusText = "请先固定至少一个账号或游戏";
+                _viewModel.StatusText = "请先开启任务栏歌词，或固定至少一个账号/游戏";
                 _viewModel.IsTaskbarPinned = false;
                 return;
             }
 
             _taskbarBand = new TaskbarBandWindow(_viewModel.GetAccountManager());
             _taskbarBand.AccountSwitchRequested += OnTaskbarAccountSwitch;
+            _taskbarBand.ForceAccountRestartRequested += OnTaskbarForceAccountRestart;
             _taskbarBand.GameLaunchRequested += OnTaskbarGameLaunch;
             _taskbarBand.ShowMainWindowRequested += (s, e) =>
             {
@@ -2190,6 +2259,8 @@ namespace SteamSwitcher
                 if (!enabled)
                     DetachFromTaskbar();
             };
+            _taskbarBand.ToggleTaskbarLyricsRequested += (s, enabled) => SetTaskbarLyricsEnabled(enabled);
+            _taskbarBand.ToggleTaskbarAppearanceRequested += (s, enabled) => SetTaskbarAppearanceEnabled(enabled);
             _taskbarBand.ExitRequested += (s, e) => RequestExit();
             _taskbarBand.QuickLaunchRequested += (s, id) => _viewModel.LaunchQuickLaunchItem(id);
             _taskbarBand.PanelItemOrderChanged += async (s, keys) => await _viewModel.SetPinnedPanelItemOrderAsync(keys);
@@ -2203,6 +2274,7 @@ namespace SteamSwitcher
             _taskbarBand.SetPinnedQuickLaunchItems(_viewModel.GetPinnedQuickLaunchItems());
             
             _taskbarBand.SetPosition(_viewModel.TaskbarPosition);
+            _taskbarBand.SetMonitorIndex(_viewModel.TaskbarMonitorIndex);
             _taskbarBand.SetOffset(_viewModel.TaskbarOffsetX, _viewModel.TaskbarOffsetY);
             _taskbarBand.SetWindowSize(_viewModel.TaskbarWindowSize);
             _taskbarBand.SetAvatarSize(_viewModel.TaskbarAvatarSize);
@@ -2287,6 +2359,8 @@ namespace SteamSwitcher
                 else
                     DetachFromTaskbar();
             };
+            _desktopFloatingWindow.ToggleTaskbarLyricsRequested += (s, enabled) => SetTaskbarLyricsEnabled(enabled);
+            _desktopFloatingWindow.ToggleTaskbarAppearanceRequested += (s, enabled) => SetTaskbarAppearanceEnabled(enabled);
             _desktopFloatingWindow.ExitRequested += (s, e) => RequestExit();
             _desktopFloatingWindow.QuickLaunchRequested += (s, id) => _viewModel.LaunchQuickLaunchItem(id);
             _desktopFloatingWindow.PanelItemOrderChanged += async (s, keys) => await _viewModel.SetPinnedPanelItemOrderAsync(keys);
@@ -2333,51 +2407,96 @@ namespace SteamSwitcher
 
         private async void OnTaskbarAccountSwitch(object? sender, Models.SteamAccount account)
         {
-            var accountManager = _viewModel.GetAccountManager();
-            var isCurrent = AccountManager.AreSameAccount(accountManager.CurrentAccount, account);
+            await SwitchFromTaskbarAsync(account, forceRestart: false);
+        }
 
-            if (isCurrent)
+        private async void OnTaskbarForceAccountRestart(object? sender, Models.SteamAccount account)
+        {
+            await SwitchFromTaskbarAsync(account, forceRestart: true);
+        }
+
+        private async Task SwitchFromTaskbarAsync(Models.SteamAccount account, bool forceRestart)
+        {
+            if (_viewModel.IsLoading || !await _accountInteractionGate.WaitAsync(0))
             {
-                _viewModel.StatusText = $"{account.PersonaName} 已是当前账号";
-                _trayIcon.ShowNotification("Steam Switch", $"{account.PersonaName} 已是当前账号", 1000);
-                _viewModel.IsSteamRunning = accountManager.GetSteamService().IsSteamRunning();
+                _trayIcon.ShowNotification("Steam Switch", "账号操作正在进行，请稍候", 1200);
                 return;
             }
 
+            var accountManager = _viewModel.GetAccountManager();
             _viewModel.IsLoading = true;
-            _viewModel.StatusText = "正在切换账号...";
+            _viewModel.StatusText = forceRestart
+                ? $"正在强制重启 Steam 并切换到 {account.PersonaName}..."
+                : $"正在切换到 {account.PersonaName}...";
 
-            var success = await accountManager.SwitchAccountAsync(account, _viewModel.SilentCloseSteam);
+            if (forceRestart)
+                _trayIcon.ShowNotification("Steam Switch", $"正在强制重启 Steam 并切换到 {account.PersonaName}", 1200);
 
-            if (success)
+            try
             {
-                _viewModel.StatusText = $"已切换到 {account.PersonaName}";
-                _trayIcon.ShowNotification("Steam Switch", $"已切换到 {account.PersonaName}", 1000);
+                if (!forceRestart && AccountManager.AreSameAccount(accountManager.CurrentAccount, account))
+                {
+                    _viewModel.StatusText = $"{account.PersonaName} 已是当前账号";
+                    _trayIcon.ShowNotification("Steam Switch", $"{account.PersonaName} 已是当前账号", 1000);
+                    return;
+                }
+
+                var success = await accountManager.SwitchAccountAsync(
+                    account,
+                    forceClose: forceRestart || _viewModel.SilentCloseSteam);
+                if (!success)
+                {
+                    var failedMessage = forceRestart
+                        ? "强制重启并切换账号失败"
+                        : "切换失败，请确保 Steam 已关闭";
+                    _viewModel.StatusText = failedMessage;
+                    _trayIcon.ShowNotification("Steam Switch", failedMessage, 1500);
+                    return;
+                }
+
+                _viewModel.SelectedAccount = _viewModel.Accounts.FirstOrDefault(
+                    item => AccountManager.AreSameAccount(item.Account, account));
                 _taskbarBand?.UpdateCurrentAccount(account);
                 _desktopFloatingWindow?.UpdateCurrentAccount(account);
 
-                if (_viewModel.AutoStartSteam)
+                var shouldLaunchSteam = forceRestart || _viewModel.AutoStartSteam;
+                if (shouldLaunchSteam)
                 {
-                    _viewModel.StatusText = "正在启动Steam...";
-                    accountManager.LaunchSteam();
+                    var launched = accountManager.LaunchSteam();
+                    _viewModel.StatusText = launched
+                        ? forceRestart
+                            ? $"已切换到 {account.PersonaName}，Steam 已重启"
+                            : $"已切换到 {account.PersonaName}，Steam 已启动"
+                        : $"已切换到 {account.PersonaName}，但 Steam 启动失败";
                 }
+                else
+                {
+                    _viewModel.StatusText = $"已切换到 {account.PersonaName}";
+                }
+
+                _trayIcon.ShowNotification("Steam Switch", _viewModel.StatusText, 1500);
             }
-            else
+            catch (Exception ex)
             {
-                _viewModel.StatusText = "切换失败，请确保Steam已关闭";
-                _trayIcon.ShowNotification("Steam Switch", "切换失败，请确保Steam已关闭", 1000);
+                AppLogger.Error("Taskbar account switch failed.", ex);
+                _viewModel.StatusText = forceRestart ? "强制重启并切换账号失败" : "账号切换失败";
+                _trayIcon.ShowNotification("Steam Switch", _viewModel.StatusText, 1500);
             }
-
-            _viewModel.IsSteamRunning = accountManager.GetSteamService().IsSteamRunning();
-            _viewModel.IsLoading = false;
-
-            _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+            finally
+            {
+                _viewModel.IsSteamRunning = accountManager.GetSteamService().IsSteamRunning();
+                _viewModel.IsLoading = false;
+                _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+                SyncTrayFeatureStates();
+                _accountInteractionGate.Release();
+            }
         }
 
         private async void OnTaskbarGameLaunch(object? sender, int appId)
         {
             await _viewModel.LaunchPinnedGameAsync(appId);
             _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+            SyncTrayFeatureStates();
         }
 
         // Quick Launch event handlers

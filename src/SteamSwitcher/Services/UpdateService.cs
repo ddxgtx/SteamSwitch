@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net;
 using System.Security.Cryptography;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -48,6 +49,73 @@ namespace SteamSwitcher.Services
         public DateTimeOffset RetryAfterUtc { get; set; }
     }
 
+    internal sealed class SemanticReleaseVersion : IComparable<SemanticReleaseVersion>
+    {
+        private readonly int[] _core;
+        private readonly string[] _prerelease;
+
+        private SemanticReleaseVersion(int[] core, string[] prerelease)
+        {
+            _core = core;
+            _prerelease = prerelease;
+        }
+
+        public static bool TryParse(string? value, out SemanticReleaseVersion version)
+        {
+            version = null!;
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var normalized = value.Trim().TrimStart('v', 'V');
+            var buildIndex = normalized.IndexOf('+');
+            if (buildIndex >= 0)
+                normalized = normalized[..buildIndex];
+            var prereleaseIndex = normalized.IndexOf('-');
+            var prerelease = prereleaseIndex >= 0
+                ? normalized[(prereleaseIndex + 1)..]
+                    .Split('.', StringSplitOptions.RemoveEmptyEntries)
+                : Array.Empty<string>();
+            var coreText = prereleaseIndex >= 0 ? normalized[..prereleaseIndex] : normalized;
+            var components = coreText.Split('.');
+            if (components.Length is < 2 or > 4 ||
+                components.Any(component => !int.TryParse(component, out var number) || number < 0) ||
+                (prereleaseIndex >= 0 && prerelease.Length == 0))
+                return false;
+
+            var core = new int[4];
+            for (var index = 0; index < components.Length; index++)
+                core[index] = int.Parse(components[index]);
+            version = new SemanticReleaseVersion(core, prerelease);
+            return true;
+        }
+
+        public int CompareTo(SemanticReleaseVersion? other)
+        {
+            if (other == null) return 1;
+            for (var index = 0; index < _core.Length; index++)
+            {
+                var comparison = _core[index].CompareTo(other._core[index]);
+                if (comparison != 0) return comparison;
+            }
+            if (_prerelease.Length == 0)
+                return other._prerelease.Length == 0 ? 0 : 1;
+            if (other._prerelease.Length == 0)
+                return -1;
+            for (var index = 0; index < Math.Min(_prerelease.Length, other._prerelease.Length); index++)
+            {
+                var leftNumeric = int.TryParse(_prerelease[index], out var leftNumber);
+                var rightNumeric = int.TryParse(other._prerelease[index], out var rightNumber);
+                int comparison;
+                if (leftNumeric && rightNumeric) comparison = leftNumber.CompareTo(rightNumber);
+                else if (leftNumeric) comparison = -1;
+                else if (rightNumeric) comparison = 1;
+                else comparison = string.Compare(_prerelease[index], other._prerelease[index], StringComparison.OrdinalIgnoreCase);
+                if (comparison != 0) return comparison;
+            }
+            return _prerelease.Length.CompareTo(other._prerelease.Length);
+        }
+    }
+
     public class UpdateService : IDisposable
     {
         private const string RepoApiUrl = "https://api.github.com/repos/ddxgtx/SteamSwitch/releases/latest";
@@ -57,7 +125,9 @@ namespace SteamSwitcher.Services
 
         private readonly HttpClient _http;
         private readonly string _rateLimitStatePath;
+        private readonly object _downloadSync = new();
         private CancellationTokenSource? _downloadCts;
+        private volatile bool _disposed;
 
         public event EventHandler<UpdateProgressEventArgs>? DownloadProgress;
         public event EventHandler<string>? DownloadCompleted;
@@ -75,7 +145,7 @@ namespace SteamSwitcher.Services
                 "SteamSwitch", "update-rate-limit.json");
         }
 
-        public async Task<UpdateInfo?> CheckForUpdateAsync(bool includePrereleases = false)
+        public async Task<UpdateInfo?> CheckForUpdateAsync(bool includePrereleases = false, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -84,7 +154,7 @@ namespace SteamSwitcher.Services
                     throw CreateRateLimitException(deferredUntil.Value);
 
                 var apiUrl = includePrereleases ? RepoPrereleaseApiUrl : RepoApiUrl;
-                using var response = await _http.GetAsync(apiUrl);
+                using var response = await _http.GetAsync(apiUrl, cancellationToken);
                 if (IsRateLimited(response))
                 {
                     var retryAfter = GetRetryAfter(response);
@@ -94,10 +164,10 @@ namespace SteamSwitcher.Services
                 response.EnsureSuccessStatusCode();
                 ClearDeferredUntil();
 
-                var json = await response.Content.ReadAsStringAsync();
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
                 using var doc = JsonDocument.Parse(json);
                 var currentVersionText = GetCurrentVersion();
-                if (!Version.TryParse(currentVersionText, out var currentVersion))
+                if (!SemanticReleaseVersion.TryParse(currentVersionText, out var currentVersion))
                     throw new JsonException("当前应用版本号无效。");
 
                 JsonElement release;
@@ -107,16 +177,16 @@ namespace SteamSwitcher.Services
                         throw new JsonException("GitHub 测试版发布列表格式无效。");
 
                     release = default;
-                    Version? selectedVersion = null;
+                    SemanticReleaseVersion? selectedVersion = null;
                     foreach (var candidate in doc.RootElement.EnumerateArray())
                     {
                         if (candidate.TryGetProperty("draft", out var draft) && draft.GetBoolean())
                             continue;
 
                         var candidateTag = candidate.GetProperty("tag_name").GetString() ?? "";
-                        if (!Version.TryParse(candidateTag.TrimStart('v', 'V'), out var candidateVersion) ||
-                            candidateVersion <= currentVersion ||
-                            (selectedVersion != null && candidateVersion <= selectedVersion))
+                        if (!SemanticReleaseVersion.TryParse(candidateTag, out var candidateVersion) ||
+                            candidateVersion.CompareTo(currentVersion) <= 0 ||
+                            (selectedVersion != null && candidateVersion.CompareTo(selectedVersion) <= 0))
                             continue;
 
                         selectedVersion = candidateVersion;
@@ -135,7 +205,8 @@ namespace SteamSwitcher.Services
 
                 var tagName = release.GetProperty("tag_name").GetString() ?? "";
                 var latestVersion = tagName.TrimStart('v', 'V');
-                if (!Version.TryParse(latestVersion, out var latest) || latest <= currentVersion)
+                if (!SemanticReleaseVersion.TryParse(latestVersion, out var latest) ||
+                    latest.CompareTo(currentVersion) <= 0)
                     return null;
 
                 var body = release.GetProperty("body").GetString() ?? "";
@@ -194,6 +265,10 @@ namespace SteamSwitcher.Services
                 };
             }
             catch (UpdateCheckException)
+            {
+                throw;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -288,28 +363,46 @@ namespace SteamSwitcher.Services
 
         public async Task DownloadUpdateAsync(UpdateInfo update)
         {
-            _downloadCts?.Cancel();
-            _downloadCts?.Dispose();
-            _downloadCts = new CancellationTokenSource();
+            CancellationTokenSource operationCts;
+            lock (_downloadSync)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                _downloadCts?.Cancel();
+                operationCts = new CancellationTokenSource();
+                _downloadCts = operationCts;
+            }
 
             try
             {
-                var filePath = await DownloadUpdateToFileAsync(update, _downloadCts.Token);
-                DownloadCompleted?.Invoke(this, filePath);
+                var filePath = await DownloadUpdateToFileAsync(update, operationCts.Token);
+                if (IsCurrentDownload(operationCts))
+                    DownloadCompleted?.Invoke(this, filePath);
             }
             catch (OperationCanceledException)
             {
-                DownloadFailed?.Invoke(this, "下载已取消");
+                if (IsCurrentDownload(operationCts))
+                    DownloadFailed?.Invoke(this, "下载已取消");
             }
             catch (Exception ex)
             {
                 AppLogger.Error("Download update failed.", ex);
-                DownloadFailed?.Invoke(this, $"下载失败: {ex.Message}");
+                if (IsCurrentDownload(operationCts))
+                    DownloadFailed?.Invoke(this, $"下载失败: {ex.Message}");
+            }
+            finally
+            {
+                lock (_downloadSync)
+                {
+                    if (ReferenceEquals(_downloadCts, operationCts))
+                        _downloadCts = null;
+                }
+                operationCts.Dispose();
             }
         }
 
         public async Task<string> DownloadUpdateToFileAsync(UpdateInfo update, CancellationToken cancellationToken = default)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (string.IsNullOrEmpty(update.DownloadUrl))
                 throw new InvalidOperationException("没有可用的下载链接");
             if (!update.CanVerifyIntegrity)
@@ -364,12 +457,15 @@ namespace SteamSwitcher.Services
                         throw new InvalidDataException("实际下载大小超过 Release 声明值，已终止更新。");
 
                     var percent = totalBytes > 0 ? (int)Math.Min(100, totalRead * 100 / totalBytes) : 0;
-                    DownloadProgress?.Invoke(this, new UpdateProgressEventArgs
+                    if (!_disposed)
                     {
-                        BytesReceived = totalRead,
-                        TotalBytes = totalBytes,
-                        PercentComplete = percent
-                    });
+                        DownloadProgress?.Invoke(this, new UpdateProgressEventArgs
+                        {
+                            BytesReceived = totalRead,
+                            TotalBytes = totalBytes,
+                            PercentComplete = percent
+                        });
+                    }
                 }
 
                 await fileStream.FlushAsync(cancellationToken);
@@ -394,7 +490,14 @@ namespace SteamSwitcher.Services
 
         public void CancelDownload()
         {
-            _downloadCts?.Cancel();
+            lock (_downloadSync)
+                _downloadCts?.Cancel();
+        }
+
+        private bool IsCurrentDownload(CancellationTokenSource operationCts)
+        {
+            lock (_downloadSync)
+                return !_disposed && ReferenceEquals(_downloadCts, operationCts);
         }
 
         public static void LaunchInstaller(string filePath, string expectedSha256)
@@ -426,8 +529,17 @@ namespace SteamSwitcher.Services
 
         public static string GetCurrentVersion()
         {
-            return System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+            var assembly = Assembly.GetExecutingAssembly();
+            var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            var version = !string.IsNullOrWhiteSpace(informational)
+                ? informational
+                : assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+            var metadataIndex = version.IndexOf('+');
+            return metadataIndex >= 0 ? version[..metadataIndex] : version;
         }
+
+        public static bool IsCurrentVersionPrerelease() =>
+            GetCurrentVersion().Contains('-', StringComparison.Ordinal);
 
         private static string ReadSha256Digest(JsonElement asset)
         {
@@ -459,7 +571,16 @@ namespace SteamSwitcher.Services
 
         public void Dispose()
         {
-            _downloadCts?.Dispose();
+            lock (_downloadSync)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                _downloadCts?.Cancel();
+                _downloadCts = null;
+            }
+            DownloadProgress = null;
+            DownloadCompleted = null;
+            DownloadFailed = null;
             _http.Dispose();
         }
     }

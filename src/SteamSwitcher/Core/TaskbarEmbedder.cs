@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
@@ -47,6 +49,11 @@ namespace SteamSwitcher.Core
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
         private const int WS_CHILD = 0x40000000;
@@ -78,6 +85,7 @@ namespace SteamSwitcher.Core
         private TaskbarPosition _position = TaskbarPosition.Auto;
         private int _offsetX;
         private int _offsetY;
+        private int _monitorIndex;
         private System.Windows.Threading.DispatcherTimer? _positionTimer;
         private IntPtr _lastPositionHwnd;
         private int _lastX = int.MinValue;
@@ -119,6 +127,19 @@ namespace SteamSwitcher.Core
 
         public event EventHandler? TaskbarCreated;
 
+        public void SetMonitorIndex(int monitorIndex)
+        {
+            monitorIndex = Math.Max(0, monitorIndex);
+            if (_monitorIndex == monitorIndex) return;
+            _monitorIndex = monitorIndex;
+            if (_isEmbedded)
+            {
+                RemoveFromTaskbar();
+                EmbedToTaskbar();
+                StartPositionTimer();
+            }
+        }
+
         public TaskbarEmbedder()
         {
         }
@@ -143,6 +164,26 @@ namespace SteamSwitcher.Core
             if (_isEmbedded) UpdatePosition();
         }
 
+        public int GetMaximumWidthInDips()
+        {
+            try
+            {
+                IntPtr taskbarHandle = FindTargetTaskbar();
+                if (taskbarHandle == IntPtr.Zero || !GetWindowRect(taskbarHandle, out var taskbarRect))
+                    return 720;
+
+                int taskbarWidth = taskbarRect.Right - taskbarRect.Left;
+                int trayX = FindTrayAreaLeft(taskbarHandle, taskbarWidth);
+                int maximumPixels = _position is TaskbarPosition.Auto or TaskbarPosition.Right
+                    ? CalculateRightEdge(trayX) - EdgeMargin
+                    : taskbarWidth - EdgeMargin * 2;
+                return Math.Max(240, PixelsToDips(maximumPixels));
+            }
+            catch
+            {
+                return 720;
+            }
+        }
         private void StartPositionTimer()
         {
             _positionTimer = new System.Windows.Threading.DispatcherTimer();
@@ -163,7 +204,7 @@ namespace SteamSwitcher.Core
 
             try
             {
-                IntPtr taskbarHandle = FindWindow("Shell_TrayWnd", null);
+                IntPtr taskbarHandle = FindTargetTaskbar();
                 if (taskbarHandle == IntPtr.Zero)
                 {
                     System.Diagnostics.Debug.WriteLine("Cannot find Shell_TrayWnd");
@@ -236,7 +277,7 @@ namespace SteamSwitcher.Core
 
             try
             {
-                IntPtr taskbarHandle = FindWindow("Shell_TrayWnd", null);
+                IntPtr taskbarHandle = FindTargetTaskbar();
                 if (taskbarHandle == IntPtr.Zero) return;
 
                 IntPtr hwnd = new WindowInteropHelper(_embeddedWindow).Handle;
@@ -247,7 +288,7 @@ namespace SteamSwitcher.Core
                 int taskbarWidth = taskbarRect.Right - taskbarRect.Left;
                 int taskbarHeight = taskbarRect.Bottom - taskbarRect.Top;
 
-                int trayX = FindTrayAreaLeft(taskbarWidth);
+                int trayX = FindTrayAreaLeft(taskbarHandle, taskbarWidth);
                 int desiredWidth = DipsToPixels(_width);
                 int width = GetEffectiveWidth(taskbarWidth, trayX, desiredWidth);
                 int x = CalculateX(taskbarWidth, trayX, width);
@@ -316,6 +357,15 @@ namespace SteamSwitcher.Core
             return Math.Max(1, (int)Math.Ceiling(value * scale));
         }
 
+        private int PixelsToDips(int value)
+        {
+            if (_embeddedWindow == null)
+                return value;
+
+            var source = PresentationSource.FromVisual(_embeddedWindow);
+            double scale = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+            return Math.Max(1, (int)Math.Floor(value / Math.Max(0.1, scale)));
+        }
         private int CalculateX(int taskbarWidth, int trayX, int width)
         {
             int x;
@@ -364,11 +414,10 @@ namespace SteamSwitcher.Core
             return Math.Clamp(x, EdgeMargin, maxX);
         }
 
-        private int FindTrayAreaLeft(int taskbarWidth)
+        private int FindTrayAreaLeft(IntPtr trayWnd, int taskbarWidth)
         {
             try
             {
-                IntPtr trayWnd = FindWindow("Shell_TrayWnd", null);
                 if (trayWnd == IntPtr.Zero) return taskbarWidth - 280;
 
                 RECT taskbarRect;
@@ -405,6 +454,27 @@ namespace SteamSwitcher.Core
             {
                 return taskbarWidth - 280;
             }
+        }
+
+        private IntPtr FindTargetTaskbar()
+        {
+            var taskbars = new List<(IntPtr Handle, bool Primary, int Left, int Top)>();
+            EnumWindows((handle, _) =>
+            {
+                var className = new StringBuilder(64);
+                GetClassName(handle, className, className.Capacity);
+                var name = className.ToString();
+                if (name is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" && GetWindowRect(handle, out var rect))
+                    taskbars.Add((handle, name == "Shell_TrayWnd", rect.Left, rect.Top));
+                return true;
+            }, IntPtr.Zero);
+
+            var ordered = taskbars.OrderByDescending(item => item.Primary)
+                .ThenBy(item => item.Left)
+                .ThenBy(item => item.Top)
+                .ToList();
+            if (ordered.Count == 0) return FindWindow("Shell_TrayWnd", null);
+            return ordered[Math.Min(_monitorIndex, ordered.Count - 1)].Handle;
         }
 
         private static IntPtr FindChildWindowRecursive(IntPtr parent, string className)

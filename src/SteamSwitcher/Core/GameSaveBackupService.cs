@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,7 @@ namespace SteamSwitcher.Core
         private const string ManifestName = "steamswitch-backup.json";
         private const int MaxBackupFileCount = 100_000;
         private const long MaxExpandedBackupSize = 100L * 1024 * 1024 * 1024;
+        private const int MaxManifestBytes = 8 * 1024 * 1024;
         private const int DifferentialBackupsPerFull = 4;
         private static readonly JsonSerializerOptions ManifestJsonOptions = new() { WriteIndented = true };
         private static readonly EnumerationOptions SaveEnumerationOptions = new()
@@ -367,6 +369,74 @@ namespace SteamSwitcher.Core
             }, cancellationToken);
         }
 
+        public async Task ExportBackupAsync(
+            GameSaveEntry entry,
+            string backupPath,
+            string destinationPath,
+            CancellationToken cancellationToken = default)
+        {
+            await VerifyBackupAsync(entry, backupPath, cancellationToken);
+            var source = ValidateBackupPath(entry, backupPath);
+            var destination = Path.GetFullPath(destinationPath);
+            if (string.Equals(source, destination, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("导出位置不能与原备份相同。");
+
+            await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? throw new InvalidOperationException("导出目录无效。"));
+                File.Copy(source, destination, overwrite: true);
+            }, cancellationToken);
+        }
+
+        public Task<string> ImportBackupAsync(
+            GameSaveEntry entry,
+            string sourcePath,
+            CancellationToken cancellationToken = default)
+        {
+            ValidateEntryPath(entry);
+            return Task.Run(() =>
+            {
+                var source = Path.GetFullPath(sourcePath);
+                if (!File.Exists(source) || !string.Equals(Path.GetExtension(source), ".zip", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("请选择有效的 ZIP 存档备份。");
+
+                var directory = GetBackupDirectory(entry);
+                Directory.CreateDirectory(directory);
+                var temporary = Path.Combine(directory, $".import-{Guid.NewGuid():N}.zip");
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    File.Copy(source, temporary, overwrite: false);
+                    var manifest = ReadManifest(temporary);
+                    ValidateBackupIdentity(entry, manifest);
+                    if (!string.IsNullOrWhiteSpace(manifest.BaseBackupFile))
+                        throw new InvalidDataException("增量备份依赖原始完整备份，不能单独导入。请导出并导入完整备份。");
+
+                    var verifyDirectory = Path.Combine(directory, $".verify-{Guid.NewGuid():N}");
+                    try
+                    {
+                        Directory.CreateDirectory(verifyDirectory);
+                        ExtractArchiveSafely(temporary, verifyDirectory, manifest, cancellationToken);
+                    }
+                    finally
+                    {
+                        TryDeleteDirectory(verifyDirectory);
+                    }
+
+                    var safeName = $"{DateTime.Now:yyyyMMdd-HHmmss}-import-{Guid.NewGuid():N}.zip";
+                    var destination = Path.Combine(directory, safeName);
+                    File.Move(temporary, destination);
+                    AppLogger.Info($"Game save backup imported: {destination}");
+                    return destination;
+                }
+                finally
+                {
+                    if (File.Exists(temporary)) File.Delete(temporary);
+                }
+            }, cancellationToken);
+        }
+
         public Task<GameSaveChangeSummary> AnalyzeChangesAsync(
             GameSaveEntry entry,
             CancellationToken cancellationToken = default)
@@ -415,7 +485,7 @@ namespace SteamSwitcher.Core
             var filePaths = EnumerateSaveFiles(entry.SavePath).ToList();
             if (filePaths.Count > MaxBackupFileCount)
                 throw new InvalidDataException($"存档文件超过 {MaxBackupFileCount:N0} 个，已取消备份。");
-            if (filePaths.Sum(GetFileSize) > MaxExpandedBackupSize)
+            if (ExceedsExpandedSizeLimit(filePaths.Select(GetFileSize)))
                 throw new InvalidDataException("存档总大小超过 100 GB，已取消备份。");
             GameSaveBackupManifest? baseManifest = null;
             Dictionary<string, GameSaveBackupFile>? baseFiles = null;
@@ -638,7 +708,8 @@ namespace SteamSwitcher.Core
         {
             var destinationRoot = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             using var archive = ZipFile.OpenRead(archivePath);
-            if (manifest.Files.Count > MaxBackupFileCount || manifest.Files.Sum(file => file.Size) > MaxExpandedBackupSize)
+            if (manifest.Files.Count > MaxBackupFileCount ||
+                ExceedsExpandedSizeLimit(manifest.Files.Select(file => file.Size)))
                 throw new InvalidDataException("备份文件数量或展开大小超过安全限制。");
 
             var storedFiles = manifest.Files.Where(file => file.IsStoredInArchive).ToDictionary(
@@ -708,8 +779,24 @@ namespace SteamSwitcher.Core
             using var archive = ZipFile.OpenRead(archivePath);
             var entry = archive.GetEntry(ManifestName)
                 ?? throw new InvalidDataException("不是有效的 Steam Switch 存档备份：缺少清单。");
-            using var reader = new StreamReader(entry.Open());
-            var manifest = JsonSerializer.Deserialize<GameSaveBackupManifest>(reader.ReadToEnd())
+            if (entry.Length is <= 0 or > MaxManifestBytes)
+                throw new InvalidDataException("备份清单大小无效或超过 8 MB 安全上限。");
+
+            using var input = entry.Open();
+            using var manifestBuffer = new MemoryStream((int)entry.Length);
+            var buffer = new byte[64 * 1024];
+            var totalRead = 0;
+            int bytesRead;
+            while ((bytesRead = input.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                totalRead = checked(totalRead + bytesRead);
+                if (totalRead > MaxManifestBytes)
+                    throw new InvalidDataException("备份清单展开大小超过 8 MB 安全上限。");
+                manifestBuffer.Write(buffer, 0, bytesRead);
+            }
+
+            var manifestJson = Encoding.UTF8.GetString(manifestBuffer.GetBuffer(), 0, totalRead);
+            var manifest = JsonSerializer.Deserialize<GameSaveBackupManifest>(manifestJson)
                 ?? throw new InvalidDataException("备份清单损坏。");
             if (manifest.FormatVersion is not 1 and not 2 and not 3)
                 throw new InvalidDataException($"不支持的备份格式版本：{manifest.FormatVersion}");
@@ -728,6 +815,9 @@ namespace SteamSwitcher.Core
                 throw new InvalidDataException("备份清单包含无效的文件记录。");
             if (manifest.Files.Select(file => file.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.Files.Count)
                 throw new InvalidDataException("备份清单包含重复的文件路径。");
+            if (manifest.Files.Count > MaxBackupFileCount ||
+                ExceedsExpandedSizeLimit(manifest.Files.Select(file => file.Size)))
+                throw new InvalidDataException("备份文件数量或展开大小超过安全限制。");
             return manifest;
         }
 
@@ -838,7 +928,8 @@ namespace SteamSwitcher.Core
             CancellationToken cancellationToken)
         {
             using var archive = ZipFile.OpenRead(archivePath);
-            if (manifest.Files.Count > MaxBackupFileCount || manifest.Files.Sum(file => file.Size) > MaxExpandedBackupSize)
+            if (manifest.Files.Count > MaxBackupFileCount ||
+                ExceedsExpandedSizeLimit(manifest.Files.Select(file => file.Size)))
                 throw new InvalidDataException("备份文件数量或展开大小超过安全限制。");
 
             var expectedFiles = manifest.Files.ToDictionary(file => file.Path.Replace('\\', '/'), StringComparer.OrdinalIgnoreCase);
@@ -956,11 +1047,56 @@ namespace SteamSwitcher.Core
 
         private bool IsCustomPathAllowed(string candidate)
         {
-            var fullPath = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar);
-            var backupRoot = _backupRoot.TrimEnd(Path.DirectorySeparatorChar);
-            return !string.Equals(fullPath, backupRoot, StringComparison.OrdinalIgnoreCase) &&
-                   !fullPath.StartsWith(backupRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
-                   !backupRoot.StartsWith(fullPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                var fullPath = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar);
+                if (Directory.Exists(fullPath) &&
+                    (new DirectoryInfo(fullPath).Attributes & FileAttributes.ReparsePoint) != 0)
+                    return false;
+
+                var physicalPath = ResolvePhysicalDirectoryPath(fullPath);
+                var physicalBackupRoot = ResolvePhysicalDirectoryPath(_backupRoot);
+                return !string.Equals(physicalPath, physicalBackupRoot, StringComparison.OrdinalIgnoreCase) &&
+                       !physicalPath.StartsWith(physicalBackupRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                       !physicalBackupRoot.StartsWith(physicalPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to validate custom save path {candidate}: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static string ResolvePhysicalDirectoryPath(string path)
+        {
+            var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+            var root = Path.GetPathRoot(fullPath)
+                ?? throw new InvalidDataException("无法解析存档目录所在磁盘。");
+            var current = root;
+            foreach (var segment in Path.GetRelativePath(root, fullPath)
+                         .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+            {
+                current = Path.Combine(current, segment);
+                var info = new DirectoryInfo(current);
+                if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) == 0)
+                    continue;
+                var target = info.ResolveLinkTarget(returnFinalTarget: true);
+                if (target != null)
+                    current = target.FullName;
+            }
+            return Path.GetFullPath(current).TrimEnd(Path.DirectorySeparatorChar);
+        }
+
+        private static bool ExceedsExpandedSizeLimit(IEnumerable<long> sizes)
+        {
+            var total = 0L;
+            foreach (var size in sizes)
+            {
+                if (size < 0 || size > MaxExpandedBackupSize - total)
+                    return true;
+                total += size;
+            }
+            return false;
         }
 
         private static long GetFileSize(string path)

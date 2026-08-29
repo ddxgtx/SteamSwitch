@@ -1,8 +1,21 @@
 # 截图说明
 
-本目录包含 Steam Switch 应用程序的截图，用于 README 文档。
+本目录包含 Steam Switch 应用程序的真实界面截图，用于 README 文档。`v3.1` 目录中的图片由仓库内 `tools/UiCapture` 使用当前 WPF 控件直接渲染生成，不是设计稿或 AI 合成图。
 
 ## 截图列表
+
+### v3.1 正式版
+
+- `v3.1/accounts.png` - 账号管理
+- `v3.1/games.png` - 游戏绑定
+- `v3.1/saves.png` - 游戏存档中心
+- `v3.1/taskbar.png` - 透明任务栏
+- `v3.1/lyrics.png` - 任务栏歌词设置
+- `v3.1/taskbar-band.png` - 任务栏歌词实际组件
+- `v3.1/quick-populated.png` - 快速启动
+- `v3.1/settings.png` - 设置中心
+
+### 历史截图
 
 - `screenshot_1.png` - 账号切换页面（暗黑模式）
 - `screenshot_2.png` - 游戏列表与账号绑定页面

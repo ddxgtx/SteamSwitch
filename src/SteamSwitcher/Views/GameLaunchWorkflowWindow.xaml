@@ -107,8 +107,8 @@
 
             <Grid Grid.Row="2">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Button Grid.Column="0" Content="取消" Click="Cancel_Click" Style="{StaticResource DialogSecondaryButtonStyle}" Margin="0,0,6,0"/>
-                <Button Grid.Column="1" Content="保存工作流" Click="Save_Click" Style="{StaticResource DialogPrimaryButtonStyle}" Margin="6,0,0,0"/>
+                <Button Grid.Column="0" Content="取消" Click="Cancel_Click" Style="{StaticResource DialogSecondaryButtonStyle}" Margin="0,0,6,0" IsCancel="True"/>
+                <Button Grid.Column="1" Content="保存工作流" Click="Save_Click" Style="{StaticResource DialogPrimaryButtonStyle}" Margin="6,0,0,0" IsDefault="True"/>
             </Grid>
         </Grid>
     </Border>

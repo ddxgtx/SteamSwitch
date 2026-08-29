@@ -32,7 +32,9 @@ namespace SteamSwitcher.ViewModels
         private readonly QuickLaunchService _quickLaunch;
         private readonly GameSaveAutoBackupService _gameSaveAutoBackupService;
         private readonly CancellationTokenSource _launchWorkflowCts = new();
+        private readonly CancellationTokenSource _lifetimeCts = new();
         private int _updateCheckInProgress;
+        private int _gameScanInProgress;
         private SteamCEFInjector? _injector;
         private WebSocketServer? _wsServer;
         private readonly DispatcherTimer _settingsSaveTimer;
@@ -69,6 +71,9 @@ namespace SteamSwitcher.ViewModels
         private bool _isLoading;
 
         [ObservableProperty]
+        private bool _isGameScanInProgress;
+
+        [ObservableProperty]
         private string _statusText = "就绪";
 
         [ObservableProperty]
@@ -91,6 +96,9 @@ namespace SteamSwitcher.ViewModels
 
         [ObservableProperty]
         private TaskbarPosition _taskbarPosition;
+
+        [ObservableProperty]
+        private int _taskbarMonitorIndex;
 
         [ObservableProperty]
         private int _taskbarOffsetX;
@@ -293,9 +301,6 @@ namespace SteamSwitcher.ViewModels
         private bool _smartSaveDiscoveryEnabled = true;
 
         [ObservableProperty]
-        private bool _startMinimizedToTray;
-
-        [ObservableProperty]
         private bool _playSoundOnSwitch = true;
 
         [ObservableProperty]
@@ -366,7 +371,7 @@ namespace SteamSwitcher.ViewModels
         private bool _silentCloseSteam = true;
 
         [ObservableProperty]
-        private bool _useBetaUpdateChannel = true;
+        private bool _useBetaUpdateChannel;
 
         [ObservableProperty]
         private bool _checkUpdateOnStartup = true;
@@ -416,8 +421,8 @@ namespace SteamSwitcher.ViewModels
         public string GameCountText => GameList.Count.ToString();
         public string QuickLaunchCountText => QuickLaunchList.Count.ToString();
         public string QuickLaunchSummaryText => $"{QuickLaunchList.Count} 个快速项正在显示";
-        public string CurrentVersionText => $"当前版本：v{UpdateService.GetCurrentVersion()} · 测试版";
-        public string CompactVersionText => $"v{UpdateService.GetCurrentVersion()} 测试版 · 就绪";
+        public string CurrentVersionText => $"当前版本：v{UpdateService.GetCurrentVersion()}{(UpdateService.IsCurrentVersionPrerelease() ? " · 测试版" : "")}";
+        public string CompactVersionText => $"v{UpdateService.GetCurrentVersion()}{(UpdateService.IsCurrentVersionPrerelease() ? " 测试版" : "")} · 就绪";
         public string TaskbarPinnedStatusText => IsTaskbarPinned ? "任务栏常驻已开启" : "任务栏常驻未开启";
         public string AutoUpdateStatusText => AutoInstallUpdates
             ? "自动更新已开启"
@@ -731,10 +736,18 @@ namespace SteamSwitcher.ViewModels
 
         public async Task LaunchPinnedGameAsync(int appId)
         {
+            if (IsLoading)
+            {
+                StatusText = "已有账号或游戏操作正在进行，请稍候";
+                return;
+            }
+            IsLoading = true;
+
             var game = GameList.FirstOrDefault(g => g.AppId == appId);
             if (game == null || !game.HasBinding || string.IsNullOrEmpty(game.BindingAccountSteamId))
             {
                 StatusText = "该游戏未绑定账号";
+                IsLoading = false;
                 return;
             }
 
@@ -742,6 +755,7 @@ namespace SteamSwitcher.ViewModels
             if (account == null)
             {
                 StatusText = "绑定的账号不存在";
+                IsLoading = false;
                 return;
             }
 
@@ -756,23 +770,34 @@ namespace SteamSwitcher.ViewModels
 
             if (isCurrentAccount)
             {
-                StatusText = $"当前已是 {account.PersonaName}，直接启动 {game.GameName}...";
-                NotificationRequested?.Invoke(this, $"当前已是 {account.PersonaName}，直接启动 {game.GameName}");
-                var launched = await LaunchGameWithWorkflowAsync(appId, game.GameName, account);
-                if (launched)
+                try
                 {
-                    game.BindingLastPlayed = DateTime.Now.ToString("MM-dd HH:mm");
-                    StatusText = $"当前已是 {account.PersonaName}，正在启动 {game.GameName}";
+                    StatusText = $"当前已是 {account.PersonaName}，直接启动 {game.GameName}...";
+                    NotificationRequested?.Invoke(this, $"当前已是 {account.PersonaName}，直接启动 {game.GameName}");
+                    var launched = await LaunchGameWithWorkflowAsync(appId, game.GameName, account);
+                    if (launched)
+                    {
+                        game.BindingLastPlayed = DateTime.Now.ToString("MM-dd HH:mm");
+                        StatusText = $"当前已是 {account.PersonaName}，正在启动 {game.GameName}";
+                    }
+                    else
+                    {
+                        StatusText = $"启动 {game.GameName} 失败";
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    StatusText = $"启动 {game.GameName} 失败";
+                    AppLogger.Error($"LaunchPinnedGameAsync failed. appId={appId}", ex);
+                    StatusText = $"启动失败: {ex.Message}";
                 }
-                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                finally
+                {
+                    IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                    IsLoading = false;
+                }
                 return;
             }
 
-            IsLoading = true;
             StatusText = $"正在切换账号并启动 {game.GameName}...";
 
             try
@@ -808,8 +833,11 @@ namespace SteamSwitcher.ViewModels
             }
             finally
             {
-                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-                IsLoading = false;
+                if (!_disposed)
+                {
+                    IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                    IsLoading = false;
+                }
             }
         }
 
@@ -841,6 +869,7 @@ namespace SteamSwitcher.ViewModels
             _startWithWindows = _settings.StartWithWindows;
             _isTaskbarPinned = _settings.TaskbarPinned;
             _taskbarPosition = _settings.TaskbarPosition;
+            _taskbarMonitorIndex = Math.Clamp(_settings.TaskbarMonitorIndex, 0, 8);
             _taskbarOffsetX = _settings.TaskbarOffsetX;
             _taskbarOffsetY = _settings.TaskbarOffsetY;
             _taskbarWindowSize = _settings.TaskbarWindowSize;
@@ -891,7 +920,7 @@ namespace SteamSwitcher.ViewModels
             _taskbarLyricsShowVisualizer = _settings.TaskbarLyricsShowVisualizer;
             _taskbarLyricsTransparentBackground = _settings.TaskbarLyricsTransparentBackground;
             _taskbarLyricsAdaptiveWidth = _settings.TaskbarLyricsAdaptiveWidth;
-            _taskbarLyricsWidth = Math.Clamp(_settings.TaskbarLyricsWidth, 240, 520);
+            _taskbarLyricsWidth = Math.Clamp(_settings.TaskbarLyricsWidth, 240, 720);
             _taskbarLyricsTrackInfoOnly = _settings.TaskbarLyricsTrackInfoOnly;
             _taskbarLyricsShowSecondaryLine = _settings.TaskbarLyricsShowSecondaryLine;
             _taskbarLyricsPollingIntervalMs = Math.Clamp(_settings.TaskbarLyricsPollingIntervalMs, 60, 1000);
@@ -926,7 +955,6 @@ namespace SteamSwitcher.ViewModels
             _desktopFloatingGlassEnabled = _settings.DesktopFloatingGlassEnabled;
             _desktopFloatingRoundedMode = _settings.DesktopFloatingRoundedMode;
             _desktopFloatingGlassColor = _settings.DesktopFloatingGlassColor;
-            _startMinimizedToTray = _settings.StartMinimizedToTray;
             _playSoundOnSwitch = _settings.PlaySoundOnSwitch;
             _showSwitchNotification = _settings.ShowSwitchNotification;
             _taskbarLyricsFontSize = Math.Clamp(_settings.TaskbarLyricsFontSize, 12, 18);
@@ -1139,59 +1167,77 @@ namespace SteamSwitcher.ViewModels
 
         public async Task ScanGamesAsync()
         {
+            if (_disposed) return;
+            if (Interlocked.CompareExchange(ref _gameScanInProgress, 1, 0) != 0)
+            {
+                StatusText = "游戏扫描正在进行，请稍候...";
+                return;
+            }
+            var cancellationToken = _lifetimeCts.Token;
+            IsGameScanInProgress = true;
             IsLoading = true;
             StatusText = "正在扫描本地 Steam 游戏...";
 
-            await Task.Run(() =>
+            try
             {
-                var steamService = _accountManager.GetSteamService();
-                var games = steamService.GetInstalledGames();
-                var allBindings = _gameBinding.GetAllBindings();
-
-                Application.Current.Dispatcher.Invoke(() =>
+                var scanResult = await Task.Run(() =>
                 {
-                    GameList.Clear();
-                    var pinnedIds = new HashSet<int>(_settings.PinnedGameIds);
-                    foreach (var game in games)
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var steamService = _accountManager.GetSteamService();
+                    return (Games: steamService.GetInstalledGames(), Bindings: _gameBinding.GetAllBindings());
+                }, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                GameList.Clear();
+                var pinnedIds = new HashSet<int>(_settings.PinnedGameIds);
+                foreach (var game in scanResult.Games)
+                {
+                    var vm = new GameListViewModel(game.AppId, game.Name)
                     {
-                        var vm = new GameListViewModel(game.AppId, game.Name)
-                        {
-                            InstallDir = game.InstallDir,
-                            IconPath = game.IconPath,
-                            SizeDisplay = game.SizeDisplay,
-                            IsPinned = pinnedIds.Contains(game.AppId)
-                        };
+                        InstallDir = game.InstallDir,
+                        IconPath = game.IconPath,
+                        SizeDisplay = game.SizeDisplay,
+                        IsPinned = pinnedIds.Contains(game.AppId)
+                    };
 
-                        if (allBindings.TryGetValue(game.AppId, out var binding))
-                        {
-                            vm.HasBinding = true;
-                            vm.BindingAccountName = binding.AccountName;
-                            vm.BindingAccountSteamId = binding.AccountSteamId;
-                            vm.BindingLastPlayed = binding.LastPlayed?.ToString("MM-dd HH:mm") ?? "从未";
-                        }
-
-                        GameList.Add(vm);
+                    if (scanResult.Bindings.TryGetValue(game.AppId, out var binding))
+                    {
+                        vm.HasBinding = true;
+                        vm.BindingAccountName = binding.AccountName;
+                        vm.BindingAccountSteamId = binding.AccountSteamId;
+                        vm.BindingLastPlayed = binding.LastPlayed?.ToString("MM-dd HH:mm") ?? "从未";
                     }
+                    GameList.Add(vm);
+                }
 
-                    OnPropertyChanged(nameof(ShowEmptyHint));
-                    OnPropertyChanged(nameof(GameCountText));
-                    OnPropertyChanged(nameof(PinnedCountText));
-                });
-            });
-
-            if (_settings.PinnedGameIds.Count > 0)
-                PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
-
-            if (GameList.Count == 0)
-            {
-                StatusText = $"未找到已安装的游戏，请在 Steam 中安装游戏后重试";
+                OnPropertyChanged(nameof(ShowEmptyHint));
+                OnPropertyChanged(nameof(GameCountText));
+                OnPropertyChanged(nameof(PinnedCountText));
+                if (_settings.PinnedGameIds.Count > 0)
+                    PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
+                StatusText = GameList.Count == 0
+                    ? "未找到已安装的游戏，请在 Steam 中安装游戏后重试"
+                    : $"已找到 {GameList.Count} 个已安装的游戏";
             }
-            else
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                StatusText = $"已找到 {GameList.Count} 个已安装的游戏";
+                AppLogger.Info("Game scan canceled during shutdown.");
             }
-
-            IsLoading = false;
+            catch (Exception ex)
+            {
+                AppLogger.Error("Unable to scan installed Steam games.", ex);
+                if (!_disposed)
+                    StatusText = $"扫描游戏失败：{ex.Message}";
+            }
+            finally
+            {
+                if (!_disposed)
+                {
+                    IsLoading = false;
+                    IsGameScanInProgress = false;
+                }
+                Interlocked.Exchange(ref _gameScanInProgress, 0);
+            }
         }
 
         public async Task SaveGameBinding(int appId, string gameName, string steamId, string accountName)
@@ -1310,7 +1356,15 @@ namespace SteamSwitcher.ViewModels
             {
                 var installRoot = Path.Combine(game.LibraryPath, "steamapps", "common", game.InstallDir);
                 if (!await GameProcessMonitor.WaitForExitAsync(installRoot, processIdsBeforeLaunch, cancellationToken))
+                {
+                    DispatchToUi(() =>
+                    {
+                        var message = $"未能识别《{game.Name}》的运行进程，退出后操作未执行";
+                        StatusText = message;
+                        NotificationRequested?.Invoke(this, message);
+                    });
                     return;
+                }
                 if (binding.BackupAfterExit)
                 {
                     var backup = await _gameSaveAutoBackupService.BackupGameAsync(
@@ -1445,6 +1499,9 @@ namespace SteamSwitcher.ViewModels
                 case nameof(TaskbarPosition):
                     _settings.TaskbarPosition = TaskbarPosition;
                     break;
+                case nameof(TaskbarMonitorIndex):
+                    _settings.TaskbarMonitorIndex = Math.Clamp(TaskbarMonitorIndex, 0, 8);
+                    break;
                 case nameof(TaskbarOffsetX):
                     _settings.TaskbarOffsetX = TaskbarOffsetX;
                     break;
@@ -1551,7 +1608,7 @@ namespace SteamSwitcher.ViewModels
                     _settings.TaskbarLyricsAdaptiveWidth = TaskbarLyricsAdaptiveWidth;
                     break;
                 case nameof(TaskbarLyricsWidth):
-                    _settings.TaskbarLyricsWidth = Math.Clamp(TaskbarLyricsWidth, 240, 520);
+                    _settings.TaskbarLyricsWidth = Math.Clamp(TaskbarLyricsWidth, 240, 720);
                     break;
                 case nameof(TaskbarLyricsTrackInfoOnly):
                     _settings.TaskbarLyricsTrackInfoOnly = TaskbarLyricsTrackInfoOnly;
@@ -1606,9 +1663,6 @@ namespace SteamSwitcher.ViewModels
                     break;
                 case nameof(SmartSaveDiscoveryEnabled):
                     _settings.SmartSaveDiscoveryEnabled = SmartSaveDiscoveryEnabled;
-                    break;
-                case nameof(StartMinimizedToTray):
-                    _settings.StartMinimizedToTray = StartMinimizedToTray;
                     break;
                 case nameof(PlaySoundOnSwitch):
                     _settings.PlaySoundOnSwitch = PlaySoundOnSwitch;
@@ -1956,6 +2010,8 @@ namespace SteamSwitcher.ViewModels
 
         private async Task CheckForUpdatesAsync(bool isManual)
         {
+            if (_disposed) return;
+            var cancellationToken = _lifetimeCts.Token;
             if (Interlocked.Exchange(ref _updateCheckInProgress, 1) != 0)
             {
                 if (isManual)
@@ -1969,7 +2025,8 @@ namespace SteamSwitcher.ViewModels
                     StatusText = UseBetaUpdateChannel ? "正在检查 GitHub 测试版更新..." : "正在检查 GitHub 正式版更新...";
 
                 using var updateService = new UpdateService();
-                var updateInfo = await updateService.CheckForUpdateAsync(UseBetaUpdateChannel);
+                var updateInfo = await updateService.CheckForUpdateAsync(UseBetaUpdateChannel, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (updateInfo != null)
                 {
                     StatusText = $"发现新版本 v{updateInfo.Version}";
@@ -1977,7 +2034,7 @@ namespace SteamSwitcher.ViewModels
 
                     if (AutoInstallUpdates)
                     {
-                        await DownloadAndInstallUpdateAsync(updateService, updateInfo);
+                        await DownloadAndInstallUpdateAsync(updateService, updateInfo, cancellationToken);
                         return;
                     }
 
@@ -1987,6 +2044,10 @@ namespace SteamSwitcher.ViewModels
                 {
                     StatusText = $"当前已是最新版本 v{UpdateService.GetCurrentVersion()}";
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                AppLogger.Info("Update check canceled during shutdown.");
             }
             catch (UpdateCheckException ex)
             {
@@ -2011,7 +2072,7 @@ namespace SteamSwitcher.ViewModels
                 Volatile.Write(ref _updateCheckInProgress, 0);
             }
         }
-        private async Task DownloadAndInstallUpdateAsync(UpdateService updateService, UpdateInfo updateInfo)
+        private async Task DownloadAndInstallUpdateAsync(UpdateService updateService, UpdateInfo updateInfo, CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(updateInfo.DownloadUrl))
             {
@@ -2030,9 +2091,13 @@ namespace SteamSwitcher.ViewModels
             try
             {
                 StatusText = $"正在下载 v{updateInfo.Version} 更新...";
-                var filePath = await updateService.DownloadUpdateToFileAsync(updateInfo);
+                var filePath = await updateService.DownloadUpdateToFileAsync(updateInfo, cancellationToken);
                 StatusText = "更新下载完成，正在启动安装器...";
                 UpdateService.LaunchInstaller(filePath, updateInfo.ExpectedSha256);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                AppLogger.Info("Automatic update download canceled during shutdown.");
             }
             catch (Exception ex)
             {
@@ -2169,6 +2234,11 @@ namespace SteamSwitcher.ViewModels
         private async Task SwitchAccountAsync(bool launchSteam)
         {
             if (SelectedAccount == null) return;
+            if (IsLoading)
+            {
+                StatusText = "账号操作正在进行，请稍候";
+                return;
+            }
 
             var currentSteamId = _accountManager.CurrentAccount?.SteamId;
             var currentAccountName = _accountManager.CurrentAccount?.AccountName;
@@ -2310,6 +2380,8 @@ namespace SteamSwitcher.ViewModels
         [RelayCommand]
         private async Task StartInjectorAsync()
         {
+            if (_disposed) return;
+            var cancellationToken = _lifetimeCts.Token;
             if (_injector != null && _injector.IsConnected)
             {
                 StatusText = $"注入器已连接，日志: {AppLogger.CurrentLogPath}";
@@ -2334,6 +2406,7 @@ namespace SteamSwitcher.ViewModels
                 confirmed = warningResult == MessageBoxResult.Yes;
             });
 
+            cancellationToken.ThrowIfCancellationRequested();
             if (!confirmed)
                 return;
 
@@ -2351,9 +2424,10 @@ namespace SteamSwitcher.ViewModels
                 _wsServer.ClientConnected += (s, id) => AppLogger.Info($"Library WebSocket client connected: {id}");
                 _wsServer.ClientDisconnected += (s, id) => AppLogger.Info($"Library WebSocket client disconnected: {id}");
                 await _wsServer.StartAsync();
+                cancellationToken.ThrowIfCancellationRequested();
                 AppLogger.Info($"Authenticated local WebSocket server started on port {webSocketPort}.");
 
-                var debugReady = await EnsureSteamDebuggingAsync();
+                var debugReady = await EnsureSteamDebuggingAsync(cancellationToken);
                 if (!debugReady.HasValue)
                 {
                     CleanupInjectorResources();
@@ -2374,12 +2448,18 @@ namespace SteamSwitcher.ViewModels
                 };
 
                 var connected = await _injector.ConnectAsync();
+                cancellationToken.ThrowIfCancellationRequested();
                 IsInjectorConnected = connected;
                 if (!connected)
                     CleanupInjectorResources();
                 StatusText = connected
                     ? $"注入器已启动，日志: {AppLogger.CurrentLogPath}"
                     : $"注入失败，日志: {AppLogger.CurrentLogPath}";
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CleanupInjectorResources();
+                AppLogger.Info("Injector startup canceled during shutdown.");
             }
             catch (Exception ex)
             {
@@ -2395,9 +2475,9 @@ namespace SteamSwitcher.ViewModels
             }
         }
 
-        private async Task<int?> EnsureSteamDebuggingAsync()
+        private async Task<int?> EnsureSteamDebuggingAsync(CancellationToken cancellationToken)
         {
-            if (await IsSteamDebugPortOpenAsync(SteamDebugPort))
+            if (await IsSteamDebugPortOpenAsync(SteamDebugPort, cancellationToken))
             {
                 AppLogger.Info("Steam debug port is already open.");
                 return SteamDebugPort;
@@ -2430,11 +2510,11 @@ namespace SteamSwitcher.ViewModels
 
             for (var i = 0; i < 30; i++)
             {
-                await Task.Delay(1000);
-                if (await IsSteamDebugPortOpenAsync(debugPort))
+                await Task.Delay(1000, cancellationToken);
+                if (await IsSteamDebugPortOpenAsync(debugPort, cancellationToken))
                 {
                     AppLogger.Info($"Steam debug port became ready after {i + 1} seconds.");
-                    await Task.Delay(1500);
+                    await Task.Delay(1500, cancellationToken);
                     return debugPort;
                 }
             }
@@ -2443,19 +2523,23 @@ namespace SteamSwitcher.ViewModels
             return null;
         }
 
-        private static async Task<bool> IsSteamDebugPortOpenAsync(int port)
+        private static async Task<bool> IsSteamDebugPortOpenAsync(int port, CancellationToken cancellationToken)
         {
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-                using var response = await http.GetAsync($"http://127.0.0.1:{port}/json/version");
+                using var response = await http.GetAsync($"http://127.0.0.1:{port}/json/version", cancellationToken);
                 var json = response.IsSuccessStatusCode
-                    ? await response.Content.ReadAsStringAsync()
+                    ? await response.Content.ReadAsStringAsync(cancellationToken)
                     : "";
                 var ok = response.IsSuccessStatusCode &&
                          json.Contains("webSocketDebuggerUrl", StringComparison.OrdinalIgnoreCase);
                 AppLogger.Info($"Debug port check: status={(int)response.StatusCode}, ok={ok}");
                 return ok;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -2520,7 +2604,22 @@ namespace SteamSwitcher.ViewModels
             _wsServer = null;
         }
 
-        private async void OnWebSocketMessage(object? sender, (string action, System.Text.Json.JsonElement data) e)
+        private void OnWebSocketMessage(object? sender, (string action, System.Text.Json.JsonElement data) e)
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted)
+                return;
+
+            if (!dispatcher.CheckAccess())
+            {
+                _ = dispatcher.BeginInvoke(new Action(() => OnWebSocketMessage(sender, e)));
+                return;
+            }
+
+            _ = HandleWebSocketMessageAsync(e);
+        }
+
+        private async Task HandleWebSocketMessageAsync((string action, System.Text.Json.JsonElement data) e)
         {
             try
             {
@@ -2575,6 +2674,13 @@ namespace SteamSwitcher.ViewModels
 
         private async Task SwitchAccountAndLaunchGameAsync(int appId, string gameName, string? steamId)
         {
+            if (IsLoading)
+            {
+                StatusText = "已有账号或游戏操作正在进行，请稍候";
+                return;
+            }
+            IsLoading = true;
+
             var account = !string.IsNullOrEmpty(steamId)
                 ? _accountManager.Accounts.FirstOrDefault(a => a.SteamId == steamId)
                 : null;
@@ -2589,6 +2695,7 @@ namespace SteamSwitcher.ViewModels
             {
                 AppLogger.Info($"No account binding found for appId={appId}.");
                 StatusText = "请先为此游戏选择账号";
+                IsLoading = false;
                 return;
             }
 
@@ -2603,25 +2710,36 @@ namespace SteamSwitcher.ViewModels
 
             if (isCurrentAccount)
             {
-                StatusText = $"当前已是 {account.PersonaName}，直接启动游戏...";
-                NotificationRequested?.Invoke(this, $"当前已是 {account.PersonaName}，直接启动游戏");
-                if (!string.IsNullOrWhiteSpace(gameName))
+                try
                 {
-                    await _gameBinding.SetBindingAsync(appId, gameName, account.SteamId, account.AccountName);
+                    StatusText = $"当前已是 {account.PersonaName}，直接启动游戏...";
+                    NotificationRequested?.Invoke(this, $"当前已是 {account.PersonaName}，直接启动游戏");
+                    if (!string.IsNullOrWhiteSpace(gameName))
+                    {
+                        await _gameBinding.SetBindingAsync(appId, gameName, account.SteamId, account.AccountName);
+                    }
+                    else
+                    {
+                        await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
+                    }
+                    var launched = await LaunchGameWithWorkflowAsync(appId, gameName, account);
+                    StatusText = launched
+                        ? $"当前已是 {account.PersonaName}，正在启动游戏"
+                        : "启动游戏失败";
                 }
-                else
+                catch (Exception ex)
                 {
-                    await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
+                    AppLogger.Error($"SwitchAccountAndLaunchGameAsync failed. appId={appId}", ex);
+                    StatusText = $"启动失败: {ex.Message}";
                 }
-                var launched = await LaunchGameWithWorkflowAsync(appId, gameName, account);
-                StatusText = launched
-                    ? $"当前已是 {account.PersonaName}，正在启动游戏"
-                    : "启动游戏失败";
-                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                finally
+                {
+                    IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                    IsLoading = false;
+                }
                 return;
             }
 
-            IsLoading = true;
             StatusText = "正在切换账号并启动游戏...";
 
             try
@@ -2693,6 +2811,7 @@ namespace SteamSwitcher.ViewModels
                 return;
 
             _disposed = true;
+            _lifetimeCts.Cancel();
             _settingsSaveTimer.Stop();
             _settingsSaveTimer.Tick -= OnSettingsSaveTimerTick;
             _steamStatusTimer.Stop();

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using SteamSwitcher.Services;
@@ -18,13 +19,15 @@ namespace SteamSwitcher.Views
             _updateInfo = updateInfo;
 
             VersionText.Text = $"v{updateInfo.Version}{(updateInfo.IsPrerelease ? " · 测试版" : "")}";
-            CurrentVersionText.Text = $"当前版本：v{UpdateService.GetCurrentVersion()} · 测试版";
+            CurrentVersionText.Text = $"当前版本：v{UpdateService.GetCurrentVersion()}{(UpdateService.IsCurrentVersionPrerelease() ? " · 测试版" : "")}";
             IntegrityText.Text = updateInfo.CanVerifyIntegrity
                 ? "GitHub 官方源 · SHA-256 完整性校验可用"
                 : "此版本缺少完整性摘要，只能前往 GitHub 手动下载";
             ChangelogText.Text = string.IsNullOrWhiteSpace(updateInfo.Changelog)
                 ? "暂无更新说明"
                 : updateInfo.Changelog;
+            if (!updateInfo.CanVerifyIntegrity)
+                DownloadButton.Content = "打开 GitHub";
 
             _updateService.DownloadProgress += OnDownloadProgress;
             _updateService.DownloadCompleted += OnDownloadCompleted;
@@ -91,6 +94,22 @@ namespace SteamSwitcher.Views
 
         private async void Download_Click(object sender, RoutedEventArgs e)
         {
+            if (!_updateInfo.CanVerifyIntegrity)
+            {
+                if (Uri.TryCreate(_updateInfo.ReleaseUrl, UriKind.Absolute, out var releaseUri) &&
+                    releaseUri.Scheme == Uri.UriSchemeHttps &&
+                    releaseUri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    Process.Start(new ProcessStartInfo(releaseUri.AbsoluteUri) { UseShellExecute = true });
+                    Close();
+                }
+                else
+                {
+                    MessageBox.Show("更新页面地址无效，已阻止打开。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                return;
+            }
+
             if (string.IsNullOrEmpty(_updateInfo.DownloadUrl))
             {
                 MessageBox.Show("没有可用的下载链接，请前往 GitHub 手动下载。",

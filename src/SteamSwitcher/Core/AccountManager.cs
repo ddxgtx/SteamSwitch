@@ -96,7 +96,7 @@ namespace SteamSwitcher.Core
 
             CurrentAccount = resolved;
             AppLogger.Info($"Refreshed current Steam account: registry={autoLoginUser ?? "<none>"}, mostRecent={mostRecentSteamId ?? "<none>"}, current={resolved?.AccountName ?? "<none>"}");
-            CurrentAccountChanged?.Invoke(this, EventArgs.Empty);
+            RaiseSafely(CurrentAccountChanged, nameof(CurrentAccountChanged));
             return true;
         }
 
@@ -121,8 +121,8 @@ namespace SteamSwitcher.Core
             var loginUsersPath = _steamService.GetLoginUsersPath();
             if (!File.Exists(loginUsersPath))
             {
-                AccountsChanged?.Invoke(this, EventArgs.Empty);
-                CurrentAccountChanged?.Invoke(this, EventArgs.Empty);
+                RaiseSafely(AccountsChanged, nameof(AccountsChanged));
+                RaiseSafely(CurrentAccountChanged, nameof(CurrentAccountChanged));
                 return Task.CompletedTask;
             }
 
@@ -169,8 +169,8 @@ namespace SteamSwitcher.Core
                 System.Diagnostics.Debug.WriteLine($"Error loading accounts: {ex.Message}");
             }
 
-            AccountsChanged?.Invoke(this, EventArgs.Empty);
-            CurrentAccountChanged?.Invoke(this, EventArgs.Empty);
+            RaiseSafely(AccountsChanged, nameof(AccountsChanged));
+            RaiseSafely(CurrentAccountChanged, nameof(CurrentAccountChanged));
 
             var accountSnapshot = Accounts.ToList();
             _ = DownloadMissingAvatarsAsync(accountSnapshot, _avatarDownloadCts.Token);
@@ -209,7 +209,7 @@ namespace SteamSwitcher.Core
                 }
 
                 if (avatarUpdated && !_disposed && !cancellationToken.IsCancellationRequested)
-                    AccountsChanged?.Invoke(this, EventArgs.Empty);
+                    RaiseSafely(AccountsChanged, nameof(AccountsChanged));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -288,8 +288,8 @@ namespace SteamSwitcher.Core
                 }
                 CurrentAccount = account;
 
-                AccountsChanged?.Invoke(this, EventArgs.Empty);
-                CurrentAccountChanged?.Invoke(this, EventArgs.Empty);
+                RaiseSafely(AccountsChanged, nameof(AccountsChanged));
+                RaiseSafely(CurrentAccountChanged, nameof(CurrentAccountChanged));
                 return true;
             }
             catch (Exception ex)
@@ -311,6 +311,22 @@ namespace SteamSwitcher.Core
             bool startInBigPicture = false)
         {
             return _steamService.StartGame(appId, silent, launchArguments, startInBigPicture);
+        }
+
+        private void RaiseSafely(EventHandler? handlers, string eventName)
+        {
+            if (handlers == null) return;
+            foreach (EventHandler handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, EventArgs.Empty);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error($"AccountManager event subscriber failed: {eventName}.", ex);
+                }
+            }
         }
 
         private async Task<bool> UpdateLoginUsersVdfAsync(string activeSteamId)
@@ -381,6 +397,7 @@ namespace SteamSwitcher.Core
                     throw new InvalidDataException("生成的 loginusers.vdf 未通过重新解析校验。");
 
                 var transientBackup = $"{backupPath}.{Guid.NewGuid():N}.tmp";
+                var preserveTransientBackup = false;
                 try
                 {
                     File.Replace(tempPath, loginUsersPath, transientBackup, ignoreMetadataErrors: true);
@@ -390,12 +407,31 @@ namespace SteamSwitcher.Core
                     }
                     catch (Exception ex)
                     {
-                        AppLogger.Warn($"loginusers.vdf 已更新，但上一版本备份轮换失败：{ex.Message}");
+                        // Do not commit a switch without a verified pre-switch rollback point.
+                        // Leaving an older .bak in place could restore the wrong account if the
+                        // following registry update fails.
+                        AppLogger.Error("Unable to rotate the pre-switch loginusers.vdf backup; rolling the VDF change back.", ex);
+                        try
+                        {
+                            File.Replace(transientBackup, loginUsersPath, null, ignoreMetadataErrors: true);
+                        }
+                        catch (Exception rollbackEx)
+                        {
+                            preserveTransientBackup = true;
+                            AppLogger.Error("Failed to roll back loginusers.vdf after backup rotation failed.", rollbackEx);
+                            AppLogger.Error($"The pre-switch VDF was preserved for manual recovery at: {transientBackup}");
+                        }
+                        return false;
                     }
                 }
                 finally
                 {
-                    try { if (File.Exists(transientBackup)) File.Delete(transientBackup); } catch { }
+                    try
+                    {
+                        if (!preserveTransientBackup && File.Exists(transientBackup))
+                            File.Delete(transientBackup);
+                    }
+                    catch { }
                 }
                 return true;
             }

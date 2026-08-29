@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Win32;
@@ -25,6 +26,10 @@ namespace SteamSwitcher.Core
         private IntPtr _mouseHook;
         private readonly HookProc _mouseProc;
         private bool _disposed;
+        private static string RecoveryMarkerPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SteamSwitch",
+            "desktop-icons-hidden.lock");
 
         public event EventHandler<bool>? IconVisibilityChanged;
         public event EventHandler<int>? CountdownChanged;
@@ -48,7 +53,9 @@ namespace SteamSwitcher.Core
                 _lastDesktopActivityAt = _timerStartedAt;
                 _hasDesktopActivityCursor = false;
                 _timer ??= new Timer(_ => Tick(), null, Timeout.Infinite, Timeout.Infinite);
-                _timer.Change(_settings.EnableAutoHideIcons ? 250 : Timeout.Infinite, 250);
+                _timer.Change(_settings.EnableAutoHideIcons || File.Exists(RecoveryMarkerPath)
+                    ? 250
+                    : Timeout.Infinite, 250);
                 UpdateDesktopClickHook();
                 if (!_settings.EnableAutoHideIcons && (_iconsHidden || _desktopListHiddenByApp))
                     ShowIconsCore();
@@ -71,10 +78,12 @@ namespace SteamSwitcher.Core
                 }
                 if (_iconsHidden) return true;
                 GetCursorPos(out _hiddenCursor);
+                if (!CreateRecoveryMarker()) return false;
                 // Hide only Explorer's desktop list view without refreshing open file windows.
                 ShowWindow(iconList, SwHide);
                 _desktopListHiddenByApp = !IsWindowVisible(iconList);
                 _iconsHidden = _desktopListHiddenByApp;
+                if (!_iconsHidden) DeleteRecoveryMarker();
                 if (_iconsHidden)
                     IconVisibilityChanged?.Invoke(this, false);
                 CountdownChanged?.Invoke(this, 0);
@@ -87,12 +96,19 @@ namespace SteamSwitcher.Core
             lock (_sync) ShowIconsCore();
         }
 
-        public bool RecoverIconsAfterUnexpectedShutdown()
+        public bool RecoverIconsAfterUnexpectedShutdown(bool legacyHiddenByApp = false)
         {
             lock (_sync)
             {
                 if (_disposed) return false;
-                if (!AreDesktopIconsHidden()) return true;
+                if (!File.Exists(RecoveryMarkerPath) && !legacyHiddenByApp) return false;
+                if (!File.Exists(RecoveryMarkerPath) && legacyHiddenByApp)
+                    CreateRecoveryMarker();
+                if (!AreDesktopIconsHidden())
+                {
+                    DeleteRecoveryMarker();
+                    return true;
+                }
                 var iconList = FindDesktopIconList();
                 if (iconList == IntPtr.Zero)
                     return false;
@@ -103,6 +119,7 @@ namespace SteamSwitcher.Core
                 {
                     _iconsHidden = false;
                     _desktopListHiddenByApp = false;
+                    DeleteRecoveryMarker();
                 }
                 return recovered;
             }
@@ -111,12 +128,14 @@ namespace SteamSwitcher.Core
         private void ShowIconsCore()
         {
             var iconList = FindDesktopIconList();
-            if ((_iconsHidden || _desktopListHiddenByApp) && iconList != IntPtr.Zero)
+            if ((_iconsHidden || _desktopListHiddenByApp || File.Exists(RecoveryMarkerPath)) && iconList != IntPtr.Zero)
                 ShowWindow(iconList, SwShow);
-            if (_iconsHidden && iconList != IntPtr.Zero && IsWindowVisible(iconList))
+            if (iconList != IntPtr.Zero && IsWindowVisible(iconList) &&
+                (_iconsHidden || _desktopListHiddenByApp || File.Exists(RecoveryMarkerPath)))
             {
                 _iconsHidden = false;
                 _desktopListHiddenByApp = false;
+                DeleteRecoveryMarker();
                 _timerStartedAt = Environment.TickCount64;
                 _lastDesktopActivityAt = _timerStartedAt;
                 IconVisibilityChanged?.Invoke(this, true);
@@ -130,7 +149,13 @@ namespace SteamSwitcher.Core
         {
             lock (_sync)
             {
-                if (_disposed || !_settings.EnableAutoHideIcons) return;
+                if (_disposed) return;
+                if (File.Exists(RecoveryMarkerPath) && !_iconsHidden && !_desktopListHiddenByApp)
+                {
+                    RecoverIconsAfterUnexpectedShutdown();
+                    if (!_settings.EnableAutoHideIcons) return;
+                }
+                if (!_settings.EnableAutoHideIcons) return;
                 if (_iconsHidden)
                 {
                     // Explorer can restart and recreate the desktop host. Reacquire it on every
@@ -238,10 +263,14 @@ namespace SteamSwitcher.Core
 
         private static bool IsDesktopWindow(IntPtr handle)
         {
+            var sawDesktopComponent = false;
             for (var current = handle; current != IntPtr.Zero; current = GetParent(current))
             {
                 var name = GetClassName(current);
-                if (name is "Progman" or "WorkerW" or "SHELLDLL_DefView" or "SysListView32") return true;
+                if (name is "SHELLDLL_DefView" or "SysListView32")
+                    sawDesktopComponent = true;
+                if (name is "Progman" or "WorkerW")
+                    return sawDesktopComponent || current == handle;
             }
             return false;
         }
@@ -284,9 +313,20 @@ namespace SteamSwitcher.Core
         private static IntPtr FindDesktopIconListIn(IntPtr root)
         {
             if (root == IntPtr.Zero) return IntPtr.Zero;
-            if (GetClassName(root) == "SysListView32") return root;
-            IntPtr found = IntPtr.Zero;
+            var rootClass = GetClassName(root);
+            if (rootClass is not ("Progman" or "WorkerW")) return IntPtr.Zero;
+
+            IntPtr shellView = IntPtr.Zero;
             EnumChildWindows(root, (child, _) =>
+            {
+                if (GetClassName(child) != "SHELLDLL_DefView") return true;
+                shellView = child;
+                return false;
+            }, IntPtr.Zero);
+            if (shellView == IntPtr.Zero) return IntPtr.Zero;
+
+            IntPtr found = IntPtr.Zero;
+            EnumChildWindows(shellView, (child, _) =>
             {
                 if (GetClassName(child) != "SysListView32") return true;
                 found = child;
@@ -300,6 +340,41 @@ namespace SteamSwitcher.Core
             var buffer = new char[128];
             var length = GetClassName(handle, buffer, buffer.Length);
             return length > 0 ? new string(buffer, 0, length) : string.Empty;
+        }
+
+        private static bool CreateRecoveryMarker()
+        {
+            var markerPath = RecoveryMarkerPath;
+            var directory = Path.GetDirectoryName(markerPath)!;
+            var temporaryPath = markerPath + $".{Guid.NewGuid():N}.tmp";
+            try
+            {
+                Directory.CreateDirectory(directory);
+                using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 256, FileOptions.WriteThrough))
+                using (var writer = new StreamWriter(stream))
+                {
+                    writer.Write(Environment.ProcessId);
+                    writer.Flush();
+                    stream.Flush(flushToDisk: true);
+                }
+                File.Move(temporaryPath, markerPath, overwrite: true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Unable to create the desktop icon recovery marker; icons will remain visible.", ex);
+                return false;
+            }
+            finally
+            {
+                try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch { }
+            }
+        }
+
+        private static void DeleteRecoveryMarker()
+        {
+            try { if (File.Exists(RecoveryMarkerPath)) File.Delete(RecoveryMarkerPath); }
+            catch (Exception ex) { AppLogger.Warn($"Unable to remove the desktop icon recovery marker: {ex.Message}"); }
         }
 
         public void Dispose()

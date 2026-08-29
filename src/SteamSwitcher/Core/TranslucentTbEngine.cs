@@ -36,6 +36,31 @@ namespace SteamSwitcher.Core
         private bool _started;
         private bool _ownsProcess;
         private long _lastStartAttemptTick;
+        private string? _managedConfigPath;
+        private string? _configRestoreBackupPath;
+        private string? _configCreationMarkerPath;
+
+        public TranslucentTbEngine()
+        {
+            // Recover configuration left behind by a hard termination before any new
+            // synchronization is attempted. Normal taskbar rendering no longer depends on TTB.
+            try
+            {
+                var configPath = FindConfigPath();
+                if (string.IsNullOrWhiteSpace(configPath)) return;
+                var backupPath = configPath + ".steamswitch.restore.bak";
+                var markerPath = configPath + ".steamswitch.created";
+                if (!File.Exists(backupPath) && !File.Exists(markerPath)) return;
+                _managedConfigPath = configPath;
+                _configRestoreBackupPath = backupPath;
+                _configCreationMarkerPath = markerPath;
+                RestoreOriginalConfiguration();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to recover a previous TranslucentTB configuration session: {ex.Message}");
+            }
+        }
 
         public bool IsRunning
         {
@@ -168,7 +193,8 @@ namespace SteamSwitcher.Core
                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 });
 
-                File.WriteAllText(configPath, json, Encoding.UTF8);
+                PrepareConfigurationRestorePoint(configPath);
+                WriteTextAtomically(configPath, json);
                 AppLogger.Info($"TranslucentTB config synchronized: {configPath}");
             }
             catch (Exception ex)
@@ -265,6 +291,117 @@ namespace SteamSwitcher.Core
                     _ttbProcess = null;
                     _ownsProcess = false;
                 }
+
+                RestoreOriginalConfiguration();
+            }
+        }
+
+        private void PrepareConfigurationRestorePoint(string configPath)
+        {
+            if (string.Equals(_managedConfigPath, configPath, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _managedConfigPath = configPath;
+            _configRestoreBackupPath = configPath + ".steamswitch.restore.bak";
+            _configCreationMarkerPath = configPath + ".steamswitch.created";
+
+            // A leftover marker is evidence that the previous process terminated before Stop().
+            // Recover the user's configuration before beginning a new managed session.
+            if (File.Exists(_configRestoreBackupPath))
+            {
+                RestoreFileAtomically(_configRestoreBackupPath, configPath);
+                return;
+            }
+
+            if (File.Exists(_configCreationMarkerPath))
+            {
+                if (File.Exists(configPath)) File.Delete(configPath);
+                return;
+            }
+
+            if (File.Exists(configPath))
+            {
+                File.Copy(configPath, _configRestoreBackupPath, overwrite: false);
+            }
+            else
+            {
+                File.WriteAllText(_configCreationMarkerPath, string.Empty, Encoding.UTF8);
+            }
+        }
+
+        private void RestoreOriginalConfiguration()
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(_managedConfigPath) &&
+                    !string.IsNullOrWhiteSpace(_configRestoreBackupPath) &&
+                    File.Exists(_configRestoreBackupPath))
+                {
+                    RestoreFileAtomically(_configRestoreBackupPath, _managedConfigPath);
+                    File.Delete(_configRestoreBackupPath);
+                    if (!string.IsNullOrWhiteSpace(_configCreationMarkerPath) && File.Exists(_configCreationMarkerPath))
+                        File.Delete(_configCreationMarkerPath);
+                }
+                else if (!string.IsNullOrWhiteSpace(_managedConfigPath) &&
+                         !string.IsNullOrWhiteSpace(_configCreationMarkerPath) &&
+                         File.Exists(_configCreationMarkerPath))
+                {
+                    if (File.Exists(_managedConfigPath)) File.Delete(_managedConfigPath);
+                    File.Delete(_configCreationMarkerPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Failed to restore the original TranslucentTB configuration: {ex.Message}");
+            }
+            finally
+            {
+                _managedConfigPath = null;
+                _configRestoreBackupPath = null;
+                _configCreationMarkerPath = null;
+            }
+        }
+
+        private static void WriteTextAtomically(string path, string content)
+        {
+            var directory = Path.GetDirectoryName(path)
+                ?? throw new InvalidOperationException("Unable to determine the TranslucentTB configuration directory.");
+            Directory.CreateDirectory(directory);
+            var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 16 * 1024, FileOptions.WriteThrough))
+                using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+                {
+                    writer.Write(content);
+                    writer.Flush();
+                    stream.Flush(flushToDisk: true);
+                }
+
+                if (File.Exists(path)) File.Replace(temporaryPath, path, null, ignoreMetadataErrors: true);
+                else File.Move(temporaryPath, path);
+            }
+            finally
+            {
+                try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch { }
+            }
+        }
+
+        private static void RestoreFileAtomically(string sourcePath, string destinationPath)
+        {
+            var directory = Path.GetDirectoryName(destinationPath)
+                ?? throw new InvalidOperationException("Unable to determine the TranslucentTB configuration directory.");
+            Directory.CreateDirectory(directory);
+            var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.restore.tmp");
+            try
+            {
+                File.Copy(sourcePath, temporaryPath, overwrite: false);
+                if (File.Exists(destinationPath)) File.Replace(temporaryPath, destinationPath, null, ignoreMetadataErrors: true);
+                else File.Move(temporaryPath, destinationPath);
+            }
+            finally
+            {
+                try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch { }
             }
         }
 

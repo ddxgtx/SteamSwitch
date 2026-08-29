@@ -11,6 +11,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media.Imaging;
+using Microsoft.Win32;
 using SteamSwitcher.Core;
 using SteamSwitcher.Models;
 using SteamSwitcher.Services;
@@ -28,6 +29,7 @@ namespace SteamSwitcher.Views
         private readonly CancellationTokenSource _lifetimeCts = new();
         private GameSaveBackupService? _backupService;
         private bool _isBusy;
+        private bool _disposed;
         private int _changeAnalysisVersion;
 
         public GameSaveCenterWindow(MainViewModel mainViewModel)
@@ -74,6 +76,7 @@ namespace SteamSwitcher.Views
 
         private async Task RefreshEntriesAsync()
         {
+            if (_disposed) return;
             var steamService = _mainViewModel.GetAccountManager().GetSteamService();
             if (string.IsNullOrWhiteSpace(steamService.SteamPath) || !Directory.Exists(steamService.SteamPath))
             {
@@ -242,6 +245,10 @@ namespace SteamSwitcher.Views
                         if (result.WasSkipped) skipped++;
                         await RefreshEntryBackupStateAsync(entry);
                     }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         failed.Add($"{entry.AccountDisplayName} / {entry.GameName}");
@@ -318,6 +325,54 @@ namespace SteamSwitcher.Views
             {
                 await _backupService.VerifyBackupAsync(entry, backup.FilePath, token);
                 SetStatus($"备份校验通过：{backup.DisplayName}", false);
+            });
+        }
+
+        private async void ExportBackup_Click(object sender, RoutedEventArgs e)
+        {
+            if (SaveList.SelectedItem is not GameSaveEntry entry ||
+                BackupHistoryCombo.SelectedItem is not GameSaveBackupInfo backup ||
+                _backupService == null)
+                return;
+
+            var dialog = new SaveFileDialog
+            {
+                Title = "导出存档备份",
+                Filter = "SteamSwitch 存档备份 (*.zip)|*.zip",
+                FileName = $"{entry.GameName}-{backup.DisplayName}.zip",
+                AddExtension = true,
+                DefaultExt = ".zip"
+            };
+            if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+
+            await RunBusyAsync("正在校验并导出备份…", async token =>
+            {
+                await _backupService.ExportBackupAsync(entry, backup.FilePath, dialog.FileName, token);
+                SetStatus($"备份已导出：{dialog.FileName}", false);
+            });
+        }
+
+        private async void ImportBackup_Click(object sender, RoutedEventArgs e)
+        {
+            if (SaveList.SelectedItem is not GameSaveEntry entry || _backupService == null)
+                return;
+
+            var dialog = new OpenFileDialog
+            {
+                Title = $"为 {entry.GameName} 导入完整备份",
+                Filter = "SteamSwitch 存档备份 (*.zip)|*.zip",
+                CheckFileExists = true,
+                Multiselect = false
+            };
+            if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+
+            await RunBusyAsync("正在校验并导入备份…", async token =>
+            {
+                var imported = await _backupService.ImportBackupAsync(entry, dialog.FileName, token);
+                LoadBackupHistory(entry, imported);
+                entry.BackupCount = _selectedBackups.Count;
+                entry.LastBackupTime = _selectedBackups.FirstOrDefault()?.CreatedAt;
+                SetStatus("完整备份已安全导入。", false);
             });
         }
 
@@ -412,7 +467,7 @@ namespace SteamSwitcher.Views
 
         private async Task RunBusyAsync(string initialStatus, Func<CancellationToken, Task> operation)
         {
-            if (_isBusy) return;
+            if (_disposed || _isBusy) return;
             _isBusy = true;
             BusyProgress.Visibility = Visibility.Visible;
             SetActionButtonsEnabled(false);
@@ -426,6 +481,7 @@ namespace SteamSwitcher.Views
             }
             catch (Exception ex)
             {
+                if (_disposed) return;
                 AppLogger.Error("Game save center operation failed.", ex);
                 SetStatus($"操作失败：{ex.Message}", false);
                 MessageBox.Show(Window.GetWindow(this), ex.Message, "游戏存档中心", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -433,8 +489,11 @@ namespace SteamSwitcher.Views
             finally
             {
                 _isBusy = false;
-                BusyProgress.Visibility = Visibility.Collapsed;
-                SetActionButtonsEnabled(true);
+                if (!_disposed)
+                {
+                    BusyProgress.Visibility = Visibility.Collapsed;
+                    SetActionButtonsEnabled(true);
+                }
             }
         }
 
@@ -445,6 +504,8 @@ namespace SteamSwitcher.Views
             RestoreButton.IsEnabled = enabled && SaveList.SelectedItem != null && BackupHistoryCombo.SelectedItem != null;
             VerifyBackupButton.IsEnabled = enabled && SaveList.SelectedItem != null && BackupHistoryCombo.SelectedItem != null;
             DeleteBackupButton.IsEnabled = enabled && SaveList.SelectedItem != null && BackupHistoryCombo.SelectedItem != null;
+            ExportBackupButton.IsEnabled = enabled && SaveList.SelectedItem != null && BackupHistoryCombo.SelectedItem != null;
+            ImportBackupButton.IsEnabled = enabled && SaveList.SelectedItem != null;
             RemoveCustomFolderButton.IsEnabled = enabled && SaveList.SelectedItem is GameSaveEntry { IsCustom: true, IsDetected: false };
         }
 
@@ -498,7 +559,7 @@ namespace SteamSwitcher.Views
 
         private async Task AnalyzeSelectedEntryAsync(GameSaveEntry entry)
         {
-            if (_backupService == null) return;
+            if (_disposed || _backupService == null) return;
             if (!entry.IsAvailable)
             {
                 ChangeSummaryText.Text = "目录当前不可用；已有备份仍可恢复到原路径";
@@ -509,7 +570,7 @@ namespace SteamSwitcher.Views
             try
             {
                 var summary = await _backupService.AnalyzeChangesAsync(entry, _lifetimeCts.Token);
-                if (version != _changeAnalysisVersion || !ReferenceEquals(SaveList.SelectedItem, entry)) return;
+                if (_disposed || version != _changeAnalysisVersion || !ReferenceEquals(SaveList.SelectedItem, entry)) return;
                 ChangeSummaryText.Text = summary.DisplayText;
             }
             catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
@@ -517,7 +578,7 @@ namespace SteamSwitcher.Views
             }
             catch (Exception ex)
             {
-                if (version == _changeAnalysisVersion)
+                if (!_disposed && version == _changeAnalysisVersion)
                     ChangeSummaryText.Text = $"无法分析变化：{ex.Message}";
             }
         }
@@ -678,8 +739,10 @@ namespace SteamSwitcher.Views
 
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
+            _changeAnalysisVersion++;
             _lifetimeCts.Cancel();
-            _lifetimeCts.Dispose();
             GC.SuppressFinalize(this);
         }
 

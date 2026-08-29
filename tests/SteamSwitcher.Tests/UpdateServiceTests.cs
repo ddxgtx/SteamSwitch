@@ -8,6 +8,14 @@ namespace SteamSwitcher.Tests;
 public sealed class UpdateServiceTests
 {
     [TestMethod]
+    public void CurrentVersion_IsStableAndDoesNotExposeBuildMetadata()
+    {
+        var version = UpdateService.GetCurrentVersion();
+        Assert.IsFalse(version.Contains('+'));
+        Assert.IsFalse(UpdateService.IsCurrentVersionPrerelease());
+    }
+
+    [TestMethod]
     public async Task CheckForUpdate_ReturnsNewRelease()
     {
         using var temp = new TemporaryDirectory();
@@ -86,6 +94,109 @@ public sealed class UpdateServiceTests
     }
 
     [TestMethod]
+    public async Task BetaChannel_ParsesAndOrdersSemanticPrereleaseTags()
+    {
+        using var temp = new TemporaryDirectory();
+        var json = """
+        [
+          {
+            "tag_name": "v99.1.0-beta.2",
+            "body": "older beta",
+            "html_url": "https://github.com/ddxgtx/SteamSwitch/releases/tag/v99.1.0-beta.2",
+            "draft": false,
+            "prerelease": true,
+            "assets": []
+          },
+          {
+            "tag_name": "v99.1.0-beta.10",
+            "body": "newer beta",
+            "html_url": "https://github.com/ddxgtx/SteamSwitch/releases/tag/v99.1.0-beta.10",
+            "draft": false,
+            "prerelease": true,
+            "assets": []
+          },
+          {
+            "tag_name": "v99.0.0",
+            "body": "stable",
+            "html_url": "https://github.com/ddxgtx/SteamSwitch/releases/tag/v99.0.0",
+            "draft": false,
+            "prerelease": false,
+            "assets": []
+          }
+        ]
+        """;
+        using var service = new UpdateService(
+            new StubHandler(_ => JsonResponse(HttpStatusCode.OK, json)),
+            temp.Combine("rate-limit.json"));
+
+        var update = await service.CheckForUpdateAsync(includePrereleases: true);
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual("99.1.0-beta.10", update.Version);
+        Assert.IsTrue(update.IsPrerelease);
+    }
+
+    [TestMethod]
+    public void SemanticReleaseVersion_UsesSemVerPrereleasePrecedence()
+    {
+        Assert.IsTrue(SemanticReleaseVersion.TryParse("v3.0.0-beta.2", out var beta2));
+        Assert.IsTrue(SemanticReleaseVersion.TryParse("3.0.0-beta.10+build.5", out var beta10));
+        Assert.IsTrue(SemanticReleaseVersion.TryParse("3.0.0-rc.1", out var releaseCandidate));
+        Assert.IsTrue(SemanticReleaseVersion.TryParse("3.0.0", out var stable));
+
+        Assert.IsTrue(beta10.CompareTo(beta2) > 0);
+        Assert.IsTrue(releaseCandidate.CompareTo(beta10) > 0);
+        Assert.IsTrue(stable.CompareTo(releaseCandidate) > 0);
+    }
+
+    [TestMethod]
+    public async Task Dispose_CancelsDownloadWithoutRaisingStaleFailure()
+    {
+        using var temp = new TemporaryDirectory();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new DelayedHandler(started, canceled);
+        var service = new UpdateService(handler, temp.Combine("rate-limit.json"));
+        var failureEvents = 0;
+        service.DownloadFailed += (_, _) => failureEvents++;
+        var update = new UpdateInfo
+        {
+            Version = "99.0.0",
+            DownloadUrl = "https://github.com/ddxgtx/SteamSwitch/releases/download/v99.0.0/setup.exe",
+            FileName = "setup.exe",
+            FileSize = 1,
+            ExpectedSha256 = new string('A', 64)
+        };
+
+        var download = service.DownloadUpdateAsync(update);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        service.Dispose();
+        await download.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.IsTrue(canceled.Task.IsCompleted);
+        Assert.AreEqual(0, failureEvents);
+    }
+
+    [TestMethod]
+    public async Task CheckForUpdate_PropagatesCallerCancellation()
+    {
+        using var temp = new TemporaryDirectory();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var service = new UpdateService(
+            new DelayedHandler(started, canceled),
+            temp.Combine("rate-limit.json"));
+        using var cancellation = new CancellationTokenSource();
+
+        var check = service.CheckForUpdateAsync(cancellationToken: cancellation.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await check);
+        await canceled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [TestMethod]
     public async Task RateLimit_IsReportedAndPersistedWithoutRetrying()
     {
         using var temp = new TemporaryDirectory();
@@ -148,5 +259,27 @@ public sealed class UpdateServiceTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(responseFactory(request));
+    }
+
+    private sealed class DelayedHandler(
+        TaskCompletionSource started,
+        TaskCompletionSource canceled) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            }
+            catch (OperationCanceledException)
+            {
+                canceled.TrySetResult();
+                throw;
+            }
+        }
     }
 }

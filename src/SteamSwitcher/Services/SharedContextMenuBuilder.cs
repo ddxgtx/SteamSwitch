@@ -29,6 +29,10 @@ namespace SteamSwitcher.Services
             Action<bool>? toggleDesktopFloating = null,
             Action<bool>? toggleDesktopFloatingTopmost = null,
             Action<bool>? toggleTaskbarPinned = null,
+            bool isTaskbarLyricsEnabled = false,
+            bool isTaskbarAppearanceEnabled = false,
+            Action<bool>? toggleTaskbarLyrics = null,
+            Action<bool>? toggleTaskbarAppearance = null,
             Action? exit = null)
         {
             var palette = MenuPalette.FromApplication();
@@ -104,6 +108,37 @@ namespace SteamSwitcher.Services
                     active: isDesktopFloatingTopmost));
             }
 
+            if (toggleTaskbarLyrics != null || toggleTaskbarAppearance != null)
+            {
+                stack.Children.Add(CreateDivider(palette));
+                stack.Children.Add(CreateSection("任务栏功能", palette));
+
+                if (toggleTaskbarLyrics != null)
+                {
+                    stack.Children.Add(CreateRow(
+                        menu,
+                        "任务栏歌词",
+                        "显示歌曲、歌词与媒体控制",
+                        "\uE8D6",
+                        isTaskbarLyricsEnabled ? "开启" : "关闭",
+                        palette,
+                        () => toggleTaskbarLyrics(!isTaskbarLyricsEnabled),
+                        active: isTaskbarLyricsEnabled));
+                }
+
+                if (toggleTaskbarAppearance != null)
+                {
+                    stack.Children.Add(CreateRow(
+                        menu,
+                        "透明任务栏",
+                        "启用当前任务栏透明样式",
+                        "\uE790",
+                        isTaskbarAppearanceEnabled ? "开启" : "关闭",
+                        palette,
+                        () => toggleTaskbarAppearance(!isTaskbarAppearanceEnabled),
+                        active: isTaskbarAppearanceEnabled));
+                }
+            }
             if (accounts != null && accounts.Count > 0)
             {
                 stack.Children.Add(CreateDivider(palette));

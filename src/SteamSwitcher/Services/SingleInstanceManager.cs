@@ -11,7 +11,7 @@ namespace SteamSwitcher.Services
     public sealed class SingleInstanceManager : IDisposable
     {
         private readonly Mutex _applicationMutex;
-        private readonly Mutex _legacyUserMutex;
+        private readonly Mutex? _legacyUserMutex;
         private readonly bool _ownsApplicationMutex;
         private readonly bool _ownsLegacyUserMutex;
         private readonly int _ownerThreadId;
@@ -33,7 +33,10 @@ namespace SteamSwitcher.Services
             _ownerThreadId = Environment.CurrentManagedThreadId;
             _pipeName = pipeName;
             _applicationMutex = new Mutex(true, applicationMutexName, out _ownsApplicationMutex);
-            _legacyUserMutex = new Mutex(true, userMutexName, out _ownsLegacyUserMutex);
+            if (_ownsApplicationMutex)
+                _legacyUserMutex = new Mutex(true, userMutexName, out _ownsLegacyUserMutex);
+            else
+                _ownsLegacyUserMutex = false;
 
             // Keep the legacy per-user mutex during the transition from v2.7 so a
             // newly installed copy cannot coexist with an older copy that already
@@ -44,7 +47,7 @@ namespace SteamSwitcher.Services
                 if (_ownsApplicationMutex)
                     _applicationMutex.ReleaseMutex();
                 if (_ownsLegacyUserMutex)
-                    _legacyUserMutex.ReleaseMutex();
+                    _legacyUserMutex!.ReleaseMutex();
             }
         }
 
@@ -68,26 +71,28 @@ namespace SteamSwitcher.Services
 
         public bool SignalPrimaryInstance(string[]? arguments = null)
         {
-            for (var attempt = 0; attempt < 5; attempt++)
+            var deadline = DateTime.UtcNow.AddSeconds(8);
+            do
             {
                 try
                 {
                     using var client = new NamedPipeClientStream(
                         ".", _pipeName, PipeDirection.Out, PipeOptions.Asynchronous);
-                    client.Connect(300);
+                    client.Connect(500);
                     using var writer = new StreamWriter(client) { AutoFlush = true };
                     writer.WriteLine(JsonSerializer.Serialize(arguments ?? Array.Empty<string>()));
                     return true;
                 }
                 catch (TimeoutException)
                 {
-                    Thread.Sleep(100);
+                    Thread.Sleep(150);
                 }
                 catch (IOException)
                 {
-                    Thread.Sleep(100);
+                    Thread.Sleep(150);
                 }
             }
+            while (DateTime.UtcNow < deadline);
 
             return false;
         }
@@ -159,7 +164,7 @@ namespace SteamSwitcher.Services
             {
                 if (Environment.CurrentManagedThreadId == _ownerThreadId)
                 {
-                    _legacyUserMutex.ReleaseMutex();
+                    _legacyUserMutex!.ReleaseMutex();
                     _applicationMutex.ReleaseMutex();
                 }
                 else
@@ -167,7 +172,7 @@ namespace SteamSwitcher.Services
                     AppLogger.Warn("Single-instance mutex handles were disposed from a non-owner thread.");
                 }
             }
-            _legacyUserMutex.Dispose();
+            _legacyUserMutex?.Dispose();
             _applicationMutex.Dispose();
             _cancellation.Dispose();
         }

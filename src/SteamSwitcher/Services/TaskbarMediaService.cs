@@ -241,6 +241,7 @@ namespace SteamSwitcher.Services
 
     public sealed class TaskbarMediaService : IDisposable
     {
+        private const int MaxArtworkCacheEntries = 128;
         private static readonly HttpClient LyricsClient = CreateLyricsClient();
         private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(80) };
         private readonly ConcurrentDictionary<string, IReadOnlyList<SyncedLyricLine>> _lyricsCache = new(StringComparer.Ordinal);
@@ -248,6 +249,7 @@ namespace SteamSwitcher.Services
         private readonly ConcurrentDictionary<string, byte> _pendingOnlineArtwork = new(StringComparer.Ordinal);
         private readonly ConcurrentDictionary<string, byte> _pendingSmtcArtwork = new(StringComparer.Ordinal);
         private readonly System.Diagnostics.Stopwatch _playbackStopwatch = new();
+        private readonly CancellationTokenSource _lifetimeCts = new();
         private TimeSpan _playbackBasePosition = TimeSpan.Zero;
         private string _lastActiveTrackKey = string.Empty;
         private GlobalSystemMediaTransportControlsSessionManager? _manager;
@@ -524,7 +526,7 @@ namespace SteamSwitcher.Services
                                     artworkArtist,
                                     string.Empty,
                                     null,
-                                    fallbackTrackVersion));
+                                    fallbackTrackVersion), _lifetimeCts.Token);
                             }
 
                             if (OnlineLyricsEnabled && !string.IsNullOrWhiteSpace(wTitle))
@@ -535,11 +537,11 @@ namespace SteamSwitcher.Services
                                 _ = Task.Run(async () =>
                                 {
                                     var lyrics = await LoadLyricsAsync(capKey, capTitle, capArtist, string.Empty, TimeSpan.Zero);
-                                    if (string.Equals(_trackKey, capKey, StringComparison.Ordinal))
+                                    if (!_disposed && string.Equals(_trackKey, capKey, StringComparison.Ordinal))
                                     {
                                         _lyrics = lyrics;
                                     }
-                                });
+                                }, _lifetimeCts.Token);
                             }
                         }
 
@@ -630,7 +632,7 @@ namespace SteamSwitcher.Services
                             // Do not associate that stale thumbnail with the new track: use a
                             // metadata-matched online result first and sample SMTC only after it settles.
                             await EnsureArtworkAsync(capturedKey, capturedTitle, capturedArtist, capturedAlbum, null, trackVersion);
-                        });
+                        }, _lifetimeCts.Token);
                     }
 
                     if (OnlineLyricsEnabled && !string.IsNullOrWhiteSpace(title))
@@ -643,11 +645,11 @@ namespace SteamSwitcher.Services
                         _ = Task.Run(async () =>
                         {
                             var lyrics = await LoadLyricsAsync(capturedKey, capturedTitle, capturedArtist, capturedAlbum, capturedDuration);
-                            if (string.Equals(_trackKey, capturedKey, StringComparison.Ordinal))
+                            if (!_disposed && string.Equals(_trackKey, capturedKey, StringComparison.Ordinal))
                             {
                                 _lyrics = lyrics;
                             }
-                        });
+                        }, _lifetimeCts.Token);
                     }
                 }
                 else if (_artwork == null
@@ -807,7 +809,7 @@ namespace SteamSwitcher.Services
                             return;
                         }
 
-                        _artworkCache[key] = smtcArt;
+                        CacheArtwork(key, smtcArt);
                         _artwork = smtcArt;
                         return;
                     }
@@ -841,11 +843,11 @@ namespace SteamSwitcher.Services
                         // Never replace a player-owned thumbnail that completed while the
                         // network request was in flight.
                         if (_artwork == null)
-                            _artworkCache[key] = onlineArt;
+                            CacheArtwork(key, onlineArt);
                     }
                     else
                     {
-                        _artworkCache[key] = onlineArt;
+                        CacheArtwork(key, onlineArt);
                     }
                     return;
                 }
@@ -857,7 +859,7 @@ namespace SteamSwitcher.Services
         }
 
         private bool IsCurrentTrack(string key, long trackVersion) =>
-            string.Equals(_trackKey, key, StringComparison.Ordinal) &&
+            !_disposed && string.Equals(_trackKey, key, StringComparison.Ordinal) &&
             Volatile.Read(ref _trackVersion) == trackVersion;
 
         private enum ArtworkProvider
@@ -1500,8 +1502,21 @@ namespace SteamSwitcher.Services
             catch { return Array.Empty<SyncedLyricLine>(); }
         }
 
+        private void CacheArtwork(string key, byte[] artwork)
+        {
+            while (_artworkCache.Count >= MaxArtworkCacheEntries &&
+                   _artworkCache.Keys.FirstOrDefault() is { } evictionKey)
+            {
+                if (!_artworkCache.TryRemove(evictionKey, out _))
+                    break;
+            }
+            _artworkCache[key] = artwork;
+        }
+
         private void Publish(TaskbarMediaSnapshot snapshot)
         {
+            if (_disposed)
+                return;
             if (snapshot == Current)
                 return;
             Current = snapshot;
@@ -1533,9 +1548,16 @@ namespace SteamSwitcher.Services
                 return;
             _disposed = true;
             _timer.Stop();
+            _lifetimeCts.Cancel();
             DetachManagerEvents();
             _session = null;
             _manager = null;
+            _lyricsCache.Clear();
+            _artworkCache.Clear();
+            _pendingOnlineArtwork.Clear();
+            _pendingSmtcArtwork.Clear();
+            StateChanged = null;
+            _lifetimeCts.Dispose();
         }
     }
 }

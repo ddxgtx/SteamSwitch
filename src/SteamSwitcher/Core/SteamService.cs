@@ -96,6 +96,8 @@ namespace SteamSwitcher.Core
 
         public bool IsSteamRunning()
         {
+            if (string.IsNullOrWhiteSpace(SteamPath))
+                DetectSteamPath();
             var processes = GetSteamProcesses();
             try
             {
@@ -226,14 +228,20 @@ namespace SteamSwitcher.Core
             }
         }
 
-        private static List<Process> GetSteamProcesses()
+        private List<Process> GetSteamProcesses()
         {
             var processes = new List<Process>();
             foreach (var processName in SteamProcessNames)
             {
                 try
                 {
-                    processes.AddRange(Process.GetProcessesByName(processName));
+                    foreach (var process in Process.GetProcessesByName(processName))
+                    {
+                        if (IsProcessFromSteamInstallation(process))
+                            processes.Add(process);
+                        else
+                            process.Dispose();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -243,7 +251,28 @@ namespace SteamSwitcher.Core
             return processes;
         }
 
-        private static async Task ForceKillSteamProcessesAsync()
+        private bool IsProcessFromSteamInstallation(Process process)
+        {
+            if (string.IsNullOrWhiteSpace(SteamPath))
+                return false;
+
+            try
+            {
+                var executablePath = process.MainModule?.FileName;
+                if (string.IsNullOrWhiteSpace(executablePath)) return false;
+                var steamRoot = Path.GetFullPath(SteamPath)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                var fullExecutablePath = Path.GetFullPath(executablePath);
+                return fullExecutablePath.StartsWith(steamRoot, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Debug($"Ignored an unverifiable Steam-named process: {ex.Message}");
+                return false;
+            }
+        }
+
+        private async Task ForceKillSteamProcessesAsync()
         {
             var processes = GetSteamProcesses();
             try
@@ -282,24 +311,32 @@ namespace SteamSwitcher.Core
 
             try
             {
-                var argsList = new List<string>();
+                if (username?.Any(char.IsControl) == true || username?.Length > 128)
+                    throw new ArgumentException("Steam 用户名包含无效字符或长度异常。", nameof(username));
+                if (enableDebugging && debugPort is <= 0 or > 65535)
+                    throw new ArgumentOutOfRangeException(nameof(debugPort));
 
-                if (!string.IsNullOrEmpty(username))
-                    argsList.Add($"-login {username}");
-
-                if (silent)
-                    argsList.Add("-silent");
-
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = SteamExePath,
+                    UseShellExecute = false
+                };
+                if (!string.IsNullOrWhiteSpace(username))
+                {
+                    startInfo.ArgumentList.Add("-login");
+                    startInfo.ArgumentList.Add(username.Trim());
+                }
+                if (silent) startInfo.ArgumentList.Add("-silent");
                 if (enableDebugging)
                 {
-                    argsList.Add("-dev");
-                    argsList.Add("-cef-enable-debugging");
-                    argsList.Add($"-devtools-port {debugPort}");
+                    startInfo.ArgumentList.Add("-dev");
+                    startInfo.ArgumentList.Add("-cef-enable-debugging");
+                    startInfo.ArgumentList.Add("-devtools-port");
+                    startInfo.ArgumentList.Add(debugPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 }
 
-                var args = string.Join(" ", argsList);
-                AppLogger.Info($"Starting Steam: {SteamExePath} {args}");
-                var proc = Process.Start(SteamExePath, args);
+                AppLogger.Info($"Starting Steam: {SteamExePath}; Silent={silent}; Debugging={enableDebugging}");
+                var proc = Process.Start(startInfo);
                 proc?.Dispose();
                 return true;
             }

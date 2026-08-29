@@ -154,7 +154,7 @@ internal static class Program
             AddPreviewQuickLaunch(viewModel, "Spotify", @"C:\Users\Preview\AppData\Roaming\Spotify\Spotify.exe", false, false);
             AddPreviewQuickLaunch(viewModel, "Notion", @"C:\Users\Preview\AppData\Local\Programs\Notion\Notion.exe", false, false);
         }
-        viewModel.StatusText = "v2.7 · 示例数据已就绪";
+        viewModel.StatusText = "v3.1 · 正式版界面预览";
 
         var navigationMethod = view switch
         {

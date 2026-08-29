@@ -55,6 +55,10 @@ namespace SteamSwitcher.Views
         private int _lyricsFontSize = 14;
         private string _lyricsFontFamily = "Segoe UI Variable Text";
         private bool _adaptiveLayoutDirty = true;
+        private string _lastAdaptiveMeasureKey = string.Empty;
+        private int _lastMeasuredAdaptiveLyricsWidth = 280;
+        private int _adaptiveShrinkCandidateWidth;
+        private DateTimeOffset _adaptiveShrinkCandidateSince = DateTimeOffset.MinValue;
         private string _lastPresentationMode = string.Empty;
         private System.Windows.Threading.DispatcherTimer? _visualizerTimer;
         private System.Windows.Threading.DispatcherTimer? _volumeHideTimer;
@@ -70,6 +74,7 @@ namespace SteamSwitcher.Views
         private TaskbarMediaSnapshot? _lastSnapshot;
 
         public event EventHandler<SteamAccount>? AccountSwitchRequested;
+        public event EventHandler<SteamAccount>? ForceAccountRestartRequested;
         public event EventHandler<int>? GameLaunchRequested;
         public event EventHandler<string>? QuickLaunchRequested;
         public event EventHandler? ShowMainWindowRequested;
@@ -77,6 +82,8 @@ namespace SteamSwitcher.Views
         public event EventHandler<bool>? ToggleDesktopFloatingRequested;
         public event EventHandler<bool>? ToggleDesktopFloatingTopmostRequested;
         public event EventHandler<bool>? ToggleTaskbarPinnedRequested;
+        public event EventHandler<bool>? ToggleTaskbarLyricsRequested;
+        public event EventHandler<bool>? ToggleTaskbarAppearanceRequested;
         public event EventHandler? ExitRequested;
         public event EventHandler<IReadOnlyList<string>>? PanelItemOrderChanged;
         public event EventHandler<IReadOnlyList<string>>? AccountOrderChanged;
@@ -102,6 +109,15 @@ namespace SteamSwitcher.Views
             {
                 if (_currentAccountChangedHandler != null)
                     _accountManager.CurrentAccountChanged -= _currentAccountChangedHandler;
+                _mediaService.StateChanged -= MediaService_StateChanged;
+                if (_visualizerTimer != null)
+                {
+                    _visualizerTimer.Stop();
+                    _visualizerTimer.Tick -= VisualizerTimer_Tick;
+                    _visualizerTimer = null;
+                }
+                _volumeHideTimer?.Stop();
+                _volumeHideTimer = null;
                 DetachViewModelEvents();
                 try { _volumeFlyout.Close(); } catch { }
                 _mediaService.Dispose();
@@ -249,6 +265,10 @@ namespace SteamSwitcher.Views
                 toggleDesktopFloating: enabled => ToggleDesktopFloatingRequested?.Invoke(this, enabled),
                 toggleDesktopFloatingTopmost: enabled => ToggleDesktopFloatingTopmostRequested?.Invoke(this, enabled),
                 toggleTaskbarPinned: enabled => ToggleTaskbarPinnedRequested?.Invoke(this, enabled),
+                isTaskbarLyricsEnabled: _viewModel?.TaskbarLyricsEnabled ?? false,
+                isTaskbarAppearanceEnabled: _viewModel?.TaskbarAppearanceEnabled ?? false,
+                toggleTaskbarLyrics: enabled => ToggleTaskbarLyricsRequested?.Invoke(this, enabled),
+                toggleTaskbarAppearance: enabled => ToggleTaskbarAppearanceRequested?.Invoke(this, enabled),
                 exit: () => ExitRequested?.Invoke(this, EventArgs.Empty)
             );
             menu.IsOpen = true;
@@ -332,6 +352,7 @@ namespace SteamSwitcher.Views
         }
 
         public void SetPosition(TaskbarPosition pos) => _embedder.Position = pos;
+        public void SetMonitorIndex(int monitorIndex) => _embedder.SetMonitorIndex(monitorIndex);
 
         public void SetOffset(int x, int y)
         {
@@ -376,7 +397,7 @@ namespace SteamSwitcher.Views
             string normalizedFontFamily = string.IsNullOrWhiteSpace(fontFamily)
                 ? "Segoe UI Variable Text"
                 : fontFamily.Trim();
-            int normalizedWidth = Math.Clamp(width, 240, 520);
+            int normalizedWidth = Math.Clamp(width, 240, 720);
             int normalizedFontSize = Math.Clamp(fontSize, 12, 18);
             _adaptiveLayoutDirty |= normalizedWidth != _lyricsWidth
                 || normalizedFontSize != _lyricsFontSize
@@ -407,6 +428,9 @@ namespace SteamSwitcher.Views
             {
                 _currentAdaptiveLyricsWidth = _lyricsWidth;
             }
+            _lastAdaptiveMeasureKey = string.Empty;
+            _adaptiveShrinkCandidateWidth = 0;
+            _adaptiveShrinkCandidateSince = DateTimeOffset.MinValue;
             _mediaService.OnlineLyricsEnabled = onlineLyrics;
             _mediaService.SourceQQEnabled = sourceQQ;
             _mediaService.SourceNeteaseEnabled = sourceNetease;
@@ -815,32 +839,8 @@ namespace SteamSwitcher.Views
 
             if (_lyricsAdaptiveWidth && _lyricsEnabled && !_isLyricsHovered)
             {
-                if (trackChanged || _adaptiveLayoutDirty)
-                {
-                    double secondaryFontSize = Math.Max(11.5, _lyricsFontSize - 2.5);
-                    var primaryCandidates = new[] { primaryText, snapshot.Title, snapshot.CurrentLyric, snapshot.NextText };
-                    var secondaryCandidates = new[] { compositeText, artistAlbum, snapshot.CurrentTranslation };
-                    double primaryWidth = primaryCandidates
-                        .Where(value => !string.IsNullOrWhiteSpace(value))
-                        .Select(value => MeasureTextWidth(value, _lyricsFontSize, FontWeights.SemiBold))
-                        .DefaultIfEmpty(0)
-                        .Max();
-                    double secondaryWidth = secondaryCandidates
-                        .Where(value => !string.IsNullOrWhiteSpace(value))
-                        .Select(value => MeasureTextWidth(value, secondaryFontSize, FontWeights.Medium) + 16)
-                        .DefaultIfEmpty(0)
-                        .Max();
-                    int targetLyricsWidth = (int)Math.Ceiling(Math.Max(primaryWidth, secondaryWidth) + 82);
-                    targetLyricsWidth = Math.Clamp(targetLyricsWidth, 240, _lyricsWidth);
-
-                    if (Math.Abs(targetLyricsWidth - _currentAdaptiveLyricsWidth) >= 8)
-                    {
-                        _currentAdaptiveLyricsWidth = targetLyricsWidth;
-                        LyricsHost.Width = targetLyricsWidth;
-                        ApplyLayout();
-                    }
-                    _adaptiveLayoutDirty = false;
-                }
+                UpdateAdaptiveLyricsWidth(primaryText, compositeText, trackChanged || _adaptiveLayoutDirty);
+                _adaptiveLayoutDirty = false;
             }
             else if (!_lyricsAdaptiveWidth && LyricsHost.Width != _lyricsWidth)
             {
@@ -892,6 +892,8 @@ namespace SteamSwitcher.Views
                 MediaText.Visibility = _lyricsShowSecondaryLine ? Visibility.Visible : Visibility.Collapsed;
             }
 
+            FitLyricsTextToAvailableWidth(primaryText, compositeText);
+
             LyricsHost.ToolTip = string.Join("\n", new[]
             {
                 $"🎵 歌曲：{snapshot.Title}",
@@ -926,6 +928,93 @@ namespace SteamSwitcher.Views
                 LyricsControlsGlass.IsHitTestVisible = visible;
                 LyricsControlsGlass.Opacity = visible ? 1 : 0;
             }
+            if (LyricsTextPanel != null)
+                LyricsTextPanel.Opacity = visible ? 0 : 1;
+        }
+
+        private void UpdateAdaptiveLyricsWidth(string primaryText, string secondaryText, bool force)
+        {
+            string measureKey = $"{primaryText}\u001f{secondaryText}\u001f{_lyricsFontSize}\u001f{_lyricsFontFamily}";
+            if (force || !string.Equals(measureKey, _lastAdaptiveMeasureKey, StringComparison.Ordinal))
+            {
+                _lastAdaptiveMeasureKey = measureKey;
+                _lastMeasuredAdaptiveLyricsWidth = CalculateAdaptiveLyricsWidth(primaryText, secondaryText);
+            }
+
+            int targetWidth = _lastMeasuredAdaptiveLyricsWidth;
+            if (force || targetWidth > _currentAdaptiveLyricsWidth + 4)
+            {
+                ApplyAdaptiveLyricsWidth(targetWidth);
+                ResetAdaptiveShrinkCandidate();
+                return;
+            }
+
+            if (targetWidth < _currentAdaptiveLyricsWidth - 40)
+            {
+                if (Math.Abs(targetWidth - _adaptiveShrinkCandidateWidth) > 12)
+                {
+                    _adaptiveShrinkCandidateWidth = targetWidth;
+                    _adaptiveShrinkCandidateSince = DateTimeOffset.Now;
+                }
+                else if ((DateTimeOffset.Now - _adaptiveShrinkCandidateSince).TotalMilliseconds >= 1200)
+                {
+                    ApplyAdaptiveLyricsWidth(targetWidth);
+                    ResetAdaptiveShrinkCandidate();
+                }
+            }
+            else
+            {
+                ResetAdaptiveShrinkCandidate();
+            }
+        }
+
+        private int CalculateAdaptiveLyricsWidth(string primaryText, string secondaryText)
+        {
+            double secondaryFontSize = Math.Max(11.5, _lyricsFontSize - 2.5);
+            double primaryWidth = MeasureTextWidth(primaryText, _lyricsFontSize, FontWeights.SemiBold);
+            double secondaryWidth = string.IsNullOrWhiteSpace(secondaryText)
+                ? 0
+                : MeasureTextWidth(secondaryText, secondaryFontSize, FontWeights.Medium) + 16;
+            int desiredWidth = (int)Math.Ceiling(Math.Max(primaryWidth, secondaryWidth) + 82);
+
+            int currentLyricsWidth = Math.Max(1, _currentAdaptiveLyricsWidth);
+            int nonLyricsWidth = Math.Max(0, CalcWidth() - currentLyricsWidth);
+            int taskbarAvailable = _embedder.GetMaximumWidthInDips();
+            int maximumLyricsWidth = Math.Clamp(taskbarAvailable - nonLyricsWidth, 240, 720);
+            return Math.Clamp(desiredWidth, 240, maximumLyricsWidth);
+        }
+
+        private void ApplyAdaptiveLyricsWidth(int width)
+        {
+            width = Math.Clamp(width, 240, 720);
+            if (Math.Abs(width - _currentAdaptiveLyricsWidth) < 4)
+                return;
+
+            _currentAdaptiveLyricsWidth = width;
+            LyricsHost.Width = width;
+            ApplyLayout();
+        }
+
+        private void ResetAdaptiveShrinkCandidate()
+        {
+            _adaptiveShrinkCandidateWidth = 0;
+            _adaptiveShrinkCandidateSince = DateTimeOffset.MinValue;
+        }
+
+        private void FitLyricsTextToAvailableWidth(string primaryText, string secondaryText)
+        {
+            double availableWidth = Math.Max(80, LyricsHost.Width - 82);
+            double primaryRequired = MeasureTextWidth(primaryText, _lyricsFontSize, FontWeights.SemiBold);
+            LyricText.FontSize = primaryRequired > availableWidth
+                ? Math.Max(9.5, _lyricsFontSize * availableWidth / primaryRequired)
+                : _lyricsFontSize;
+
+            double secondaryBaseSize = Math.Max(11.5, _lyricsFontSize - 2.5);
+            double secondaryAvailable = Math.Max(70, availableWidth - 16);
+            double secondaryRequired = MeasureTextWidth(secondaryText, secondaryBaseSize, FontWeights.Medium);
+            MediaText.FontSize = secondaryRequired > secondaryAvailable
+                ? Math.Max(8.5, secondaryBaseSize * secondaryAvailable / secondaryRequired)
+                : secondaryBaseSize;
         }
 
         private double MeasureTextWidth(string text, double fontSize, FontWeight fontWeight)
@@ -994,7 +1083,7 @@ namespace SteamSwitcher.Views
                         EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
                     });
                 }
-                LyricsTextPanel?.BeginAnimation(OpacityProperty, new DoubleAnimation(0.18, TimeSpan.FromMilliseconds(120)));
+                LyricsTextPanel?.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(120)));
             }
         }
 
@@ -1437,7 +1526,8 @@ namespace SteamSwitcher.Views
                 BorderThickness = isCur ? new Thickness(2.5) : new Thickness(1),
                 Margin = new Thickness(2, 0, 2, 0),
                 Cursor = Cursors.Hand,
-                ToolTip = account.PersonaName,
+                Focusable = true,
+                ToolTip = $"{account.PersonaName}\n左键或 Enter：切换账号\n右键或 Ctrl+Enter：强制重启 Steam 并切换",
                 Tag = account,
                 RenderTransformOrigin = new Point(0.5, 0.5),
                 RenderTransform = new ScaleTransform(1, 1)
@@ -1465,11 +1555,39 @@ namespace SteamSwitcher.Views
                 };
             }
             border.Child = overlay;
+            KeyboardNavigation.SetIsTabStop(border, true);
+            System.Windows.Automation.AutomationProperties.SetName(border, $"Steam 账号 {account.PersonaName}");
+            System.Windows.Automation.AutomationProperties.SetHelpText(
+                border,
+                "按 Enter 切换账号；按 Ctrl+Enter 强制重启 Steam 并切换账号");
+
+            border.KeyDown += (s, e) =>
+            {
+                if (e.Key != Key.Enter && e.Key != Key.Space)
+                    return;
+
+                e.Handled = true;
+                if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+                    ForceAccountRestartRequested?.Invoke(this, account);
+                else
+                    AccountSwitchRequested?.Invoke(this, account);
+            };
+            border.GotKeyboardFocus += (s, e) =>
+            {
+                border.BorderBrush = _hoverBorderBrush;
+                border.BorderThickness = new Thickness(2.5);
+            };
+            border.LostKeyboardFocus += (s, e) =>
+            {
+                bool isCurrent = AccountManager.AreSameAccount(account, _accountManager.CurrentAccount);
+                border.BorderBrush = isCurrent ? _currentBorderBrush : _normalBorderBrush;
+                border.BorderThickness = isCurrent ? new Thickness(2.5) : new Thickness(1);
+            };
 
             border.MouseRightButtonDown += (s, e) =>
             {
                 e.Handled = true;
-                ShowContextMenu();
+                ForceAccountRestartRequested?.Invoke(this, account);
             };
             border.MouseEnter += (s, e) =>
             {

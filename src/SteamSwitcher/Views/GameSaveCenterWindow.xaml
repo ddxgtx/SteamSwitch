@@ -204,7 +204,7 @@
             </Border>
 
             <Grid Grid.Row="1" Margin="18,16,18,0">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="480"/></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="440"/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 
                 <Grid Grid.Row="0" Grid.ColumnSpan="2" Margin="0,0,0,16">
@@ -249,9 +249,9 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Border Width="4" Height="17" CornerRadius="2" Background="{DynamicResource AccentBrush}" Margin="0,0,10,0"/>
-                            <StackPanel><TextBlock Text="存档列表" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold"/><TextBlock Text="智能识别 · Steam Cloud · 本地存档" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10.5" Margin="0,2,0,0"/></StackPanel>
+                            <StackPanel><TextBlock Text="存档列表" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold"/><TextBlock Text="智能识别 · Steam Cloud · 本地存档" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11.5" Margin="0,2,0,0"/></StackPanel>
                         </StackPanel>
-                        <Border Grid.Column="1" Background="{DynamicResource AccentBgBrush}" BorderBrush="#200A84FF" BorderThickness="1" CornerRadius="8" Padding="9,4" VerticalAlignment="Center"><TextBlock Text="选择后可备份或恢复" Foreground="{DynamicResource AccentBrush}" FontSize="10.5" FontWeight="SemiBold"/></Border>
+                        <Border Grid.Column="1" Background="{DynamicResource AccentBgBrush}" BorderBrush="#200A84FF" BorderThickness="1" CornerRadius="8" Padding="9,4" VerticalAlignment="Center"><TextBlock Text="选择后可备份或恢复" Foreground="{DynamicResource AccentBrush}" FontSize="11.5" FontWeight="SemiBold"/></Border>
                     </Grid>
                     <Border Grid.Row="1" CornerRadius="18" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                     <Grid>
@@ -272,12 +272,7 @@
                                             </Grid>
                                         </Border>
                                         <StackPanel Grid.Column="1" Margin="12,0,10,0" VerticalAlignment="Center">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding GameName}" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" MaxWidth="320"/>
-                                                <Border Background="{DynamicResource InputBgBrush}" CornerRadius="6" Padding="6,1" Margin="6,0,0,0" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding AppIdDisplay}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10.5"/>
-                                                </Border>
-                                            </StackPanel>
+                                            <TextBlock Text="{Binding GameName}" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" ToolTip="{Binding GameName}"/>
                                             <WrapPanel Margin="0,6,0,0" VerticalAlignment="Center">
                                                 <Border Background="{DynamicResource AccentBgBrush}" CornerRadius="6" Padding="6,2" Margin="0,0,6,0">
                                                     <StackPanel Orientation="Horizontal">
@@ -286,7 +281,7 @@
                                                     </StackPanel>
                                                 </Border>
                                                 <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="6,2">
-                                                    <TextBlock Text="{Binding SourceDisplay}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                                                    <TextBlock Text="{Binding SourceDisplay}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
                                                 </Border>
                                             </WrapPanel>
                                         </StackPanel>
@@ -296,7 +291,7 @@
                                             </Border>
                                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0" HorizontalAlignment="Right">
                                                 <TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                                                <TextBlock Text="{Binding BackupDisplay}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+                                                <TextBlock Text="{Binding BackupCount, StringFormat={}{0} 份备份}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" ToolTip="{Binding BackupDisplay}"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </Grid>
@@ -353,14 +348,13 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <Border Grid.Column="0" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="0,0,5,0">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11" Margin="0,0,4,0"/>
-                                            <TextBlock Text="存档文件" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10.5"/>
+                                            <TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0"/>
+                                            <TextBlock Text="存档文件" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5"/>
                                         </StackPanel>
                                         <TextBlock x:Name="FileCountText" Text="—" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                     </StackPanel>
@@ -368,26 +362,26 @@
                                 <Border Grid.Column="1" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="2,0,3,0">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE8A1;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11" Margin="0,0,4,0"/>
-                                            <TextBlock Text="总大小" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10.5"/>
+                                            <TextBlock Text="&#xE8A1;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0"/>
+                                            <TextBlock Text="总大小" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5"/>
                                         </StackPanel>
                                         <TextBlock x:Name="TotalSizeText" Text="—" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
                                     </StackPanel>
                                 </Border>
-                                <Border Grid.Column="2" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="3,0,2,0">
+                                <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="0,6,5,0">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11" Margin="0,0,4,0"/>
-                                            <TextBlock Text="最后修改" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10.5"/>
+                                            <TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0"/>
+                                            <TextBlock Text="最后修改" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5"/>
                                         </StackPanel>
                                         <TextBlock x:Name="LastWriteText" Text="—" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
                                     </StackPanel>
                                 </Border>
-                                <Border Grid.Column="3" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="5,0,0,0">
+                                <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="2,6,0,0">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11" Margin="0,0,4,0"/>
-                                            <TextBlock Text="本地备份" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10.5"/>
+                                            <TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0"/>
+                                            <TextBlock Text="本地备份" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5"/>
                                         </StackPanel>
                                         <TextBlock x:Name="BackupCountText" Text="—" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                     </StackPanel>
@@ -403,9 +397,8 @@
                             </Border>
 
                             <TextBlock Text="恢复版本" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,6"/>
-                            <!-- 详情列固定为 480px；434px 与下方存档位置输入框的可用宽度严格一致。 -->
                             <Grid Height="42">
-                                <ComboBox x:Name="BackupHistoryCombo" Width="434" Height="42" HorizontalAlignment="Left" VerticalAlignment="Stretch" Style="{StaticResource SaveComboBox}" DisplayMemberPath="DisplayName" SelectionChanged="BackupHistoryCombo_SelectionChanged" ToolTip="可选择手动备份或恢复前自动创建的保护备份"/>
+                                <ComboBox x:Name="BackupHistoryCombo" Height="42" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Style="{StaticResource SaveComboBox}" DisplayMemberPath="DisplayName" SelectionChanged="BackupHistoryCombo_SelectionChanged" ToolTip="可选择手动备份或恢复前自动创建的保护备份"/>
                                 <TextBlock Text="暂无可恢复版本" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" VerticalAlignment="Center" Margin="14,0,36,0" IsHitTestVisible="False">
                                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding SelectedItem, ElementName=BackupHistoryCombo}" Value="{x:Null}"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                                 </TextBlock>
@@ -474,6 +467,11 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Button x:Name="VerifyBackupButton" Content="校验所选备份" Style="{StaticResource SaveActionButton}" Margin="0,0,4,0" Click="VerifyBackup_Click" IsEnabled="False"/>
                         <Button x:Name="DeleteBackupButton" Grid.Column="1" Content="删除所选备份" Style="{StaticResource SaveActionButton}" Margin="4,0,0,0" Click="DeleteBackup_Click" IsEnabled="False"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Button x:Name="ExportBackupButton" Content="导出所选备份" Style="{StaticResource SaveActionButton}" Margin="0,0,4,0" Click="ExportBackup_Click" IsEnabled="False"/>
+                        <Button x:Name="ImportBackupButton" Grid.Column="1" Content="导入完整备份" Style="{StaticResource SaveActionButton}" Margin="4,0,0,0" Click="ImportBackup_Click" IsEnabled="False"/>
                     </Grid>
                     <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,0,0,8">
                         <Grid>

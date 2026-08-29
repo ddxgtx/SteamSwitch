@@ -108,8 +108,8 @@
             <!-- 底部操作按钮 -->
             <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0">
-                    <Button Content="取消" Style="{StaticResource DialogSecondaryButtonStyle}" Margin="0,0,10,0" Width="88" Click="Cancel_Click"/>
-                    <Button Content="添加目录" Style="{StaticResource DialogPrimaryButtonStyle}" Width="100" Click="Add_Click"/>
+                    <Button Content="取消" Style="{StaticResource DialogSecondaryButtonStyle}" Margin="0,0,10,0" Width="88" Click="Cancel_Click" IsCancel="True"/>
+                    <Button Content="添加目录" Style="{StaticResource DialogPrimaryButtonStyle}" Width="100" Click="Add_Click" IsDefault="True"/>
                 </StackPanel>
             </Border>
         </Grid>

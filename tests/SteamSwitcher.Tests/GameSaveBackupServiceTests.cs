@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using SteamSwitcher.Core;
 using SteamSwitcher.Models;
 
@@ -81,6 +82,58 @@ public sealed class GameSaveBackupServiceTests
 
         var backups = service.GetBackups(entry);
         Assert.IsTrue(backups.Count <= 3, $"Expected at most 3 retained backups, but got {backups.Count}");
+    }
+
+    [TestMethod]
+    public async Task OversizedManifest_IsRejectedBeforeDeserialization()
+    {
+        using var temp = new TemporaryDirectory();
+        var steamRoot = temp.Combine("steam");
+        var saveRoot = temp.Combine("saves", "demo");
+        var backupRoot = temp.Combine("backups");
+        Directory.CreateDirectory(steamRoot);
+        Directory.CreateDirectory(saveRoot);
+        var entry = CreateCustomEntry(saveRoot);
+        var service = new GameSaveBackupService(steamRoot, backupRoot);
+        var backupDirectory = System.IO.Path.Combine(backupRoot, "custom", entry.CustomId);
+        Directory.CreateDirectory(backupDirectory);
+        var archivePath = System.IO.Path.Combine(backupDirectory, "oversized.zip");
+
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            var manifest = archive.CreateEntry("steamswitch-backup.json", CompressionLevel.Optimal);
+            await using var stream = manifest.Open();
+            var block = new byte[64 * 1024];
+            for (var index = 0; index < 129; index++)
+                await stream.WriteAsync(block);
+        }
+
+        var error = await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
+            service.VerifyBackupAsync(entry, archivePath));
+        StringAssert.Contains(error.Message, "8 MB");
+    }
+
+    [TestMethod]
+    public async Task FullBackup_CanBeExportedAndSafelyImported()
+    {
+        using var temp = new TemporaryDirectory();
+        var steamRoot = temp.Combine("steam");
+        var saveRoot = temp.Combine("saves", "demo");
+        Directory.CreateDirectory(steamRoot);
+        Directory.CreateDirectory(saveRoot);
+        var entry = CreateCustomEntry(saveRoot);
+        var service = new GameSaveBackupService(steamRoot, temp.Combine("backups"));
+        await File.WriteAllTextAsync(System.IO.Path.Combine(saveRoot, "save.dat"), "portable-save");
+
+        var backup = await service.BackupAsync(entry);
+        var exported = temp.Combine("transfer", "portable.zip");
+        await service.ExportBackupAsync(entry, backup.FilePath, exported);
+        service.DeleteBackup(entry, backup.FilePath);
+
+        var imported = await service.ImportBackupAsync(entry, exported);
+        Assert.IsTrue(File.Exists(imported));
+        await service.VerifyBackupAsync(entry, imported);
+        Assert.AreEqual(1, service.GetBackups(entry).Count);
     }
 
     private static GameSaveEntry CreateCustomEntry(string saveRoot)
