@@ -6,7 +6,7 @@
 
 **面向 Windows 的 Steam 多账号、游戏启动、任务栏歌词与存档管理工具**
 
-[![Release](https://img.shields.io/badge/Release-v3.1-1683ff)](https://github.com/ddxgtx/SteamSwitch/releases/tag/v3.1)
+[![Release](https://img.shields.io/badge/Release-v3.1.1-1683ff)](https://github.com/ddxgtx/SteamSwitch/releases/tag/v3.1.1)
 [![Status](https://img.shields.io/badge/Status-Stable-20b26b)](https://github.com/ddxgtx/SteamSwitch/releases/latest)
 [![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4)](#系统要求)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512bd4)](https://dotnet.microsoft.com/)
@@ -90,7 +90,7 @@ Steam Switch 将账号切换、游戏账号绑定、程序快速启动、任务�
 
 ### 安装版（推荐）
 
-下载 [SteamSwitch-v3.1-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v3.1/SteamSwitch-v3.1-win-x64-setup.exe)。
+下载 [SteamSwitch-v3.1.1-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v3.1.1/SteamSwitch-v3.1.1-win-x64-setup.exe)。
 
 - 中文/英文安装向导。
 - 内置 .NET 8 运行时。
@@ -100,7 +100,7 @@ Steam Switch 将账号切换、游戏账号绑定、程序快速启动、任务�
 
 ### 便携版
 
-下载 [SteamSwitch-v3.1-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v3.1/SteamSwitch-v3.1-win-x64-portable.zip)，解压后运行 `SteamSwitch.exe`。
+下载 [SteamSwitch-v3.1.1-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v3.1.1/SteamSwitch-v3.1.1-win-x64-portable.zip)，解压后运行 `SteamSwitch.exe`。
 
 > 安装包目前未进行商业代码签名，Windows SmartScreen 可能显示未知发布者。请只从本仓库 Release 下载，并核对 Release 中公布的 SHA-256。
 
