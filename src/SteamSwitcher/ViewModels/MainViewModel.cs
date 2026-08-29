@@ -2093,7 +2093,8 @@ namespace SteamSwitcher.ViewModels
                 StatusText = $"正在下载 v{updateInfo.Version} 更新...";
                 var filePath = await updateService.DownloadUpdateToFileAsync(updateInfo, cancellationToken);
                 StatusText = "更新下载完成，正在启动安装器...";
-                UpdateService.LaunchInstaller(filePath, updateInfo.ExpectedSha256);
+                if (!UpdateService.LaunchInstaller(filePath, updateInfo.ExpectedSha256, silent: true))
+                    StatusText = "无法启动更新安装器，请稍后重试";
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Steam Switch"
-#define MyAppVersion "3.1"
+#define MyAppVersion "3.1.1"
 #define MyAppPublisher "ddxgtx"
 #define MyAppURL "https://github.com/ddxgtx/SteamSwitch"
 #define MyAppExeName "SteamSwitch.exe"
@@ -65,6 +65,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--register-autostart"; Tasks: startwithwindows; Flags: runasoriginaluser runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-autostart"; Tasks: not startwithwindows; Flags: runasoriginaluser runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--updated"; Flags: nowait skipifnotsilent shellexec runasoriginaluser
 
 [UninstallRun]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-autostart"; RunOnceId: "SteamSwitchRemoveAutoStart"; Flags: runhidden waituntilterminated skipifdoesntexist

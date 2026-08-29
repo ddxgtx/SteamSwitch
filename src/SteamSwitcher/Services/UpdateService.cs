@@ -427,6 +427,18 @@ namespace SteamSwitcher.Services
             var filePath = Path.Combine(downloadDir, fileName);
             var temporaryPath = filePath + $".{Guid.NewGuid():N}.download";
 
+            if (await IsVerifiedCachedInstallerAsync(filePath, update.FileSize, update.ExpectedSha256, cancellationToken))
+            {
+                DownloadProgress?.Invoke(this, new UpdateProgressEventArgs
+                {
+                    BytesReceived = update.FileSize,
+                    TotalBytes = update.FileSize,
+                    PercentComplete = 100
+                });
+                AppLogger.Info($"Reusing verified update package: {fileName}");
+                return filePath;
+            }
+
             using var response = await _http.GetAsync(downloadUri,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
@@ -488,6 +500,34 @@ namespace SteamSwitcher.Services
             return filePath;
         }
 
+        private static async Task<bool> IsVerifiedCachedInstallerAsync(
+            string filePath,
+            long expectedSize,
+            string expectedSha256,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var info = new FileInfo(filePath);
+                if (!info.Exists || info.Length != expectedSize)
+                    return false;
+
+                await using var stream = new FileStream(
+                    filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
+                var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+                return string.Equals(Convert.ToHexString(hash), expectedSha256, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to reuse cached update package: {ex.Message}");
+                return false;
+            }
+        }
+
         public void CancelDownload()
         {
             lock (_downloadSync)
@@ -500,7 +540,7 @@ namespace SteamSwitcher.Services
                 return !_disposed && ReferenceEquals(_downloadCts, operationCts);
         }
 
-        public static void LaunchInstaller(string filePath, string expectedSha256)
+        public static bool LaunchInstaller(string filePath, string expectedSha256, bool silent = true)
         {
             try
             {
@@ -514,16 +554,31 @@ namespace SteamSwitcher.Services
                 if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("安装包在下载后发生变化，已阻止启动。");
 
-                Process.Start(new ProcessStartInfo
+                var startInfo = new ProcessStartInfo
                 {
                     FileName = filePath,
                     UseShellExecute = true
-                });
-                Application.Current.Shutdown();
+                };
+                if (silent)
+                {
+                    startInfo.ArgumentList.Add("/VERYSILENT");
+                    startInfo.ArgumentList.Add("/SUPPRESSMSGBOXES");
+                    startInfo.ArgumentList.Add("/NORESTART");
+                    startInfo.ArgumentList.Add("/CLOSEAPPLICATIONS");
+                    startInfo.ArgumentList.Add("/SP-");
+                }
+
+                if (Process.Start(startInfo) == null)
+                    throw new InvalidOperationException("无法启动更新安装器。");
+
+                AppLogger.Info($"Update installer started. Silent={silent}");
+                Application.Current?.Shutdown();
+                return true;
             }
             catch (Exception ex)
             {
                 AppLogger.Error("Launch installer failed.", ex);
+                return false;
             }
         }
 

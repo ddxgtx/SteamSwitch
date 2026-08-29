@@ -45,6 +45,49 @@ public sealed class UpdateServiceTests
     }
 
     [TestMethod]
+    public async Task DownloadUpdate_ReusesVerifiedCachedInstallerWithoutNetworkRequest()
+    {
+        var content = Encoding.UTF8.GetBytes("verified cached installer");
+        var fileName = $"SteamSwitch-cache-test-{Guid.NewGuid():N}.exe";
+        var updateDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SteamSwitch", "updates");
+        var cachedPath = Path.Combine(updateDirectory, fileName);
+        Directory.CreateDirectory(updateDirectory);
+        await File.WriteAllBytesAsync(cachedPath, content);
+        var requests = 0;
+
+        try
+        {
+            using var temp = new TemporaryDirectory();
+            using var service = new UpdateService(
+                new StubHandler(_ =>
+                {
+                    requests++;
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                }),
+                temp.Combine("rate-limit.json"));
+            var update = new UpdateInfo
+            {
+                Version = "99.0.0",
+                DownloadUrl = "https://github.com/ddxgtx/SteamSwitch/releases/download/v99.0.0/setup.exe",
+                FileName = fileName,
+                FileSize = content.Length,
+                ExpectedSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content))
+            };
+
+            var result = await service.DownloadUpdateToFileAsync(update);
+
+            Assert.AreEqual(cachedPath, result);
+            Assert.AreEqual(0, requests);
+        }
+        finally
+        {
+            if (File.Exists(cachedPath)) File.Delete(cachedPath);
+        }
+    }
+
+    [TestMethod]
     public async Task BetaChannel_SelectsHighestNonDraftRelease()
     {
         using var temp = new TemporaryDirectory();

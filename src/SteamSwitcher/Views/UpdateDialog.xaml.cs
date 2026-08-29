@@ -11,6 +11,7 @@ namespace SteamSwitcher.Views
         private readonly UpdateService _updateService;
         private readonly UpdateInfo _updateInfo;
         private string? _downloadedFilePath;
+        private bool _installLaunchStarted;
 
         public UpdateDialog(UpdateService updateService, UpdateInfo updateInfo)
         {
@@ -65,8 +66,8 @@ namespace SteamSwitcher.Views
                 DownloadProgressBar.Value = 100;
 
                 CancelButton.Visibility = Visibility.Collapsed;
-                InstallButton.Visibility = Visibility.Visible;
                 IgnoreButton.Visibility = Visibility.Collapsed;
+                TryStartSilentInstall();
             });
         }
 
@@ -136,10 +137,24 @@ namespace SteamSwitcher.Views
 
         private void Install_Click(object sender, RoutedEventArgs e)
         {
-            if (!string.IsNullOrEmpty(_downloadedFilePath))
-            {
-                UpdateService.LaunchInstaller(_downloadedFilePath, _updateInfo.ExpectedSha256);
-            }
+            TryStartSilentInstall();
+        }
+
+        private void TryStartSilentInstall()
+        {
+            if (_installLaunchStarted || string.IsNullOrEmpty(_downloadedFilePath)) return;
+            _installLaunchStarted = true;
+            DownloadStatusText.Text = "校验完成，正在关闭程序并自动升级…";
+            InstallButton.Visibility = Visibility.Collapsed;
+            ProgressPanel.Visibility = Visibility.Visible;
+
+            if (UpdateService.LaunchInstaller(_downloadedFilePath, _updateInfo.ExpectedSha256, silent: true))
+                return;
+
+            _installLaunchStarted = false;
+            DownloadStatusText.Text = "无法启动安装器，请点击重试";
+            ProgressPanel.Visibility = Visibility.Collapsed;
+            InstallButton.Visibility = Visibility.Visible;
         }
 
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-08-29
+
+### Fixed
+- 自动更新改为单次操作：点击“立即更新”后在后台下载并校验，随后直接静默覆盖安装、关闭旧进程并重新启动新版本。
+- 已通过文件大小和 SHA-256 校验的更新安装包会直接复用，避免重复点击或重试时再次下载。
+
 ## [3.1] - 2026-08-29
 
 ### Added
