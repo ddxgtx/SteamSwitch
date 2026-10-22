@@ -59,6 +59,14 @@ namespace SteamSwitcher.Core
             }
             catch (Exception ex)
             {
+                // Roll back the half-initialized listener so a later StartAsync can retry
+                // cleanly instead of leaking an open HttpListener / CTS.
+                try { _listener?.Stop(); } catch (ObjectDisposedException) { }
+                try { _listener?.Close(); } catch (ObjectDisposedException) { }
+                _listener = null;
+                _cts?.Dispose();
+                _cts = null;
+                IsRunning = false;
                 AppLogger.Error($"WebSocketServer failed to start on port {_port}.", ex);
                 throw new InvalidOperationException($"无法启动 WebSocket 服务: {ex.Message}", ex);
             }
@@ -353,6 +361,11 @@ namespace SteamSwitcher.Core
                 client.Value.Dispose();
             }
             _clients.Clear();
+
+            // The semaphores are created once in the constructor and never released
+            // otherwise; dispose them here so their wait handles are not leaked.
+            _clientSlots.Dispose();
+            _broadcastGate.Dispose();
         }
     }
 }

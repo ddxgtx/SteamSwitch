@@ -1259,6 +1259,9 @@ namespace SteamSwitcher.Core
         {
             if (_disposed) return;
             _disposed = true;
+            // Cancel the scan token up front so any still-running scan task observes
+            // cancellation before we dispose the source below.
+            _scanCts?.Cancel();
             // The UI also uses the synchronous IDisposable contract. Keep it
             // bounded without waiting on any captured dispatcher continuation.
             try { Task.Run(DisconnectAsync).Wait(TimeSpan.FromSeconds(5)); }

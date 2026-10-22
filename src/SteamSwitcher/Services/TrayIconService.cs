@@ -18,6 +18,7 @@ namespace SteamSwitcher.Services
         private NotifyIcon? _notifyIcon;
         private readonly Window _ownerWindow;
         private ContextMenuStrip? _contextMenu;
+        private System.Windows.Controls.ContextMenu? _popupMenu;
         private TrayMenuPalette _palette = TrayMenuPalette.FromApplication();
         private ObservableCollection<AccountViewModel>? _accounts;
         private AccountViewModel? _currentAccount;
@@ -101,9 +102,19 @@ namespace SteamSwitcher.Services
 
         private void ShowOwnerWindow()
         {
-            _ownerWindow.Show();
-            _ownerWindow.WindowState = WindowState.Normal;
-            _ownerWindow.Activate();
+            // Calling Show() again on an already-visible window throws
+            // InvalidOperationException. If it is already up, just restore and focus it.
+            if (_ownerWindow.IsVisible)
+            {
+                _ownerWindow.WindowState = WindowState.Normal;
+                _ownerWindow.Activate();
+            }
+            else
+            {
+                _ownerWindow.Show();
+                _ownerWindow.WindowState = WindowState.Normal;
+                _ownerWindow.Activate();
+            }
         }
 
         public void UpdateMenu(ObservableCollection<AccountViewModel> accounts, AccountViewModel? currentAccount)
@@ -173,6 +184,11 @@ namespace SteamSwitcher.Services
                 {
                     if (dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
                         return;
+                    // Close any previously opened popup so repeated right-clicks never
+                    // stack multiple ContextMenu instances (each one holds a slot of
+                    // native menu handles until it is garbage-collected).
+                    if (_popupMenu != null)
+                        _popupMenu.IsOpen = false;
                     var menu = SharedContextMenuBuilder.Build(
                     _accounts,
                     _currentAccount,
@@ -187,6 +203,12 @@ namespace SteamSwitcher.Services
                     emergencyRestore: () => EmergencyRestoreRequested?.Invoke(this, EventArgs.Empty),
                     exit: () => ExitRequested?.Invoke(this, EventArgs.Empty));
 
+                    menu.Closed += (s, _) =>
+                    {
+                        if (ReferenceEquals(_popupMenu, menu))
+                            _popupMenu = null;
+                    };
+                    _popupMenu = menu;
                     menu.IsOpen = true;
                 }));
             }
@@ -255,10 +277,15 @@ namespace SteamSwitcher.Services
             if (_notifyIcon != null)
             {
                 _notifyIcon.Visible = false;
+                _notifyIcon.Icon?.Dispose();
                 _notifyIcon.Dispose();
                 _notifyIcon = null;
             }
             _contextMenu?.Dispose();
+            _contextMenu = null;
+            // WPF ContextMenu is not IDisposable; drop the reference so its items
+            // (which hold account data) can be reclaimed. It was already closed above.
+            _popupMenu = null;
         }
     }
 

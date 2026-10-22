@@ -14,6 +14,8 @@ namespace SteamSwitcher.Views
     {
         private readonly MainViewModel _viewModel;
         private readonly GameAccountBinding _gameBinding;
+        private readonly ObservableCollection<GameListViewModel> _displayGames = new();
+        private string _searchText = string.Empty;
 
         public GameBindingWindow(MainViewModel viewModel, GameAccountBinding gameBinding)
         {
@@ -21,6 +23,13 @@ namespace SteamSwitcher.Views
             _viewModel = viewModel;
             _gameBinding = gameBinding;
             DataContext = _viewModel;
+
+            // Drive the list through a single, stable ObservableCollection instead of
+            // reassigning ItemsSource on every keystroke. This keeps the SelectedItem
+            // binding to SelectedGame intact (the same GameListViewModel instances are
+            // reused) and lets the list refresh after a background re-scan.
+            GameListBox.ItemsSource = _displayGames;
+            ApplyGameListFilter();
 
             Loaded += async (s, e) =>
             {
@@ -32,6 +41,7 @@ namespace SteamSwitcher.Views
                     _isPlaceholderActive = true;
 
                     await _viewModel.ScanGamesAsync();
+                    ApplyGameListFilter();
                     GameCountLabel.Text = $"— {_viewModel.GameList.Count} 款游戏";
                 }
                 catch (Exception ex)
@@ -49,6 +59,7 @@ namespace SteamSwitcher.Views
             try
             {
                 await _viewModel.ScanGamesAsync();
+                ApplyGameListFilter();
                 GameCountLabel.Text = $"— {_viewModel.GameList.Count} 款游戏";
             }
             catch (Exception ex)
@@ -86,23 +97,24 @@ namespace SteamSwitcher.Views
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (_isPlaceholderActive) return;
+            ApplyGameListFilter();
+        }
 
-            var searchText = SearchBox.Text?.Trim().ToLower() ?? "";
-            ClearSearchBtn.Visibility = string.IsNullOrEmpty(searchText) ? Visibility.Collapsed : Visibility.Visible;
+        private void ApplyGameListFilter()
+        {
+            _searchText = (SearchBox.Text ?? "").Trim().ToLowerInvariant();
+            ClearSearchBtn.Visibility = string.IsNullOrEmpty(_searchText) ? Visibility.Collapsed : Visibility.Visible;
 
-            if (string.IsNullOrEmpty(searchText))
-            {
-                RefreshGameList(null);
-            }
-            else
-            {
-                var filtered = _viewModel.GameList
-                    .Where(g => g.GameName.ToLower().Contains(searchText) ||
-                                g.AppId.ToString().Contains(searchText))
+            IEnumerable<GameListViewModel> filtered = string.IsNullOrWhiteSpace(_searchText)
+                ? _viewModel.GameList
+                : _viewModel.GameList
+                    .Where(g => g.GameName.ToLowerInvariant().Contains(_searchText) ||
+                                g.AppId.ToString().Contains(_searchText))
                     .ToList();
 
-                RefreshGameList(filtered);
-            }
+            _displayGames.Clear();
+            foreach (var game in filtered)
+                _displayGames.Add(game);
         }
 
         private void ClearSearch_Click(object sender, RoutedEventArgs e)
@@ -110,24 +122,7 @@ namespace SteamSwitcher.Views
             SearchBox.Text = "";
             SearchBox_GotFocus(sender, e);
             ClearSearchBtn.Visibility = Visibility.Collapsed;
-        }
-
-        private void RefreshGameList(System.Collections.Generic.List<GameListViewModel>? filtered)
-        {
-            var selected = GameListBox.SelectedItem;
-            if (filtered == null)
-            {
-                GameListBox.ItemsSource = _viewModel.GameList;
-            }
-            else
-            {
-                GameListBox.ItemsSource = new ObservableCollection<GameListViewModel>(filtered);
-            }
-
-            if (selected != null)
-            {
-                GameListBox.SelectedItem = selected;
-            }
+            ApplyGameListFilter();
         }
 
         private async void SaveBinding_Click(object sender, RoutedEventArgs e)

@@ -13,12 +13,21 @@ internal static class FloatingPlacementGeometry
     {
         var width = Math.Min(window.Width, work.Width);
         var height = Math.Min(window.Height, work.Height);
+        // Clamp the size too, not just the position, so a window larger than the work
+        // area does not spill outside it (the original returned the oversized size).
         return new Rect(Math.Clamp(window.Left, work.Left, work.Right - width),
-            Math.Clamp(window.Top, work.Top, work.Bottom - height), window.Width, window.Height);
+            Math.Clamp(window.Top, work.Top, work.Bottom - height), width, height);
     }
 
-    internal static FloatingMonitor Nearest(IReadOnlyList<FloatingMonitor> monitors, Rect window) => monitors
-        .OrderBy(m => DistanceSquared(m.WorkArea, window)).First();
+    internal static FloatingMonitor Nearest(IReadOnlyList<FloatingMonitor> monitors, Rect window)
+    {
+        // Headless/early-startup fallback: with no monitors, treat the window rect
+        // itself as the work area so callers never dereference an empty list.
+        if (monitors.Count == 0)
+            return new FloatingMonitor("primary", window, 1, 1, true);
+        return monitors
+            .OrderBy(m => DistanceSquared(m.WorkArea, window)).First();
+    }
 
     private static double DistanceSquared(Rect work, Rect window)
     {
@@ -39,6 +48,11 @@ internal static class FloatingPlacementGeometry
     internal static Rect Restore(FloatingMonitorPosition saved, IReadOnlyList<FloatingMonitor> monitors,
         double widthDips, double heightDips)
     {
+        // Guard against an empty monitor list (e.g. a headless/early-startup state) so
+        // we never throw IndexOutOfRangeException while restoring the window position.
+        if (monitors.Count == 0)
+            return new Rect(0, 0, Math.Max(1, widthDips), Math.Max(1, heightDips));
+
         var monitor = monitors.FirstOrDefault(m => string.Equals(m.Id, saved.MonitorId, StringComparison.OrdinalIgnoreCase))
             ?? monitors.FirstOrDefault(m => m.Primary) ?? monitors[0];
         var width = Math.Max(1, widthDips * monitor.ScaleX);

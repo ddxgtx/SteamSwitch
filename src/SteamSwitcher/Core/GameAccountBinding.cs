@@ -30,7 +30,7 @@ namespace SteamSwitcher.Core
         private readonly Dictionary<int, GameBinding> _bindings = new();
         private readonly object _saveLock = new();
         private readonly SemaphoreSlim _saveGate = new(1, 1);
-        private bool _loadFailed;
+        private volatile bool _loadFailed;
         private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
         public event EventHandler? BindingsChanged;
@@ -158,7 +158,9 @@ namespace SteamSwitcher.Core
             await MutateAsync(snapshot =>
             {
                 if (!snapshot.TryGetValue(appId, out var binding)) throw new InvalidOperationException("请先为该游戏保存账号绑定。");
-                binding.LaunchArguments = launchArguments.Trim();
+                // 调用方可能传 null（未填启动参数时），直接 .Trim() 会抛空引用
+                // 并让整个"保存启动工作流"失败。
+                binding.LaunchArguments = launchArguments?.Trim() ?? string.Empty;
                 binding.BackupBeforeLaunch = backupBeforeLaunch;
                 binding.BackupAfterExit = backupAfterExit;
                 binding.CloseSteamAfterExit = closeSteamAfterExit;

@@ -125,7 +125,7 @@ namespace SteamSwitcher.Views
         public event EventHandler<IReadOnlyList<string>>? PanelItemOrderChanged;
         public event EventHandler<IReadOnlyList<string>>? AccountOrderChanged;
         public event EventHandler<int>? GameDeleteRequested;
-        public event EventHandler<int>? QuickLaunchDeleteRequested;
+        public event EventHandler<string>? QuickLaunchDeleteRequested;
         public event EventHandler<int>? AccountDeleteRequested;
 
         public TaskbarBandWindow(AccountManager accountManager) : this(accountManager, ReadSystemCursorPosition)
@@ -285,15 +285,14 @@ namespace SteamSwitcher.Views
         {
             if (element.Tag is GameListViewModel game)
             {
-                var index = _pinnedGames.FindIndex(x => x.AppId == game.AppId);
-                if (index >= 0)
-                    GameDeleteRequested?.Invoke(this, index);
+                // Pass the AppId (stable identity), not a positional index. The panel
+                // order is normalized and can differ from the stored PinnedGameIds order,
+                // so an index here would remove the wrong game.
+                GameDeleteRequested?.Invoke(this, game.AppId);
             }
             else if (element.Tag is QuickLaunchItem item)
             {
-                var index = _pinnedQuickLaunchItems.FindIndex(x => x.Id == item.Id);
-                if (index >= 0)
-                    QuickLaunchDeleteRequested?.Invoke(this, index);
+                QuickLaunchDeleteRequested?.Invoke(this, item.Id);
             }
         }
 
@@ -921,9 +920,9 @@ namespace SteamSwitcher.Views
 
             _lastTrackVersion = snapshot.TrackVersion;
             _lastSnapshot = snapshot;
-            if (LyricText == null)
-                return;
-
+            // Do not early-return when LyricText is null (it is detached during a
+            // Rebuild). The other controls are still valid and must keep updating;
+            // only the lyric-specific assignments below are guarded by a null check.
             _isPlaying = snapshot.IsPlaying && snapshot.HasSession;
             if (_isPlaying && _lyricsShowVisualizer)
             {
@@ -1053,7 +1052,7 @@ namespace SteamSwitcher.Views
 
             // Lyricify 式行切换：新一句歌词轻微上滑+淡入。
             // 切歌走的是另一条路：直接定住，不做淡入（否则旧词一闪）。
-            if (!string.Equals(_lastLyricText, primaryText, StringComparison.Ordinal))
+            if (LyricText != null && !string.Equals(_lastLyricText, primaryText, StringComparison.Ordinal))
             {
                 _lastLyricText = primaryText;
                 LyricText.Text = primaryText;
@@ -1093,7 +1092,8 @@ namespace SteamSwitcher.Views
 
             // Rebuild() owns the configured type size; individual lines use ellipsis
             // and the full tooltip instead of resizing on every poll.
-            LyricText.FontSize = _lyricsFontSize;
+            if (LyricText != null)
+                LyricText.FontSize = _lyricsFontSize;
 
             // Tooltip 只在内容真正变化时赋值，且不在悬停时更新：内容变化会让已
             // 弹出的提示框重排，也可能与鼠标停留区域争夺指向状态。
@@ -1121,16 +1121,21 @@ namespace SteamSwitcher.Views
             // 进度条：两次轮询之间用补间动画衔接。切歌时直接归零而不是播一段
             // "从 100% 缩回 0%"的倒退动画——倒退比瞬移更显眼，那一下正是闪烁感
             // 的来源之一。歌词与封面已经在同一帧换掉了，进度条跟上即可。
-            if (trackChanged)
+            // 无头/预览路径下 LyricsProgress 可能为 null（Rebuild():745 就是这么判的）。
+            // 不判空会让 NRE 从 BeginInvoke 里逃出，直接崩掉 UI 线程。
+            if (LyricsProgress != null)
             {
-                LyricsProgress.BeginAnimation(ProgressBar.ValueProperty, null);
-                LyricsProgress.Value = snapshot.Progress;
-            }
-            else
-            {
-                // 必须带上当前显示值作为起点，否则每 250ms 重启动画都会让进度条
-                // 从旧的基值猛冲到新值，看上去就是持续抖动。
-                AnimateDouble(LyricsProgress, ProgressBar.ValueProperty, snapshot.Progress, 600);
+                if (trackChanged)
+                {
+                    LyricsProgress.BeginAnimation(ProgressBar.ValueProperty, null);
+                    LyricsProgress.Value = snapshot.Progress;
+                }
+                else
+                {
+                    // 必须带上当前显示值作为起点，否则每 250ms 重启动画都会让进度条
+                    // 从旧的基值猛冲到新值，看上去就是持续抖动。
+                    AnimateDouble(LyricsProgress, ProgressBar.ValueProperty, snapshot.Progress, 600);
+                }
             }
 
             if (PlayPauseButton != null)

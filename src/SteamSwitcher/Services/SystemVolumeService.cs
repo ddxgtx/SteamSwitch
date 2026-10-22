@@ -49,20 +49,37 @@ namespace SteamSwitcher.Services
         private const byte VK_VOLUME_MUTE = 0xAD;
         private const byte VK_VOLUME_DOWN = 0xAE;
         private const byte VK_VOLUME_UP = 0xAF;
+        private const uint KEYEVENTF_KEYUP = 0x0002;
 
         private static IAudioEndpointVolume? GetVolumeEndpoint()
         {
             try
             {
+                // Each COM object is released explicitly: these RCWs would otherwise
+                // pile up until the finalizer runs, which matters because this method
+                // is hit on every volume tick.
                 var enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumeratorCom());
                 int hr = enumerator.GetDefaultAudioEndpoint(0, 1, out var dev); // eRender = 0, eMultimedia = 1
-                if (hr != 0 || dev == null) return null;
+                if (hr != 0 || dev == null)
+                {
+                    ReleaseCom(enumerator);
+                    return null;
+                }
 
                 var iid = typeof(IAudioEndpointVolume).GUID;
                 hr = dev.Activate(ref iid, 1, IntPtr.Zero, out var obj); // CLSCTX_INPROC_SERVER = 1
-                if (hr != 0 || obj == null) return null;
+                if (hr != 0 || obj == null)
+                {
+                    ReleaseCom(dev);
+                    ReleaseCom(enumerator);
+                    return null;
+                }
 
-                return (IAudioEndpointVolume)obj;
+                var endpoint = (IAudioEndpointVolume)obj;
+                ReleaseCom(obj);   // drop the IUnknown RCW; endpoint keeps its own interface RCW
+                ReleaseCom(dev);
+                ReleaseCom(enumerator);
+                return endpoint;
             }
             catch (Exception ex)
             {
@@ -71,42 +88,57 @@ namespace SteamSwitcher.Services
             }
         }
 
+        private static void ReleaseCom(object? com)
+        {
+            if (com == null) return;
+            try { Marshal.ReleaseComObject(com); }
+            catch { }
+        }
+
         public static float GetVolume()
         {
+            var endpoint = GetVolumeEndpoint();
+            if (endpoint == null) return 0.5f;
             try
             {
-                var endpoint = GetVolumeEndpoint();
-                if (endpoint != null)
-                {
-                    int hr = endpoint.GetMasterVolumeLevelScalar(out float level);
-                    if (hr == 0) return level;
-                }
+                int hr = endpoint.GetMasterVolumeLevelScalar(out float level);
+                return hr == 0 ? level : 0.5f;
             }
-            catch { }
-            return 0.5f;
+            catch
+            {
+                return 0.5f;
+            }
+            finally
+            {
+                ReleaseCom(endpoint);
+            }
         }
 
         public static bool IsMuted()
         {
+            var endpoint = GetVolumeEndpoint();
+            if (endpoint == null) return false;
             try
             {
-                var endpoint = GetVolumeEndpoint();
-                if (endpoint != null)
-                {
-                    int hr = endpoint.GetMute(out bool isMuted);
-                    if (hr == 0) return isMuted;
-                }
+                int hr = endpoint.GetMute(out bool isMuted);
+                return hr == 0 && isMuted;
             }
-            catch { }
-            return false;
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                ReleaseCom(endpoint);
+            }
         }
 
         public static float AdjustVolume(float delta)
         {
-            try
+            var endpoint = GetVolumeEndpoint();
+            if (endpoint != null)
             {
-                var endpoint = GetVolumeEndpoint();
-                if (endpoint != null)
+                try
                 {
                     endpoint.GetMasterVolumeLevelScalar(out float currentLevel);
                     float newLevel = Math.Clamp(currentLevel + delta, 0.0f, 1.0f);
@@ -120,14 +152,24 @@ namespace SteamSwitcher.Services
                     }
                     return newLevel;
                 }
+                finally
+                {
+                    ReleaseCom(endpoint);
+                }
             }
-            catch { }
 
-            // Fallback to keyboard event
+            // Fallback to keyboard event. A key must be pressed and released, or the
+            // volume key stays "held down" and scares the OS volume OSD into repeating.
             if (delta > 0)
+            {
                 keybd_event(VK_VOLUME_UP, 0, 0, UIntPtr.Zero);
+                keybd_event(VK_VOLUME_UP, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            }
             else if (delta < 0)
+            {
                 keybd_event(VK_VOLUME_DOWN, 0, 0, UIntPtr.Zero);
+                keybd_event(VK_VOLUME_DOWN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            }
 
             return GetVolume();
         }

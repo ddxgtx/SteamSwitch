@@ -15,7 +15,8 @@ namespace SteamSwitcher.Core
         private bool _mouseDown;
         private Point _startPoint;
         private int _dragIndex = -1;
-        private DispatcherTimer? _longPressTimer;
+        private bool _attached;
+        private readonly DispatcherTimer _longPressTimer;
 
         public event EventHandler<int>? ItemDeleted;
         public event EventHandler<(int fromIndex, int toIndex)>? ItemMoved;
@@ -26,14 +27,43 @@ namespace SteamSwitcher.Core
             _listBox = listBox;
             _deleteZone = deleteZone;
             _deleteZone.Visibility = Visibility.Collapsed;
+            // Created once and reused: rebuilding it on every press leaked the previous
+            // timer (and its closure) until the GC reclaimed it.
+            _longPressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            _longPressTimer.Tick += LongPressTimer_Tick;
         }
 
         public void Attach()
         {
+            if (_attached) return;
+            _attached = true;
             // Use AddHandler with HandledEventsToo to capture events even if handled by children
             _listBox.AddHandler(UIElement.MouseLeftButtonDownEvent, new MouseButtonEventHandler(OnMouseLeftButtonDown), true);
             _listBox.AddHandler(UIElement.MouseMoveEvent, new MouseEventHandler(OnMouseMove), true);
             _listBox.AddHandler(UIElement.MouseLeftButtonUpEvent, new MouseButtonEventHandler(OnMouseLeftButtonUp), true);
+        }
+
+        public void Detach()
+        {
+            if (!_attached) return;
+            _attached = false;
+            _listBox.RemoveHandler(UIElement.MouseLeftButtonDownEvent, new MouseButtonEventHandler(OnMouseLeftButtonDown));
+            _listBox.RemoveHandler(UIElement.MouseMoveEvent, new MouseEventHandler(OnMouseMove));
+            _listBox.RemoveHandler(UIElement.MouseLeftButtonUpEvent, new MouseButtonEventHandler(OnMouseLeftButtonUp));
+            _longPressTimer.Stop();
+        }
+
+        private void LongPressTimer_Tick(object? sender, EventArgs e)
+        {
+            _longPressTimer.Stop();
+            if (_mouseDown && _dragIndex >= 0)
+            {
+                _isDragging = true;
+                var container = _listBox.ItemContainerGenerator.ContainerFromIndex(_dragIndex) as UIElement;
+                if (container != null)
+                    container.Opacity = 0.3;
+                _deleteZone.Visibility = Visibility.Visible;
+            }
         }
 
         private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -46,20 +76,7 @@ namespace SteamSwitcher.Core
 
             if (_dragIndex >= 0)
             {
-                _longPressTimer?.Stop();
-                _longPressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-                _longPressTimer.Tick += (s, args) =>
-                {
-                    _longPressTimer.Stop();
-                    if (_mouseDown && _dragIndex >= 0)
-                    {
-                        _isDragging = true;
-                        var container = _listBox.ItemContainerGenerator.ContainerFromIndex(_dragIndex) as UIElement;
-                        if (container != null)
-                            container.Opacity = 0.3;
-                        _deleteZone.Visibility = Visibility.Visible;
-                    }
-                };
+                _longPressTimer.Stop();
                 _longPressTimer.Start();
             }
         }

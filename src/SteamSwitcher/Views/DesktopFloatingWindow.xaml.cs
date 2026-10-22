@@ -74,7 +74,7 @@ namespace SteamSwitcher.Views
         public event EventHandler<IReadOnlyList<string>>? PanelItemOrderChanged;
         public event EventHandler<IReadOnlyList<string>>? AccountOrderChanged;
         public event EventHandler<int>? GameDeleteRequested;
-        public event EventHandler<int>? QuickLaunchDeleteRequested;
+        public event EventHandler<string>? QuickLaunchDeleteRequested;
         public event EventHandler<int>? AccountDeleteRequested;
 
         public DesktopFloatingWindow(AccountManager accountManager)
@@ -241,15 +241,14 @@ namespace SteamSwitcher.Views
         {
             if (element.Tag is GameListViewModel game)
             {
-                var index = _pinnedGames.FindIndex(x => x.AppId == game.AppId);
-                if (index >= 0)
-                    GameDeleteRequested?.Invoke(this, index);
+                // Pass the AppId (stable identity), not a positional index. The panel
+                // order is normalized and can differ from the stored PinnedGameIds order,
+                // so an index here would remove the wrong game.
+                GameDeleteRequested?.Invoke(this, game.AppId);
             }
             else if (element.Tag is QuickLaunchItem item)
             {
-                var index = _pinnedQuickLaunchItems.FindIndex(x => x.Id == item.Id);
-                if (index >= 0)
-                    QuickLaunchDeleteRequested?.Invoke(this, index);
+                QuickLaunchDeleteRequested?.Invoke(this, item.Id);
             }
         }
 
@@ -620,8 +619,10 @@ namespace SteamSwitcher.Views
                 _glassEnabled ? "GlassTextPrimaryBrush" : "FloatingTextPrimaryBrush");
             Resources["FloatingTextSecondaryBrush"] = Application.Current.FindResource(
                 _glassEnabled ? "GlassTextSecondaryBrush" : "FloatingTextSecondaryBrush");
-            RootGlass.Effect = new System.Windows.Media.Effects.DropShadowEffect
+            var shadow = new System.Windows.Media.Effects.DropShadowEffect
             { Color = Colors.Black, BlurRadius = 12, ShadowDepth = 2, Opacity = 0.28 };
+            shadow.Freeze();
+            RootGlass.Effect = shadow;
         }
 
         private static Color ParseColor(string hex)

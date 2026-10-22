@@ -723,12 +723,12 @@ namespace SteamSwitcher.ViewModels
             PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        public void RemovePinnedGame(int index)
+        public void RemovePinnedGame(int appId)
         {
             var pinnedIds = _settings.PinnedGameIds;
-            if (index >= 0 && index < pinnedIds.Count)
+            var index = pinnedIds.IndexOf(appId);
+            if (index >= 0)
             {
-                var appId = pinnedIds[index];
                 pinnedIds.RemoveAt(index);
                 SaveSettingsNow();
 
@@ -1349,14 +1349,12 @@ namespace SteamSwitcher.ViewModels
             }
         }
 
-        public async Task DeletePinnedQuickLaunchItemAsync(int index)
+        public async Task DeletePinnedQuickLaunchItemAsync(string id)
         {
-            var items = _quickLaunch.GetPinned();
-            if (index >= 0 && index < items.Count)
-            {
-                await _quickLaunch.RemoveAsync(items[index].Id);
-                StatusText = $"已删除: {items[index].Name}";
-            }
+            if (string.IsNullOrEmpty(id)) return;
+            var item = _quickLaunch.GetById(id);
+            await _quickLaunch.RemoveAsync(id);
+            StatusText = $"已删除: {item?.Name ?? id}";
         }
 
         private void UpdateAccountsList()

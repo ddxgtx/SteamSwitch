@@ -2787,8 +2787,8 @@ namespace SteamSwitcher
                 await RunGuardedAsync("保存面板顺序", () => _viewModel.SetPinnedPanelItemOrderAsync(keys));
             _taskbarBand.AccountOrderChanged += (s, ids) => RunGuardedSync("保存账号顺序", () => _viewModel.SetPinnedAccountOrder(ids));
             _taskbarBand.GameDeleteRequested += (s, index) => RunGuardedSync("移除固定游戏", () => _viewModel.RemovePinnedGame(index));
-            _taskbarBand.QuickLaunchDeleteRequested += async (s, index) =>
-                await RunGuardedAsync("移除固定项目", () => _viewModel.DeletePinnedQuickLaunchItemAsync(index));
+            _taskbarBand.QuickLaunchDeleteRequested += async (s, id) =>
+                await RunGuardedAsync("移除固定项目", () => _viewModel.DeletePinnedQuickLaunchItemAsync(id));
             _taskbarBand.AccountDeleteRequested += (s, index) => RunGuardedSync("移除固定账号", () => _viewModel.RemovePinnedAccount(index));
             _taskbarBand.SetViewModel(_viewModel);
             _taskbarBand.SetPinnedAccounts(pinnedAccounts);
@@ -2891,7 +2891,7 @@ namespace SteamSwitcher
             _desktopFloatingWindow.PanelItemOrderChanged += async (s, keys) => await _viewModel.SetPinnedPanelItemOrderAsync(keys);
             _desktopFloatingWindow.AccountOrderChanged += (s, ids) => _viewModel.SetPinnedAccountOrder(ids);
             _desktopFloatingWindow.GameDeleteRequested += (s, index) => _viewModel.RemovePinnedGame(index);
-            _desktopFloatingWindow.QuickLaunchDeleteRequested += async (s, index) => await _viewModel.DeletePinnedQuickLaunchItemAsync(index);
+            _desktopFloatingWindow.QuickLaunchDeleteRequested += async (s, id) => await _viewModel.DeletePinnedQuickLaunchItemAsync(id);
             _desktopFloatingWindow.AccountDeleteRequested += (s, index) => _viewModel.RemovePinnedAccount(index);
             _desktopFloatingWindow.PositionChanged += (s, pos) =>
             {

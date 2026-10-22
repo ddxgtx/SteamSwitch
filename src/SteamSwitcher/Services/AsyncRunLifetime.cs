@@ -12,14 +12,20 @@ internal sealed class AsyncRunLifetime
 
     internal Lease? Begin()
     {
+        CancellationTokenSource? previous;
+        long generation;
         lock (_sync)
         {
             if (_disposed != 0) return null;
-            CancelAndDispose(_runCancellation);
+            previous = _runCancellation;
             _runCancellation = new CancellationTokenSource();
             _running = 1;
-            return new(++_generation, _runCancellation.Token);
+            generation = ++_generation;
         }
+        // Cancel outside the lock: a cancellation callback that re-enters these
+        // methods would otherwise deadlock on _sync.
+        CancelAndDispose(previous);
+        return new Lease(generation, _runCancellation.Token);
     }
 
     internal bool IsCurrent(Lease lease) => Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _running) != 0 &&
@@ -37,19 +43,18 @@ internal sealed class AsyncRunLifetime
 
     internal void Stop(Action stop, bool dispose = false)
     {
+        CancellationTokenSource? cancellation;
         lock (_sync)
         {
             _running = 0;
             _generation++;
             if (dispose) _disposed = 1;
-            var cancellation = _runCancellation;
+            cancellation = _runCancellation;
             _runCancellation = null;
-            try { CancelAndDispose(cancellation); }
-            finally
-            {
-                stop();
-            }
         }
+        // Cancel and run the stop callback outside the lock to avoid re-entrancy deadlocks.
+        try { CancelAndDispose(cancellation); }
+        finally { stop(); }
     }
 
     private static void CancelAndDispose(CancellationTokenSource? cancellation)

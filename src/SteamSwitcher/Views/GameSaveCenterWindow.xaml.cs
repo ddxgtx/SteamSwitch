@@ -48,7 +48,7 @@ namespace SteamSwitcher.Views
             _mainViewModel.GetSettings().CustomGameSaveFolders ??= new List<CustomGameSaveDefinition>();
             AccountFilter.Items.Add(AllAccounts);
             AccountFilter.SelectedIndex = 0;
-            Loaded += async (_, _) => await RefreshEntriesAsync();
+            Loaded += OnLoaded;
         }
 
         public void SetPreviewEntries(IEnumerable<GameSaveEntry> entries)
@@ -74,11 +74,16 @@ namespace SteamSwitcher.Views
             SetActionButtonsEnabled(true);
         }
 
+        private async void OnLoaded(object sender, RoutedEventArgs e) => await RefreshEntriesAsync();
+
         public async Task ReloadSettingsAsync()
         {
             if (_disposed) return;
+            // A reload while a backup/restore operation is in flight would race with it.
+            // Skip quietly instead of throwing — the in-flight operation already keeps
+            // the UI in sync, so the caller does not need to wait or retry.
             if (_isBusy)
-                throw new InvalidOperationException("存档操作正在进行，请等待操作完成后重新加载设置。");
+                return;
             SyncSaveSettingsControls();
             await RefreshEntriesAsync();
         }
@@ -858,11 +863,15 @@ namespace SteamSwitcher.Views
             if (_disposed) return;
             _disposed = true;
             _changeAnalysisVersion++;
+            Loaded -= OnLoaded;
             try
             {
-                // 只取消、不立刻 Dispose：还在跑的后台任务会继续用这个 token，
-                // 提前释放会让它们抛 ObjectDisposedException 并被报成操作失败。
+                // Cancel first so the token enters the canceled state, then release the
+                // underlying wait handle. Running operations observe cancellation via the
+                // canceled token (IsCancellationRequested stays valid after dispose), so
+                // they complete cleanly instead of being abandoned mid-flight.
                 _lifetimeCts.Cancel();
+                _lifetimeCts.Dispose();
             }
             catch (ObjectDisposedException) { }
             GC.SuppressFinalize(this);
