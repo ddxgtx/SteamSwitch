@@ -12,8 +12,12 @@ public sealed class ParserTests
         var lines = SyncedLyricsParser.Parse("[00:01.00]first\n[00:02.50]second");
         Assert.HasCount(2, lines);
         Assert.AreEqual("second", SyncedLyricsParser.FindLine(lines, TimeSpan.FromSeconds(2.6)));
-        Assert.AreEqual("second", SyncedLyricsParser.FindNextLine(lines, TimeSpan.FromSeconds(1.2)));
+        Assert.AreEqual("second", SyncedLyricsParser.FindNextLine(lines, TimeSpan.FromSeconds(1.8)));
+        Assert.IsNull(SyncedLyricsParser.FindNextLine(lines, TimeSpan.FromSeconds(1.2)),
+            "距离下一句超过 1 秒时不应显示即将播放");
         Assert.IsNull(SyncedLyricsParser.FindNextLine(lines, TimeSpan.FromSeconds(2.6)));
+        Assert.IsNull(SyncedLyricsParser.FindNextLine(lines, TimeSpan.FromSeconds(0.2)),
+            "前奏阶段不应提前显示第一句歌词");
     }
 
     [TestMethod]
@@ -57,6 +61,63 @@ public sealed class ParserTests
         Assert.IsNotNull(line);
         Assert.AreEqual("And I might not be the one for you", line.Text);
         Assert.AreEqual("或许我并非你的命中注定", line.Translation);
+    }
+
+    [TestMethod]
+    public void SyncedLyricsParser_DoesNotReuseOneTranslationForMultipleLines()
+    {
+        var original = SyncedLyricsParser.Parse("[00:10.00]第一句\n[00:10.40]第二句");
+        var translations = SyncedLyricsParser.Parse("[00:10.00]译文");
+        var merged = SyncedLyricsParser.Merge(original, translations);
+        Assert.AreEqual("译文", merged[0].Translation);
+        Assert.IsNull(merged[1].Translation);
+    }
+
+    [TestMethod]
+    public void SyncedLyricsParser_FiltersCreditLines()
+    {
+        var lrc = "[00:00.50]作词 : 某某人\n[00:00.60]作曲：某某人\n[00:00.70]Lyrics by Someone\n[00:00.80]纯音乐，请欣赏\n[00:01.20]Hello World";
+        var lines = SyncedLyricsParser.Parse(lrc);
+        Assert.HasCount(1, lines);
+        Assert.AreEqual("Hello World", lines[0].Text);
+    }
+
+    [TestMethod]
+    public void SyncedLyricsParser_TranslationCoverage()
+    {
+        var orig = SyncedLyricsParser.Parse("[00:01.00]first\n[00:02.00]second");
+        var trans = SyncedLyricsParser.Parse("[00:01.00]第一\n[00:02.00]第二");
+        var full = SyncedLyricsParser.Merge(orig, trans);
+        Assert.AreEqual(1.0, SyncedLyricsParser.TranslationCoverage(full), 1e-9);
+        Assert.AreEqual(0.0, SyncedLyricsParser.TranslationCoverage(orig), 1e-9);
+    }
+
+    [TestMethod]
+    public void LyricMatch_TitleScore_PrefersExactAndPenalizesVersionTags()
+    {
+        Assert.AreEqual(LyricMatch.TitleScoreMax, LyricMatch.TitleScore("晴天", "晴天"));
+        // 归一化：全角、大小写、标点差异不影响完全相等
+        Assert.AreEqual(LyricMatch.TitleScoreMax, LyricMatch.TitleScore("Ｈｅｌｌｏ！", "hello"));
+        // 一方包含另一方（后缀不带版本标签时得 2 分）
+        Assert.AreEqual(2, LyricMatch.TitleScore("晴天 (Album Version)", "晴天"));
+        // 候选带歌名没有的 Live 标签 → 同档罚 1 分
+        Assert.AreEqual(1, LyricMatch.TitleScore("晴天 (Live)", "晴天"));
+        Assert.AreEqual(1, LyricMatch.TitleScore("晴天 Live", "晴天"));
+        // 歌名本身就带标签时：完全相等得满分且不罚
+        Assert.AreEqual(LyricMatch.TitleScoreMax, LyricMatch.TitleScore("晴天 Live", "晴天 Live"));
+        // 完全不同
+        Assert.AreEqual(0, LyricMatch.TitleScore("七里香", "晴天"));
+    }
+
+    [TestMethod]
+    public void LyricMatch_ArtistMatches_SplitsAndContains()
+    {
+        Assert.IsTrue(LyricMatch.ArtistMatches("周杰伦", "周杰伦"));
+        Assert.IsTrue(LyricMatch.ArtistMatches("周杰伦/费玉清", "周杰伦"));
+        Assert.IsTrue(LyricMatch.ArtistMatches("Jay Chou", "jay chou"));
+        Assert.IsTrue(LyricMatch.ArtistMatches("A feat. B", "B"));
+        Assert.IsFalse(LyricMatch.ArtistMatches("王力宏", "周杰伦"));
+        Assert.IsFalse(LyricMatch.ArtistMatches("", "周杰伦"));
     }
 
     [TestMethod]

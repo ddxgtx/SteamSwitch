@@ -68,5 +68,18 @@ installer/
 
 ## Local build environments
 artifacts/
+**/TestResults/
 .appdata/
 .dotnet-home/
+
+## WPF build temp
+*_wpftmp.csproj
+
+## QA / preview / local scratch
+.codex-qa/
+.preview/
+.workbuddy/
+build/
+isolated-profile/
+settings-apply-smoke
+settings-apply-smoke.json

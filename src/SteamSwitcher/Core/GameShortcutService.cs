@@ -27,33 +27,19 @@ namespace SteamSwitcher.Core
                 throw new FileNotFoundException("无法确定 Steam Switch 程序路径。", executable);
 
             Directory.CreateDirectory(destinationDirectory);
-            var shortcutPath = GetUniquePath(destinationDirectory, $"{SanitizeFileName(game.Name)}.lnk");
+            var shortcutName = $"{ShortcutHelper.SanitizeFileName(game.Name, "Steam Game")}.lnk";
+            var arguments = $"--launch-game {game.AppId}";
+            var shortcutPath = ShortcutHelper.FindExistingShortcut(destinationDirectory, shortcutName, executable, arguments)
+                ?? ShortcutHelper.GetUniquePath(destinationDirectory, shortcutName);
             var iconPath = ResolveGameIcon(game, steamPath) ?? executable;
 
-            object? shell = null;
-            object? shortcut = null;
-            try
-            {
-                var shellType = Type.GetTypeFromProgID("WScript.Shell")
-                    ?? throw new InvalidOperationException("系统未提供 Windows Script Host。");
-                shell = Activator.CreateInstance(shellType)
-                    ?? throw new InvalidOperationException("无法创建快捷方式服务。");
-                dynamic dynamicShell = shell;
-                shortcut = dynamicShell.CreateShortcut(shortcutPath);
-                dynamic dynamicShortcut = shortcut;
-                dynamicShortcut.TargetPath = executable;
-                dynamicShortcut.Arguments = $"--launch-game {game.AppId}";
-                dynamicShortcut.WorkingDirectory = AppContext.BaseDirectory;
-                dynamicShortcut.IconLocation = $"{iconPath},0";
-                dynamicShortcut.Description = $"使用 Steam Switch 切换绑定账号并启动 {game.Name}";
-                dynamicShortcut.Save();
-                return shortcutPath;
-            }
-            finally
-            {
-                if (shortcut != null && Marshal.IsComObject(shortcut)) Marshal.FinalReleaseComObject(shortcut);
-                if (shell != null && Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
-            }
+            ShortcutHelper.SaveShortcut(
+                shortcutPath,
+                executable,
+                arguments,
+                iconPath,
+                $"使用 Steam Switch 切换绑定账号并启动 {game.Name}");
+            return shortcutPath;
         }
 
         private static string? ResolveGameIcon(SteamLibraryGame game, string steamPath)
@@ -109,25 +95,6 @@ namespace SteamSwitcher.Core
             {
                 return null;
             }
-        }
-        private static string SanitizeFileName(string value)
-        {
-            var invalid = Path.GetInvalidFileNameChars();
-            var result = string.Concat(value.Trim().Select(character => invalid.Contains(character) ? '_' : character));
-            return string.IsNullOrWhiteSpace(result) ? "Steam Game" : result;
-        }
-
-        private static string GetUniquePath(string directory, string fileName)
-        {
-            var candidate = Path.Combine(directory, fileName);
-            if (!File.Exists(candidate)) return candidate;
-            var name = Path.GetFileNameWithoutExtension(fileName);
-            for (var index = 2; index < 1000; index++)
-            {
-                candidate = Path.Combine(directory, $"{name} ({index}).lnk");
-                if (!File.Exists(candidate)) return candidate;
-            }
-            return Path.Combine(directory, $"{name} ({Guid.NewGuid():N}).lnk");
         }
     }
 }

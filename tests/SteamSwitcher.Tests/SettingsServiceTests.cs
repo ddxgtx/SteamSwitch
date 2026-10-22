@@ -57,4 +57,68 @@ public sealed class SettingsServiceTests
         Assert.AreEqual(60, normalized.TaskbarLyricsPollingIntervalMs);
         Assert.AreEqual(12, normalized.TaskbarLyricsVerticalOffset);
     }
+
+    [TestMethod]
+    public void Normalize_ClampsLayoutBackupAndOpacitySettings()
+    {
+        var normalized = SettingsService.Normalize(new AppSettings
+        {
+            TaskbarOffsetX = 999,
+            TaskbarOffsetY = -999,
+            TaskbarWindowSize = 999,
+            TaskbarAvatarSize = 1,
+            DesktopFloatingOpacity = 999,
+            DesktopFloatingAvatarSize = 1,
+            GameSaveManualRetention = 0,
+            GameSaveSafetyRetention = 999,
+            GameSavePeriodicIntervalMinutes = 1
+        });
+
+        Assert.AreEqual(100, normalized.TaskbarOffsetX);
+        Assert.AreEqual(-100, normalized.TaskbarOffsetY);
+        Assert.AreEqual(30, normalized.TaskbarWindowSize);
+        Assert.AreEqual(16, normalized.TaskbarAvatarSize);
+        Assert.AreEqual(100, normalized.DesktopFloatingOpacity);
+        Assert.AreEqual(24, normalized.DesktopFloatingAvatarSize);
+        Assert.AreEqual(1, normalized.GameSaveManualRetention);
+        Assert.AreEqual(50, normalized.GameSaveSafetyRetention);
+        Assert.AreEqual(5, normalized.GameSavePeriodicIntervalMinutes);
+    }
+
+    [TestMethod]
+    public void Normalize_PreservesMinimumLyricsFontSize()
+    {
+        var normalized = SettingsService.Normalize(new AppSettings { TaskbarLyricsFontSize = 12 });
+        Assert.AreEqual(12, normalized.TaskbarLyricsFontSize);
+    }
+
+    [TestMethod]
+    public void Normalize_AutoInstallUpdatesRequiresStartupCheck()
+    {
+        var normalized = SettingsService.Normalize(new AppSettings
+        {
+            AutoInstallUpdates = true,
+            CheckUpdateOnStartup = false
+        });
+
+        Assert.IsTrue(normalized.CheckUpdateOnStartup);
+    }
+
+    [TestMethod]
+    public void Normalize_RepairsInvalidGlassColor()
+    {
+        var normalized = SettingsService.Normalize(new AppSettings
+        {
+            DesktopFloatingGlassColor = "#12"
+        });
+
+        Assert.AreEqual("#4A90D9", normalized.DesktopFloatingGlassColor);
+    }
+
+    [TestMethod]
+    public void Normalize_RejectsUnknownGameFilterMode()
+    {
+        var normalized = SettingsService.Normalize(new AppSettings { GameFilterMode = "Unsupported" });
+        Assert.AreEqual("All", normalized.GameFilterMode);
+    }
 }

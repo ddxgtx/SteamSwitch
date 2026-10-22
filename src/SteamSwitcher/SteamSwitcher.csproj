@@ -8,8 +8,8 @@
     <ApplicationIcon>Resources\steam.ico</ApplicationIcon>
     <AssemblyName>SteamSwitch</AssemblyName>
     <RootNamespace>SteamSwitcher</RootNamespace>
-    <Version>3.1.2</Version>
-    <InformationalVersion>3.1.2</InformationalVersion>
+    <Version>3.3.0</Version>
+    <InformationalVersion>3.3.0</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>Steam Switch</Authors>
     <Description>快速切换Steam账号工具</Description>
@@ -22,9 +22,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.0" />
-    <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="WPF-UI" />
   </ItemGroup>
 
   <ItemGroup>

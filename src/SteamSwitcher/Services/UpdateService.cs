@@ -122,9 +122,13 @@ namespace SteamSwitcher.Services
         private const string RepoPrereleaseApiUrl = "https://api.github.com/repos/ddxgtx/SteamSwitch/releases?per_page=20";
         private const long MaxInstallerSize = 512L * 1024 * 1024;
         public const string ReleasesUrl = "https://github.com/ddxgtx/SteamSwitch/releases";
+        private static string PendingUpdatePath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SteamSwitch", "update-pending.json");
 
         private readonly HttpClient _http;
         private readonly string _rateLimitStatePath;
+        private readonly string _downloadDirectory;
         private readonly object _downloadSync = new();
         private CancellationTokenSource? _downloadCts;
         private volatile bool _disposed;
@@ -133,20 +137,31 @@ namespace SteamSwitcher.Services
         public event EventHandler<string>? DownloadCompleted;
         public event EventHandler<string>? DownloadFailed;
 
-        public UpdateService(HttpMessageHandler? handler = null, string? rateLimitStatePath = null)
+        public UpdateService(HttpMessageHandler? handler = null, string? rateLimitStatePath = null, string? downloadDirectory = null)
         {
             _http = handler == null ? new HttpClient() : new HttpClient(handler, disposeHandler: true);
-            _http.Timeout = TimeSpan.FromSeconds(15);
+            // Infinite so large installer downloads are not cancelled mid-body.
+            // Callers apply explicit deadlines via linked CTS (see CheckForUpdateAsync).
+            _http.Timeout = Timeout.InfiniteTimeSpan;
             _http.DefaultRequestHeaders.Add("User-Agent", "SteamSwitch");
             _http.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
             _http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
             _rateLimitStatePath = rateLimitStatePath ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "SteamSwitch", "update-rate-limit.json");
+            _downloadDirectory = downloadDirectory ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SteamSwitch", "updates");
         }
 
         public async Task<UpdateInfo?> CheckForUpdateAsync(bool includePrereleases = false, CancellationToken cancellationToken = default)
         {
+            // Explicit 15s deadline for the metadata request; the shared client
+            // itself has an infinite timeout so downloads are not affected.
+            using var checkTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            checkTimeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+            var checkToken = checkTimeoutCts.Token;
+
             try
             {
                 var deferredUntil = ReadDeferredUntil();
@@ -154,7 +169,7 @@ namespace SteamSwitcher.Services
                     throw CreateRateLimitException(deferredUntil.Value);
 
                 var apiUrl = includePrereleases ? RepoPrereleaseApiUrl : RepoApiUrl;
-                using var response = await _http.GetAsync(apiUrl, cancellationToken);
+                using var response = await _http.GetAsync(apiUrl, checkToken);
                 if (IsRateLimited(response))
                 {
                     var retryAfter = GetRetryAfter(response);
@@ -164,7 +179,7 @@ namespace SteamSwitcher.Services
                 response.EnsureSuccessStatusCode();
                 ClearDeferredUntil();
 
-                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                var json = await response.Content.ReadAsStringAsync(checkToken);
                 using var doc = JsonDocument.Parse(json);
                 var currentVersionText = GetCurrentVersion();
                 if (!SemanticReleaseVersion.TryParse(currentVersionText, out var currentVersion))
@@ -234,22 +249,11 @@ namespace SteamSwitcher.Services
                         }
                     }
 
-                    if (string.IsNullOrEmpty(downloadUrl))
-                    {
-                        foreach (var asset in assets.EnumerateArray())
-                        {
-                            var name = asset.GetProperty("name").GetString() ?? "";
-                            if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                            {
-                                downloadUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
-                                fileName = name;
-                                if (asset.TryGetProperty("size", out var sizeEl))
-                                    fileSize = sizeEl.GetInt64();
-                                expectedSha256 = ReadSha256Digest(asset);
-                                break;
-                            }
-                        }
-                    }
+                    // Portable ZIP archives are useful for manual downloads but
+                    // cannot be passed to LaunchInstaller (which intentionally
+                    // accepts only a verified setup executable). Do not expose
+                    // a misleading "download then install" path when a Release
+                    // has no compatible setup package.
                 }
 
                 return new UpdateInfo
@@ -286,28 +290,50 @@ namespace SteamSwitcher.Services
             }
         }
 
+        private static readonly TimeSpan MaxRetryAfterDelay = TimeSpan.FromHours(1);
+
         private static bool IsRateLimited(HttpResponseMessage response)
         {
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
                 return true;
             if (response.StatusCode != HttpStatusCode.Forbidden)
                 return false;
-            // GitHub uses 403 for both primary and secondary rate limits. This
-            // client always sends a valid User-Agent, so backing off is safer
-            // than repeatedly retrying an ambiguous 403 response.
+
+            // Prefer the explicit remaining-quota header: a 403 with remaining > 0
+            // is usually a permission/SSO issue, not a rate limit.
+            if (response.Headers.TryGetValues("X-RateLimit-Remaining", out var remainingValues) &&
+                long.TryParse(remainingValues.FirstOrDefault(), out var remaining) &&
+                remaining > 0)
+                return false;
+
+            // GitHub uses 403 for both primary and secondary rate limits. When the
+            // remaining-quota header is absent or zero, backing off is safer than
+            // repeatedly retrying an ambiguous 403 response.
             return true;
         }
 
         private static DateTimeOffset GetRetryAfter(HttpResponseMessage response)
         {
+            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset candidate;
+
             if (response.Headers.RetryAfter?.Date is { } retryDate)
-                return retryDate.ToUniversalTime();
-            if (response.Headers.RetryAfter?.Delta is { } retryDelta)
-                return DateTimeOffset.UtcNow + retryDelta;
-            if (response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues) &&
+                candidate = retryDate.ToUniversalTime();
+            else if (response.Headers.RetryAfter?.Delta is { } retryDelta)
+                candidate = now + retryDelta;
+            else if (response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues) &&
                 long.TryParse(resetValues.FirstOrDefault(), out var resetUnix))
-                return DateTimeOffset.FromUnixTimeSeconds(resetUnix);
-            return DateTimeOffset.UtcNow.AddMinutes(1);
+                candidate = DateTimeOffset.FromUnixTimeSeconds(resetUnix);
+            else
+                candidate = now.AddMinutes(1);
+
+            // Clamp so a hostile/absurd Retry-After cannot disable update checks
+            // for an unbounded period.
+            if (candidate <= now)
+                candidate = now.AddMinutes(1);
+            if (candidate - now > MaxRetryAfterDelay)
+                candidate = now + MaxRetryAfterDelay;
+            return candidate;
         }
 
         private static UpdateCheckException CreateRateLimitException(DateTimeOffset retryAfter)
@@ -413,9 +439,7 @@ namespace SteamSwitcher.Services
             var downloadUri = new Uri(update.DownloadUrl, UriKind.Absolute);
             EnsureTrustedDownloadUri(downloadUri);
 
-            var downloadDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SteamSwitch", "updates");
+            var downloadDir = _downloadDirectory;
             Directory.CreateDirectory(downloadDir);
 
             var fileName = string.IsNullOrWhiteSpace(update.FileName)
@@ -455,10 +479,11 @@ namespace SteamSwitcher.Services
             using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
             try
             {
-                await using var fileStream = new FileStream(
-                    temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true);
                 using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-
+                string actualSha256;
+                await using (var fileStream = new FileStream(
+                    temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                {
                 int bytesRead;
                 while ((bytesRead = await contentStream.ReadAsync(buffer, cancellationToken)) > 0)
                 {
@@ -486,10 +511,12 @@ namespace SteamSwitcher.Services
                 if (totalRead != update.FileSize)
                     throw new InvalidDataException("安装包实际大小与 GitHub Release 声明不一致。");
 
-                var actualSha256 = Convert.ToHexString(hash.GetHashAndReset());
+                actualSha256 = Convert.ToHexString(hash.GetHashAndReset());
                 if (!string.Equals(actualSha256, update.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("安装包 SHA-256 校验失败，文件可能已损坏或被替换。");
+                }
 
+                cancellationToken.ThrowIfCancellationRequested();
                 File.Move(temporaryPath, filePath, overwrite: true);
                 AppLogger.Info($"Update package verified: {fileName}, SHA256={actualSha256}");
             }
@@ -532,6 +559,9 @@ namespace SteamSwitcher.Services
         {
             lock (_downloadSync)
                 _downloadCts?.Cancel();
+            // 取消后立刻清理，避免残留的 .download 一直占着磁盘。
+            try { CleanupOldUpdatePackages(); }
+            catch (Exception ex) { AppLogger.Warn($"Unable to clean update packages after cancel: {ex.Message}"); }
         }
 
         private bool IsCurrentDownload(CancellationTokenSource operationCts)
@@ -549,29 +579,40 @@ namespace SteamSwitcher.Services
                     expectedSha256.Length != 64)
                     throw new InvalidDataException("安装包未通过启动前安全检查。");
 
-                using var stream = File.OpenRead(filePath);
-                var actualSha256 = Convert.ToHexString(SHA256.HashData(stream));
-                if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("安装包在下载后发生变化，已阻止启动。");
+                // Keep the FileStream open across Process.Start so the hashed bytes
+                // cannot be swapped out between verification and launch (TOCTOU).
+                using (var stream = File.OpenRead(filePath))
+                {
+                    var actualSha256 = Convert.ToHexString(SHA256.HashData(stream));
+                    if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("安装包在下载后发生变化，已阻止启动。");
 
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = filePath,
-                    UseShellExecute = true
-                };
-                if (silent)
-                {
-                    startInfo.ArgumentList.Add("/VERYSILENT");
-                    startInfo.ArgumentList.Add("/SUPPRESSMSGBOXES");
-                    startInfo.ArgumentList.Add("/NORESTART");
-                    startInfo.ArgumentList.Add("/CLOSEAPPLICATIONS");
-                    startInfo.ArgumentList.Add("/SP-");
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = filePath,
+                        UseShellExecute = true
+                    };
+                    if (silent)
+                    {
+                        startInfo.ArgumentList.Add("/VERYSILENT");
+                        startInfo.ArgumentList.Add("/SUPPRESSMSGBOXES");
+                        startInfo.ArgumentList.Add("/NORESTART");
+                        startInfo.ArgumentList.Add("/CLOSEAPPLICATIONS");
+                        startInfo.ArgumentList.Add("/SP-");
+                    }
+
+                    if (Process.Start(startInfo) == null)
+                        throw new InvalidOperationException("无法启动更新安装器。");
                 }
 
-                if (Process.Start(startInfo) == null)
-                    throw new InvalidOperationException("无法启动更新安装器。");
+                // Persist the checkpoint only after the installer process was
+                // actually created. A failed Process.Start must not leave a
+                // false-positive "unfinished update" warning behind.
+                WritePendingUpdateCheckpoint(filePath, expectedSha256);
 
                 AppLogger.Info($"Update installer started. Silent={silent}");
+                if (Application.Current?.MainWindow is SteamSwitcher.MainWindow mainWindow)
+                    mainWindow.PrepareForApplicationShutdown();
                 Application.Current?.Shutdown();
                 return true;
             }
@@ -579,6 +620,85 @@ namespace SteamSwitcher.Services
             {
                 AppLogger.Error("Launch installer failed.", ex);
                 return false;
+            }
+        }
+
+        public static bool HasPendingUpdateCheckpoint() => File.Exists(PendingUpdatePath);
+
+        public static void CompletePendingUpdateCheckpoint()
+        {
+            try
+            {
+                if (File.Exists(PendingUpdatePath))
+                    File.Delete(PendingUpdatePath);
+                CleanupOldUpdatePackages();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to clear update checkpoint: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 清理陈旧安装包与中断的下载残留。取消下载、安装未完成或进程被杀时
+        /// 都必须有机会执行到，否则 %LOCALAPPDATA%\SteamSwitch\updates 里的
+        /// *.exe 与 *.download 会无限堆积（单个最大 512MB）。
+        /// </summary>
+        public static void CleanupOldUpdatePackages()
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SteamSwitch", "updates");
+            if (!Directory.Exists(directory))
+                return;
+
+            var cutoff = DateTime.UtcNow.AddDays(-30);
+            var installers = Directory.EnumerateFiles(directory, "*.exe", SearchOption.TopDirectoryOnly)
+                .Select(path => new FileInfo(path))
+                .Where(info => info.LastWriteTimeUtc < cutoff)
+                .OrderByDescending(info => info.LastWriteTimeUtc)
+                .Skip(3) // Keep a few recent packages as a manual recovery point.
+                .ToList();
+            foreach (var installer in installers)
+            {
+                try { installer.Delete(); }
+                catch (Exception ex) { AppLogger.Warn($"Unable to remove stale update package {installer.Name}: {ex.Message}"); }
+            }
+
+            // 中断的下载残留：下载路径的 finally 会删 .download，但进程被杀、
+            // 断电或磁盘满时执行不到，只能在这里兜底。
+            var partialCutoff = DateTime.UtcNow.AddDays(-1);
+            var partials = Directory.EnumerateFiles(directory, "*.download", SearchOption.TopDirectoryOnly)
+                .Select(path => new FileInfo(path))
+                .Where(info => info.LastWriteTimeUtc < partialCutoff)
+                .ToList();
+            foreach (var partial in partials)
+            {
+                try { partial.Delete(); }
+                catch (Exception ex) { AppLogger.Warn($"Unable to remove partial update download {partial.Name}: {ex.Message}"); }
+            }
+        }
+
+        private static void WritePendingUpdateCheckpoint(string installerPath, string expectedSha256)
+        {
+            try
+            {
+                var directory = Path.GetDirectoryName(PendingUpdatePath)!;
+                Directory.CreateDirectory(directory);
+                var temporaryPath = PendingUpdatePath + $".{Guid.NewGuid():N}.tmp";
+                var payload = new
+                {
+                    StartedAtUtc = DateTimeOffset.UtcNow,
+                    CurrentVersion = GetCurrentVersion(),
+                    InstallerPath = installerPath,
+                    ExpectedSha256 = expectedSha256
+                };
+                File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload));
+                File.Move(temporaryPath, PendingUpdatePath, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to write update checkpoint: {ex.Message}");
             }
         }
 

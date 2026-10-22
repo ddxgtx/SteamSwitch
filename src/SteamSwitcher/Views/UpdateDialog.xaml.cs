@@ -1,7 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using SteamSwitcher.Core;
 using SteamSwitcher.Services;
 
 namespace SteamSwitcher.Views
@@ -12,6 +14,15 @@ namespace SteamSwitcher.Views
         private readonly UpdateInfo _updateInfo;
         private string? _downloadedFilePath;
         private bool _installLaunchStarted;
+        private bool _isClosing;
+
+        private void PostToUi(Action action)
+        {
+            if (_isClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+                return;
+            try { Dispatcher.BeginInvoke(action); }
+            catch (InvalidOperationException) { }
+        }
 
         public UpdateDialog(UpdateService updateService, UpdateInfo updateInfo)
         {
@@ -24,6 +35,12 @@ namespace SteamSwitcher.Views
             IntegrityText.Text = updateInfo.CanVerifyIntegrity
                 ? "GitHub 官方源 · SHA-256 完整性校验可用"
                 : "此版本缺少完整性摘要，只能前往 GitHub 手动下载";
+            var integrityForeground = updateInfo.CanVerifyIntegrity ? "SuccessFgBrush" : "WarningFgBrush";
+            IntegrityBadge.SetResourceReference(Border.BackgroundProperty,
+                updateInfo.CanVerifyIntegrity ? "SuccessBgBrush" : "WarningBgBrush");
+            IntegrityIcon.SetResourceReference(TextBlock.ForegroundProperty, integrityForeground);
+            IntegrityText.SetResourceReference(TextBlock.ForegroundProperty, integrityForeground);
+            IntegrityIcon.Text = updateInfo.CanVerifyIntegrity ? "\uE72E" : "\uE7BA";
             ChangelogText.Text = string.IsNullOrWhiteSpace(updateInfo.Changelog)
                 ? "暂无更新说明"
                 : updateInfo.Changelog;
@@ -36,6 +53,7 @@ namespace SteamSwitcher.Views
 
             Closing += (s, e) =>
             {
+                _isClosing = true;
                 _updateService.CancelDownload();
                 _updateService.DownloadProgress -= OnDownloadProgress;
                 _updateService.DownloadCompleted -= OnDownloadCompleted;
@@ -45,7 +63,7 @@ namespace SteamSwitcher.Views
 
         private void OnDownloadProgress(object? sender, UpdateProgressEventArgs e)
         {
-            Dispatcher.Invoke(() =>
+            PostToUi(() =>
             {
                 DownloadProgressBar.Value = e.PercentComplete;
                 DownloadPercentText.Text = $"{e.PercentComplete}%";
@@ -58,7 +76,7 @@ namespace SteamSwitcher.Views
 
         private void OnDownloadCompleted(object? sender, string filePath)
         {
-            Dispatcher.Invoke(() =>
+            PostToUi(() =>
             {
                 _downloadedFilePath = filePath;
                 DownloadStatusText.Text = "下载完成";
@@ -73,7 +91,7 @@ namespace SteamSwitcher.Views
 
         private void OnDownloadFailed(object? sender, string error)
         {
-            Dispatcher.Invoke(() =>
+            PostToUi(() =>
             {
                 DownloadStatusText.Text = error;
                 ProgressPanel.Visibility = Visibility.Collapsed;
@@ -95,44 +113,67 @@ namespace SteamSwitcher.Views
 
         private async void Download_Click(object sender, RoutedEventArgs e)
         {
-            if (!_updateInfo.CanVerifyIntegrity)
+            try
             {
-                if (Uri.TryCreate(_updateInfo.ReleaseUrl, UriKind.Absolute, out var releaseUri) &&
-                    releaseUri.Scheme == Uri.UriSchemeHttps &&
-                    releaseUri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+                if (!_updateInfo.CanVerifyIntegrity)
                 {
-                    Process.Start(new ProcessStartInfo(releaseUri.AbsoluteUri) { UseShellExecute = true });
-                    Close();
+                    if (Uri.TryCreate(_updateInfo.ReleaseUrl, UriKind.Absolute, out var releaseUri) &&
+                        releaseUri.Scheme == Uri.UriSchemeHttps &&
+                        releaseUri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Process.Start(new ProcessStartInfo(releaseUri.AbsoluteUri) { UseShellExecute = true });
+                        Close();
+                    }
+                    else
+                    {
+                        MessageBox.Show("更新页面地址无效，已阻止打开。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                    return;
                 }
-                else
-                {
-                    MessageBox.Show("更新页面地址无效，已阻止打开。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
-                return;
-            }
 
-            if (string.IsNullOrEmpty(_updateInfo.DownloadUrl))
+                if (string.IsNullOrEmpty(_updateInfo.DownloadUrl))
+                {
+                    MessageBox.Show("没有可用的下载链接，请前往 GitHub 手动下载。",
+                        "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                DownloadButton.Visibility = Visibility.Collapsed;
+                IgnoreButton.Visibility = Visibility.Collapsed;
+                ProgressPanel.Visibility = Visibility.Visible;
+                CancelButton.Visibility = Visibility.Visible;
+
+                await _updateService.DownloadUpdateAsync(_updateInfo);
+            }
+            catch (OperationCanceledException)
             {
-                MessageBox.Show("没有可用的下载链接，请前往 GitHub 手动下载。",
-                    "提示", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
+                // User cancelled; Cancel_Click already restored the buttons.
             }
-
-            DownloadButton.Visibility = Visibility.Collapsed;
-            IgnoreButton.Visibility = Visibility.Collapsed;
-            ProgressPanel.Visibility = Visibility.Visible;
-            CancelButton.Visibility = Visibility.Visible;
-
-            await _updateService.DownloadUpdateAsync(_updateInfo);
+            catch (Exception ex)
+            {
+                AppLogger.Error("Update download failed.", ex);
+                if (_isClosing) return;
+                DownloadStatusText.Text = $"下载失败：{ex.Message}";
+                ProgressPanel.Visibility = Visibility.Collapsed;
+                DownloadButton.Visibility = Visibility.Visible;
+                CancelButton.Visibility = Visibility.Collapsed;
+                IgnoreButton.Visibility = Visibility.Visible;
+            }
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
             _updateService.CancelDownload();
-            ProgressPanel.Visibility = Visibility.Collapsed;
-            CancelButton.Visibility = Visibility.Collapsed;
-            DownloadButton.Visibility = Visibility.Visible;
-            IgnoreButton.Visibility = Visibility.Visible;
+            // Delay UI restore so a concurrent cancellation exception in
+            // Download_Click can settle before the download button is re-enabled.
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_isClosing) return;
+                ProgressPanel.Visibility = Visibility.Collapsed;
+                CancelButton.Visibility = Visibility.Collapsed;
+                DownloadButton.Visibility = Visibility.Visible;
+                IgnoreButton.Visibility = Visibility.Visible;
+            }), System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private void Install_Click(object sender, RoutedEventArgs e)
@@ -160,7 +201,16 @@ namespace SteamSwitcher.Views
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ButtonState == MouseButtonState.Pressed)
-                DragMove();
+                WindowDragHelper.TryDrag(this, e);
+        }
+
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                Close();
+            }
         }
     }
 }

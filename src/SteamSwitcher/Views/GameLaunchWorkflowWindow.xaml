@@ -1,9 +1,10 @@
-<Window x:Class="SteamSwitcher.Views.GameLaunchWorkflowWindow"
+<Window Style="{StaticResource DialogWindowStyle}" FontSize="13" x:Class="SteamSwitcher.Views.GameLaunchWorkflowWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="游戏启动工作流" Width="640" Height="660"
         WindowStartupLocation="CenterOwner" WindowStyle="None"
         AllowsTransparency="True" ResizeMode="NoResize" Background="Transparent"
+        PreviewKeyDown="Window_PreviewKeyDown"
         FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
@@ -38,7 +39,7 @@
         <Style x:Key="PrimaryWorkflowBtn" TargetType="Button" BasedOn="{StaticResource WorkflowBtn}">
             <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentForegroundBrush}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -79,15 +80,15 @@
                 <StackPanel>
                     <TextBlock Text="启动参数" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12.5" FontWeight="SemiBold"/>
                     <TextBox x:Name="LaunchArgumentsBox" Style="{StaticResource FormTextBoxStyle}" Margin="0,8,0,4"/>
-                    <TextBlock Text="参数将通过 Steam 启动协议传递；最长 2048 个字符。" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10.5"/>
+                    <TextBlock Text="参数将通过 Steam 启动协议传递；最长 2048 个字符。" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12"/>
 
-                    <Border Style="{StaticResource SurfaceCardStyle}" Margin="0,16,0,0" Padding="16,8">
+                    <Border Style="{StaticResource SurfaceCardStyle}" Margin="0,20,0,0" Padding="16,10">
                         <StackPanel>
                             <CheckBox x:Name="BackupBeforeLaunchCheck" Margin="0,10" Content="启动前备份存档" FontWeight="SemiBold" Style="{StaticResource DialogCheckBoxStyle}"/>
-                            <TextBlock Text="备份失败时取消启动，避免在没有保护点的情况下覆盖进度。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10.5" Margin="24,-6,0,8"/>
+                            <TextBlock Text="备份失败时取消启动，避免在没有保护点的情况下覆盖进度。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="24,-6,0,8"/>
                             <Border Height="1" Background="{DynamicResource SeparatorBrush}"/>
                             <CheckBox x:Name="BackupAfterExitCheck" Margin="0,12" Content="游戏退出后备份存档" FontWeight="SemiBold" Style="{StaticResource DialogCheckBoxStyle}"/>
-                            <TextBlock Text="监测安装目录中的游戏进程，完全退出并停止写入后创建备份。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10.5" Margin="24,-8,0,8"/>
+                            <TextBlock Text="监测安装目录中的游戏进程，完全退出并停止写入后创建备份。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="24,-8,0,8"/>
                             <Border Height="1" Background="{DynamicResource SeparatorBrush}"/>
                             <CheckBox x:Name="CloseSteamAfterExitCheck" Margin="0,12" Content="游戏退出后关闭 Steam" FontWeight="SemiBold" Style="{StaticResource DialogCheckBoxStyle}"/>
                             <Border Height="1" Background="{DynamicResource SeparatorBrush}"/>
@@ -99,7 +100,7 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="13" Margin="0,0,8,0" VerticalAlignment="Top"/>
                             <TextBlock Grid.Column="1" Text="退出后任务只对从 SteamSwitch 启动且能识别到安装目录的游戏生效。受保护的反作弊进程可能无法被监测。"
-                                       Foreground="{DynamicResource AccentBrush}" FontSize="11" TextWrapping="Wrap" LineHeight="16"/>
+                                       Foreground="{DynamicResource AccentBrush}" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
                         </Grid>
                     </Border>
                 </StackPanel>

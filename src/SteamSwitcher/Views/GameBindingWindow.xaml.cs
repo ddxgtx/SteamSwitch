@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using SteamSwitcher.Core;
+using SteamSwitcher.Services;
 using SteamSwitcher.ViewModels;
 
 namespace SteamSwitcher.Views
@@ -23,21 +24,40 @@ namespace SteamSwitcher.Views
 
             Loaded += async (s, e) =>
             {
-                GameCountLabel.Text = "";
-                SearchBox.Text = PlaceholderText;
-                SearchBox.Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0x63, 0x63, 0x66));
-                _isPlaceholderActive = true;
+                try
+                {
+                    GameCountLabel.Text = "";
+                    SearchBox.Text = PlaceholderText;
+                    SearchBox.SetResourceReference(Control.ForegroundProperty, "SearchPlaceholderFgBrush");
+                    _isPlaceholderActive = true;
 
-                await _viewModel.ScanGamesAsync();
-                GameCountLabel.Text = $"— {_viewModel.GameList.Count} 款游戏";
+                    await _viewModel.ScanGamesAsync();
+                    GameCountLabel.Text = $"— {_viewModel.GameList.Count} 款游戏";
+                }
+                catch (Exception ex)
+                {
+                    Services.AppLogger.Error("GameBindingWindow initial scan failed.", ex);
+                    GameCountLabel.Text = "扫描失败";
+                    MessageBox.Show(this, $"扫描游戏失败：{ex.Message}", "游戏绑定",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             };
         }
 
         private async void ScanGames_Click(object sender, RoutedEventArgs e)
         {
-            await _viewModel.ScanGamesAsync();
-            GameCountLabel.Text = $"— {_viewModel.GameList.Count} 款游戏";
+            try
+            {
+                await _viewModel.ScanGamesAsync();
+                GameCountLabel.Text = $"— {_viewModel.GameList.Count} 款游戏";
+            }
+            catch (Exception ex)
+            {
+                Services.AppLogger.Error("GameBindingWindow scan failed.", ex);
+                GameCountLabel.Text = "扫描失败";
+                MessageBox.Show(this, $"扫描游戏失败：{ex.Message}", "游戏绑定",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private const string PlaceholderText = "搜索游戏名称或 AppID...";
@@ -48,8 +68,7 @@ namespace SteamSwitcher.Views
             if (_isPlaceholderActive)
             {
                 SearchBox.Text = "";
-                SearchBox.Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(255, 255, 255));
+                SearchBox.SetResourceReference(Control.ForegroundProperty, "TextPrimaryBrush");
                 _isPlaceholderActive = false;
             }
         }
@@ -59,8 +78,7 @@ namespace SteamSwitcher.Views
             if (string.IsNullOrWhiteSpace(SearchBox.Text))
             {
                 SearchBox.Text = PlaceholderText;
-                SearchBox.Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0x63, 0x63, 0x66));
+                SearchBox.SetResourceReference(Control.ForegroundProperty, "SearchPlaceholderFgBrush");
                 _isPlaceholderActive = true;
             }
         }
@@ -114,80 +132,107 @@ namespace SteamSwitcher.Views
 
         private async void SaveBinding_Click(object sender, RoutedEventArgs e)
         {
-            var game = _viewModel.SelectedGame;
-            var account = _viewModel.SelectedBindingAccount;
-
-            if (game == null)
+            try
             {
-                MessageBox.Show("请先在左侧列表中选择一个游戏", "提示",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
+                var game = _viewModel.SelectedGame;
+                var account = _viewModel.SelectedBindingAccount;
 
-            if (account == null)
+                if (game == null)
+                {
+                    MessageBox.Show("请先在左侧列表中选择一个游戏", "提示",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (account == null)
+                {
+                    MessageBox.Show("请先选择一个账号", "提示",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                await _viewModel.SaveGameBinding(
+                    game.AppId,
+                    game.GameName,
+                    account.SteamId,
+                    account.DisplayName);
+            }
+            catch (Exception ex)
             {
-                MessageBox.Show("请先选择一个账号", "提示",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+                Services.AppLogger.Error("GameBindingWindow save binding failed.", ex);
+                MessageBox.Show(this, $"保存绑定失败：{ex.Message}", "游戏绑定",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
-
-            await _viewModel.SaveGameBinding(
-                game.AppId,
-                game.GameName,
-                account.SteamId,
-                account.DisplayName);
         }
 
         private async void RemoveBinding_Click(object sender, RoutedEventArgs e)
         {
-            var game = _viewModel.SelectedGame;
-            if (game == null) return;
-
-            var result = MessageBox.Show(
-                $"确定要删除 {game.GameName} 的账号绑定吗？",
-                "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Question);
-
-            if (result == MessageBoxResult.Yes)
+            try
             {
-                await _viewModel.RemoveGameBinding(game.AppId);
+                var game = _viewModel.SelectedGame;
+                if (game == null) return;
+
+                var result = MessageBox.Show(
+                    $"确定要删除 {game.GameName} 的账号绑定吗？",
+                    "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    await _viewModel.RemoveGameBinding(game.AppId);
+                }
+            }
+            catch (Exception ex)
+            {
+                Services.AppLogger.Error("GameBindingWindow remove binding failed.", ex);
+                MessageBox.Show(this, $"删除绑定失败：{ex.Message}", "游戏绑定",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
         private async void ManualAddBinding_Click(object sender, RoutedEventArgs e)
         {
-            if (!int.TryParse(ManualAppIdInput.Text?.Trim(), out int appId))
+            try
             {
-                MessageBox.Show("请输入有效的 AppID", "提示",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+                if (!int.TryParse(ManualAppIdInput.Text?.Trim(), out int appId))
+                {
+                    MessageBox.Show("请输入有效的 AppID", "提示",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var gameName = ManualGameNameInput.Text?.Trim();
+                if (string.IsNullOrEmpty(gameName))
+                {
+                    MessageBox.Show("请输入游戏名称", "提示",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var account = _viewModel.SelectedBindingAccount;
+                if (account == null)
+                {
+                    MessageBox.Show("请先选择要绑定的账号", "提示",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                await _viewModel.SaveGameBinding(appId, gameName, account.SteamId, account.DisplayName);
+
+                ManualAppIdInput.Text = "";
+                ManualGameNameInput.Text = "";
+                ManualAddPanel.Visibility = Visibility.Collapsed;
+
+                var game = _viewModel.GameList.FirstOrDefault(g => g.AppId == appId);
+                if (game != null)
+                {
+                    _viewModel.SelectedGame = game;
+                }
             }
-
-            var gameName = ManualGameNameInput.Text?.Trim();
-            if (string.IsNullOrEmpty(gameName))
+            catch (Exception ex)
             {
-                MessageBox.Show("请输入游戏名称", "提示",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            var account = _viewModel.SelectedBindingAccount;
-            if (account == null)
-            {
-                MessageBox.Show("请先选择要绑定的账号", "提示",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            await _viewModel.SaveGameBinding(appId, gameName, account.SteamId, account.DisplayName);
-
-            ManualAppIdInput.Text = "";
-            ManualGameNameInput.Text = "";
-            ManualAddPanel.Visibility = Visibility.Collapsed;
-
-            var game = _viewModel.GameList.FirstOrDefault(g => g.AppId == appId);
-            if (game != null)
-            {
-                _viewModel.SelectedGame = game;
+                Services.AppLogger.Error("GameBindingWindow manual add binding failed.", ex);
+                MessageBox.Show(this, $"手动绑定失败：{ex.Message}", "游戏绑定",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -215,7 +260,19 @@ namespace SteamSwitcher.Views
 
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            DragMove();
+            // Interactive controls (buttons, text boxes, sliders) mark the mouse
+            // event handled and never reach here; the helper double-checks so
+            // unhandled presses inside them cannot drag the window.
+            WindowDragHelper.TryDrag(this, e);
+        }
+
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                Close();
+            }
         }
 
         private void Close_Click(object sender, RoutedEventArgs e)

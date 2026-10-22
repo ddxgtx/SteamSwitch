@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -16,7 +17,7 @@ namespace SteamSwitcher.Services
     public static class AppLogger
     {
         private static readonly object SyncRoot = new();
-        private static readonly long MaxLogFileSize = 5 * 1024 * 1024; // 5MB
+        private static readonly long MaxLogFileSize = 5 * 1024 * 1024;
         private static readonly int MaxLogFiles = 5;
 
         public static LogLevel MinimumLevel { get; set; } = LogLevel.Info;
@@ -90,20 +91,24 @@ namespace SteamSwitcher.Services
                         _directoryCreated = true;
                     }
 
-                    // Only run cleanup/rotation every 100 writes
                     if (_writeCount++ % 100 == 0)
-                    {
                         CleanupOldLogs();
-                        CheckLogRotation();
-                    }
+
+                    CheckLogRotation();
 
                     var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
                     File.AppendAllText(CurrentLogPath, line, Encoding.UTF8);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Logging must never break account switching or injection.
+                try
+                {
+                    System.Diagnostics.Debug.WriteLine($"[AppLogger] write failed: {ex.Message}");
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -112,21 +117,20 @@ namespace SteamSwitcher.Services
             try
             {
                 var currentLog = CurrentLogPath;
-                if (File.Exists(currentLog))
-                {
-                    var fileInfo = new FileInfo(currentLog);
-                    if (fileInfo.Length > MaxLogFileSize)
-                {
-                    var timestamp = DateTime.Now.ToString("HHmmss");
-                    var rotatedPath = Path.Combine(LogDirectory,
-                        $"steamswitch-{DateTime.Now:yyyyMMdd}-{timestamp}.log");
-                    File.Move(currentLog, rotatedPath);
-                }
-                }
+                if (!File.Exists(currentLog))
+                    return;
+
+                var fileInfo = new FileInfo(currentLog);
+                if (fileInfo.Length <= MaxLogFileSize)
+                    return;
+
+                var timestamp = DateTime.Now.ToString("HHmmss");
+                var rotatedPath = Path.Combine(LogDirectory,
+                    $"steamswitch-{DateTime.Now:yyyyMMdd}-{timestamp}.log");
+                File.Move(currentLog, rotatedPath);
             }
             catch
             {
-                // Rotation failure should not break logging
             }
         }
 
@@ -150,7 +154,6 @@ namespace SteamSwitcher.Services
             }
             catch
             {
-                // Cleanup failure should not break logging
             }
         }
     }

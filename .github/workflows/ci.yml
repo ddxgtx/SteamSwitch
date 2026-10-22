@@ -29,6 +29,29 @@ jobs:
       - name: Test
         run: dotnet test tests/SteamSwitcher.Tests/SteamSwitcher.Tests.csproj -c Release --no-build --logger "trx;LogFileName=SteamSwitcher.Tests.trx"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test Steam CEF session lifecycle
+        run: node tests/cef-session-regression.cjs
+
+      - name: Test WPF configuration application
+        run: dotnet run --project tools/UiCapture/UiCapture.csproj -c Release -- artifacts/ui-smoke/settings.png settings-apply-smoke
+
+      - name: Test WPF close-to-tray and full exit
+        run: |
+          dotnet run --project tools/UiCapture/UiCapture.csproj -c Release -- artifacts/ui-smoke/exit.png exit-lifecycle-smoke
+          dotnet run --project tools/UiCapture/UiCapture.csproj -c Release -- artifacts/ui-smoke/direct-exit.png exit-direct-smoke
+
+      - name: Test shared visual states and theme contrast
+        run: |
+          dotnet run --project tools/UiCapture/UiCapture.csproj -c Release -- artifacts/ui-smoke/states-light.png visual-states-smoke 1180 800 Light
+          dotnet run --project tools/UiCapture/UiCapture.csproj -c Release -- artifacts/ui-smoke/states-dark.png visual-states-smoke 1180 800 Dark
+
+      - name: Test WPF lyric display stability
+        run: dotnet run --project tools/UiCapture/UiCapture.csproj -c Release -- artifacts/ui-smoke/lyrics-stability.png lyrics-stability-smoke 1180 800 Dark
+
       - name: Publish win-x64
         run: dotnet publish src/SteamSwitcher/SteamSwitcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/publish
 

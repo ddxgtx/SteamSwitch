@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using SteamSwitcher.Core;
 
 namespace SteamSwitcher.Views
 {
@@ -54,12 +55,16 @@ namespace SteamSwitcher.Views
 
             UpdateLayout();
 
-            // 将窗口居中放置在歌词框正上方
+            // 将窗口居中放置在歌词框正上方。乐队贴在屏幕边缘时锚点居中会把浮窗送出
+            // 屏幕，夹回虚拟屏内（留 8 DIP 呼吸位）。
             double windowWidth = ActualWidth > 0 ? ActualWidth : 140;
             double windowHeight = ActualHeight > 0 ? ActualHeight : 54;
 
-            Left = centerScreenPoint.X - (windowWidth / 2);
-            Top = anchorTop - windowHeight + 8;
+            var placement = FlyoutPlacement.Clamp(
+                new Rect(centerScreenPoint.X - (windowWidth / 2), anchorTop - windowHeight + 8, windowWidth, windowHeight),
+                FlyoutPlacement.VirtualScreen());
+            Left = placement.Left;
+            Top = placement.Top;
 
             if (Visibility != Visibility.Visible)
             {
@@ -97,8 +102,11 @@ namespace SteamSwitcher.Views
             double windowWidth = ActualWidth > 0 ? ActualWidth : 180;
             double windowHeight = ActualHeight > 0 ? ActualHeight : 54;
 
-            Left = centerScreenPoint.X - (windowWidth / 2);
-            Top = anchorTop - windowHeight + 8;
+            var placement = FlyoutPlacement.Clamp(
+                new Rect(centerScreenPoint.X - (windowWidth / 2), anchorTop - windowHeight + 8, windowWidth, windowHeight),
+                FlyoutPlacement.VirtualScreen());
+            Left = placement.Left;
+            Top = placement.Top;
 
             if (Visibility != Visibility.Visible)
             {

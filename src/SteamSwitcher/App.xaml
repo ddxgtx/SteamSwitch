@@ -8,6 +8,8 @@
                 <ui:ThemesDictionary Theme="Light"/>
                 <ui:ControlsDictionary/>
                 <ResourceDictionary Source="Resources/Styles.xaml"/>
+                <ResourceDictionary Source="Resources/MenuStyles.xaml"/>
+                <ResourceDictionary Source="Resources/SettingsStyles.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
             <DrawingGroup x:Key="AppIcon">
@@ -31,58 +33,70 @@
                 </GeometryDrawing>
             </DrawingGroup>
 
-            <!-- SteamSwitch visual system: calm Fluent surfaces with a crisp Steam-blue accent -->
-            <SolidColorBrush x:Key="WindowBgBrush" Color="#FFF3F6FB"/>
-            <SolidColorBrush x:Key="CardBgBrush" Color="#FFFFFFFF"/>
-            <SolidColorBrush x:Key="CardBgAltBrush" Color="#FFF7F9FC"/>
-            <SolidColorBrush x:Key="SidebarBgBrush" Color="#FFF8FAFD"/>
-            <SolidColorBrush x:Key="SidebarActiveBgBrush" Color="#FFEAF4FF"/>
-            <SolidColorBrush x:Key="SidebarActiveFgBrush" Color="#FF0A84FF"/>
-            <SolidColorBrush x:Key="SidebarInactiveFgBrush" Color="#FF4B5565"/>
-            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FF10141B"/>
-            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#FF647083"/>
-            <SolidColorBrush x:Key="TextTertiaryBrush" Color="#FF758196"/>
-            <SolidColorBrush x:Key="AccentBrush" Color="#FF0A84FF"/>
-            <SolidColorBrush x:Key="AccentBgBrush" Color="#160A84FF"/>
-            <SolidColorBrush x:Key="AccentBorderBrush" Color="#520A84FF"/>
-            <SolidColorBrush x:Key="AccentHoverBrush" Color="#FF0076E8"/>
-            <SolidColorBrush x:Key="BorderBrush" Color="#FFDCE4EF"/>
-            <SolidColorBrush x:Key="SeparatorBrush" Color="#FFE8EDF4"/>
-            <SolidColorBrush x:Key="SurfaceHighlightBrush" Color="#FFFFFFFF"/>
-            <SolidColorBrush x:Key="SurfaceTintBrush" Color="#F5FFFFFF"/>
-            <SolidColorBrush x:Key="FocusRingBrush" Color="#660A84FF"/>
-            <SolidColorBrush x:Key="InputBgBrush" Color="#FFFFFFFF"/>
-            <SolidColorBrush x:Key="SearchPlaceholderFgBrush" Color="#FF969DA8"/>
-            <SolidColorBrush x:Key="SearchTextFgBrush" Color="#FF111318"/>
-            <SolidColorBrush x:Key="HoverBgBrush" Color="#FFF0F4FA"/>
-            <SolidColorBrush x:Key="SelectedBgBrush" Color="#FFEBF5FF"/>
-            <SolidColorBrush x:Key="SelectedBgBrush2" Color="#FFDDECFF"/>
-            <SolidColorBrush x:Key="SuccessBgBrush" Color="#1830D158"/>
-            <SolidColorBrush x:Key="SuccessFgBrush" Color="#FF30D158"/>
-            <SolidColorBrush x:Key="WarningBgBrush" Color="#18FF9F0A"/>
-            <SolidColorBrush x:Key="WarningFgBrush" Color="#FFD97800"/>
-            <SolidColorBrush x:Key="DangerBgBrush" Color="#16FF453A"/>
-            <SolidColorBrush x:Key="DangerFgBrush" Color="#FFE7382F"/>
-            <SolidColorBrush x:Key="IconBgBrush" Color="#FFEBF5FF"/>
-            <SolidColorBrush x:Key="AvatarBgBrush" Color="#FFE2EBF5"/>
-            <SolidColorBrush x:Key="ToggleBgBrush" Color="#FFE2E7EE"/>
-            <SolidColorBrush x:Key="ToggleHoverBgBrush" Color="#FFD5DDE6"/>
-            <SolidColorBrush x:Key="ToggleCheckedBgBrush" Color="#FF30D158"/>
-            <SolidColorBrush x:Key="BtnHoverBgBrush" Color="#0C141F30"/>
-            <SolidColorBrush x:Key="BtnDisabledBgBrush" Color="#FFF0F3F7"/>
-            <SolidColorBrush x:Key="BtnDisabledFgBrush" Color="#FF969DA8"/>
-            <SolidColorBrush x:Key="ProgressBgBrush" Color="#FFE5EAF0"/>
-            <SolidColorBrush x:Key="FooterTextBrush" Color="#FF6C727D"/>
-            <SolidColorBrush x:Key="FooterLinkBrush" Color="#FF0A84FF"/>
-            <SolidColorBrush x:Key="BtnSecondaryFgBrush" Color="#FF111318"/>
-            <SolidColorBrush x:Key="ToggleTrackBgBrush" Color="#FFD5DCE5"/>
-            <SolidColorBrush x:Key="ToggleTrackBorderBrush" Color="#FFCCD4DE"/>
-            <SolidColorBrush x:Key="ToggleThumbBrush" Color="#FFFFFFFF"/>
-            <SolidColorBrush x:Key="ToggleTrackCheckedBgBrush" Color="#FF30D158"/>
-            <SolidColorBrush x:Key="ToggleTrackCheckedBorderBrush" Color="#FF28B84C"/>
-            <SolidColorBrush x:Key="ScrollThumbBrush" Color="#30141F30"/>
-            <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#50141F30"/>
-            <SolidColorBrush x:Key="ScrollThumbDragBrush" Color="#70141F30"/>
+            <!-- Semantic palette defaults; ThemeManager applies the selected appearance at startup. -->
+            <SolidColorBrush x:Key="WindowBgBrush" Color="#F3F5F9"/>
+            <SolidColorBrush x:Key="CardBgBrush" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="CardBgAltBrush" Color="#F6F8FB"/>
+            <SolidColorBrush x:Key="SidebarBgBrush" Color="#F9FAFC"/>
+            <SolidColorBrush x:Key="SidebarActiveBgBrush" Color="#E8EFFB"/>
+            <SolidColorBrush x:Key="SidebarActiveFgBrush" Color="#175EC9"/>
+            <SolidColorBrush x:Key="SidebarInactiveFgBrush" Color="#4F6078"/>
+            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#182438"/>
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#53647B"/>
+            <SolidColorBrush x:Key="TextTertiaryBrush" Color="#64748B"/>
+            <SolidColorBrush x:Key="AccentBrush" Color="#1762D7"/>
+            <SolidColorBrush x:Key="AccentForegroundBrush" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="AccentBgBrush" Color="#EAF1FD"/>
+            <SolidColorBrush x:Key="AccentBorderBrush" Color="#A9C3EB"/>
+            <SolidColorBrush x:Key="AccentHoverBrush" Color="#1254BC"/>
+            <SolidColorBrush x:Key="FocusRingBrush" Color="#661762D7"/>
+            <SolidColorBrush x:Key="BorderBrush" Color="#DCE3ED"/>
+            <SolidColorBrush x:Key="SubtleBorderBrush" Color="#E9EEF5"/>
+            <SolidColorBrush x:Key="SeparatorBrush" Color="#E9EEF5"/>
+            <SolidColorBrush x:Key="SurfaceHighlightBrush" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="SurfaceTintBrush" Color="#F8FAFD"/>
+            <SolidColorBrush x:Key="PageHeaderBrush" Color="#182438"/>
+            <SolidColorBrush x:Key="SectionLabelBrush" Color="#53647B"/>
+            <SolidColorBrush x:Key="InputBgBrush" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="SearchPlaceholderFgBrush" Color="#63748C"/>
+            <SolidColorBrush x:Key="SearchTextFgBrush" Color="#182438"/>
+            <SolidColorBrush x:Key="HoverBgBrush" Color="#EFF3F9"/>
+            <SolidColorBrush x:Key="SelectedBgBrush" Color="#EDF3FD"/>
+            <SolidColorBrush x:Key="SelectedBgBrush2" Color="#E0EBFC"/>
+            <SolidColorBrush x:Key="SuccessBgBrush" Color="#E6F4ED"/>
+            <SolidColorBrush x:Key="SuccessFgBrush" Color="#087F5B"/>
+            <SolidColorBrush x:Key="WarningBgBrush" Color="#FFF2D9"/>
+            <SolidColorBrush x:Key="WarningFgBrush" Color="#925800"/>
+            <SolidColorBrush x:Key="DangerBgBrush" Color="#FCECEE"/>
+            <SolidColorBrush x:Key="DangerFgBrush" Color="#B92D3B"/>
+            <SolidColorBrush x:Key="IconBgBrush" Color="#EAF1FD"/>
+            <SolidColorBrush x:Key="AvatarBgBrush" Color="#E5ECF6"/>
+            <SolidColorBrush x:Key="ToggleBgBrush" Color="#E5EBF4"/>
+            <SolidColorBrush x:Key="ToggleHoverBgBrush" Color="#DCE5F1"/>
+            <SolidColorBrush x:Key="ToggleCheckedBgBrush" Color="#1762D7"/>
+            <SolidColorBrush x:Key="BtnHoverBgBrush" Color="#EFF3F9"/>
+            <SolidColorBrush x:Key="BtnDisabledBgBrush" Color="#ECF0F5"/>
+            <SolidColorBrush x:Key="BtnDisabledFgBrush" Color="#7D8BA0"/>
+            <SolidColorBrush x:Key="BtnSecondaryFgBrush" Color="#263850"/>
+            <SolidColorBrush x:Key="ToggleTrackBgBrush" Color="#CCD5E1"/>
+            <SolidColorBrush x:Key="ToggleTrackBorderBrush" Color="#BCC9D9"/>
+            <SolidColorBrush x:Key="ToggleThumbBrush" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="ToggleTrackCheckedBgBrush" Color="#1762D7"/>
+            <SolidColorBrush x:Key="ToggleTrackCheckedBorderBrush" Color="#1254BC"/>
+            <SolidColorBrush x:Key="ProgressBgBrush" Color="#E5EBF4"/>
+            <SolidColorBrush x:Key="FooterTextBrush" Color="#607086"/>
+            <SolidColorBrush x:Key="FooterLinkBrush" Color="#175EC9"/>
+            <SolidColorBrush x:Key="ScrollThumbBrush" Color="#6653647B"/>
+            <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#9953647B"/>
+            <SolidColorBrush x:Key="ScrollThumbDragBrush" Color="#CC53647B"/>
+            <SolidColorBrush x:Key="CompactSurfaceBrush" Color="#F0182434"/>
+            <SolidColorBrush x:Key="CompactBorderBrush" Color="#364A63"/>
+            <SolidColorBrush x:Key="CompactTextPrimaryBrush" Color="#F4F7FC"/>
+            <SolidColorBrush x:Key="CompactTextSecondaryBrush" Color="#B6C6DA"/>
+            <SolidColorBrush x:Key="CompactHoverBrush" Color="#293C55"/>
+            <SolidColorBrush x:Key="CompactPressedBrush" Color="#344B69"/>
+            <SolidColorBrush x:Key="CompactAccentBrush" Color="#6AA7FF"/>
+            <SolidColorBrush x:Key="CompactSubtleBrush" Color="#66364A63"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

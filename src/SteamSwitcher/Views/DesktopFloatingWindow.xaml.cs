@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -12,6 +13,7 @@ using SteamSwitcher.Core;
 using SteamSwitcher.Models;
 using SteamSwitcher.Services;
 using SteamSwitcher.ViewModels;
+using SteamSwitcher.Controls;
 
 namespace SteamSwitcher.Views
 {
@@ -26,10 +28,13 @@ namespace SteamSwitcher.Views
         private bool _readyToSavePosition;
         private double? _savedLeft;
         private double? _savedTop;
+        private FloatingMonitorPosition? _savedMonitorPosition;
+        private bool _restoringPosition;
+        private HwndSource? _windowSource;
         private int _avatarSize = 42;
         private bool _glassEnabled = true;
         private bool _roundedMode = true;
-        private string _glassColor = "#4A90D9";
+        private string _glassColor = "#6AA7FF";
         private EventHandler? _pinnedGamesChangedHandler;
         private EventHandler? _pinnedAccountsChangedHandler;
         private EventHandler? _quickLaunchChangedHandler;
@@ -40,6 +45,7 @@ namespace SteamSwitcher.Views
         private PanelDragHelper? _avatarDragHelper;
 
         private System.Windows.Threading.DispatcherTimer? _autoHideTimer;
+        private System.Windows.Threading.DispatcherTimer? _positionSaveTimer;
         private double _normalOpacity = 1.0;
         private bool _isDragging;
         private bool _isCollapsed;
@@ -58,12 +64,12 @@ namespace SteamSwitcher.Views
         public event EventHandler<int>? GameLaunchRequested;
         public event EventHandler<string>? QuickLaunchRequested;
         public event EventHandler<(double left, double top)>? PositionChanged;
+        public event EventHandler<(string MonitorId, double RelativeLeft, double RelativeTop)>? MonitorPositionChanged;
         public event EventHandler? ShowMainWindowRequested;
         public event EventHandler<bool>? ToggleDesktopFloatingRequested;
         public event EventHandler<bool>? ToggleDesktopFloatingTopmostRequested;
         public event EventHandler<bool>? ToggleTaskbarPinnedRequested;
         public event EventHandler<bool>? ToggleTaskbarLyricsRequested;
-        public event EventHandler<bool>? ToggleTaskbarAppearanceRequested;
         public event EventHandler? ExitRequested;
         public event EventHandler<IReadOnlyList<string>>? PanelItemOrderChanged;
         public event EventHandler<IReadOnlyList<string>>? AccountOrderChanged;
@@ -74,32 +80,74 @@ namespace SteamSwitcher.Views
         public DesktopFloatingWindow(AccountManager accountManager)
         {
             InitializeComponent();
+            UpdateGlassEffect();
             _accountManager = accountManager;
-            _currentAccountChangedHandler = (s, e) => Dispatcher.BeginInvoke(
-                new Action(() => UpdateCurrentAccount(_accountManager.CurrentAccount)));
+            _currentAccountChangedHandler = (s, e) => PostToUi(
+                () => UpdateCurrentAccount(_accountManager.CurrentAccount));
             _accountManager.CurrentAccountChanged += _currentAccountChangedHandler;
 
             Loaded += (s, e) => { DesktopFloatingWindow_Loaded(s!, e); SetupDragDrop(); InitializeAutoHide(); };
             LocationChanged += DesktopFloatingWindow_LocationChanged;
-            SourceInitialized += (s, e) => HideFromAltTab();
+            SourceInitialized += (s, e) =>
+            {
+                HideFromAltTab();
+                _windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+                _windowSource?.AddHook(WindowMessages);
+            };
             Closed += (s, e) =>
             {
-                if (_currentAccountChangedHandler != null)
-                    _accountManager.CurrentAccountChanged -= _currentAccountChangedHandler;
-                DetachViewModelEvents();
-                if (_autoHideTimer != null)
-                {
-                    _autoHideTimer.Stop();
-                    _autoHideTimer.Tick -= AutoHideTimer_Tick;
-                    _autoHideTimer = null;
-                }
-                LocationChanged -= DesktopFloatingWindow_LocationChanged;
+                var pendingPosition = _positionSaveTimer?.IsEnabled == true;
+                ExitCleanup.Run(
+                    ("解绑浮窗账号事件", () =>
+                    {
+                        if (_currentAccountChangedHandler != null)
+                            _accountManager.CurrentAccountChanged -= _currentAccountChangedHandler;
+                    }),
+                    ("解绑浮窗模型事件", DetachViewModelEvents),
+                    ("解绑浮窗窗口消息", () =>
+                    {
+                        var source = _windowSource;
+                        _windowSource = null;
+                        source?.RemoveHook(WindowMessages);
+                    }),
+                    ("停止浮窗自动隐藏计时器", () =>
+                    {
+                        var timer = _autoHideTimer;
+                        _autoHideTimer = null;
+                        if (timer == null) return;
+                        timer.Stop();
+                        timer.Tick -= AutoHideTimer_Tick;
+                    }),
+                    ("解绑浮窗位置事件", () => LocationChanged -= DesktopFloatingWindow_LocationChanged),
+                    ("解绑浮窗游戏拖动", () =>
+                    {
+                        var helper = _gameDragHelper;
+                        _gameDragHelper = null;
+                        helper?.Detach();
+                    }),
+                    ("解绑浮窗账号拖动", () =>
+                    {
+                        var helper = _avatarDragHelper;
+                        _avatarDragHelper = null;
+                        helper?.Detach();
+                    }),
+                    ("停止浮窗位置保存计时器", () =>
+                    {
+                        var timer = _positionSaveTimer;
+                        _positionSaveTimer = null;
+                        timer?.Stop();
+                    }),
+                    ("保存浮窗最终位置", () =>
+                    {
+                        if (pendingPosition && _readyToSavePosition && !_locked && !_isCollapsed) SaveCurrentPosition();
+                    }));
             };
         }
 
         private void InitializeAutoHide()
         {
             _normalOpacity = OpacityPercentToDouble();
+            if (_autoHideTimer != null) return;
             _autoHideTimer = new System.Windows.Threading.DispatcherTimer
             {
                 Interval = TimeSpan.FromMilliseconds(200)
@@ -119,6 +167,11 @@ namespace SteamSwitcher.Views
 
         private void SetupDragDrop()
         {
+            // Guard against Loaded firing more than once. Double Attach()
+            // would stack handlers and fire events twice.
+            if (_gameDragHelper != null || _avatarDragHelper != null)
+                return;
+
             _gameDragHelper = new PanelDragHelper(GamePanel);
             _gameDragHelper.ItemClicked += (s, index) =>
             {
@@ -235,6 +288,14 @@ namespace SteamSwitcher.Views
             _readyToSavePosition = true;
         }
 
+        private void PostToUi(Action action)
+        {
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+                return;
+            try { Dispatcher.BeginInvoke(action); }
+            catch (InvalidOperationException) { }
+        }
+
         public void SetViewModel(MainViewModel viewModel)
         {
             DetachViewModelEvents();
@@ -242,23 +303,23 @@ namespace SteamSwitcher.Views
             _viewModel = viewModel;
 
             // Store event handler references for later unsubscription
-            _pinnedGamesChangedHandler = (s, e) => Dispatcher.Invoke(() =>
+            _pinnedGamesChangedHandler = (s, e) => PostToUi(() =>
             {
                 _pinnedGames = _viewModel.GetPinnedGames();
                 RefreshGameIcons();
             });
-            _pinnedAccountsChangedHandler = (s, e) => Dispatcher.Invoke(() =>
+            _pinnedAccountsChangedHandler = (s, e) => PostToUi(() =>
             {
                 _pinnedAccounts = _viewModel.GetPinnedAccounts();
                 RefreshAvatars();
             });
-            _quickLaunchChangedHandler = (s, e) => Dispatcher.Invoke(() =>
+            _quickLaunchChangedHandler = (s, e) => PostToUi(() =>
             {
                 _pinnedQuickLaunchItems = _viewModel.GetPinnedQuickLaunchItems();
                 RefreshGameIcons();
             });
 
-            _minimalModeChangedHandler = (s, val) => Dispatcher.Invoke(() =>
+            _minimalModeChangedHandler = (s, val) => PostToUi(() =>
             {
                 if (val)
                 {
@@ -266,7 +327,7 @@ namespace SteamSwitcher.Views
                     Opacity = _normalOpacity;
                 }
             });
-            _dockEnabledChangedHandler = (s, val) => Dispatcher.Invoke(() =>
+            _dockEnabledChangedHandler = (s, val) => PostToUi(() =>
             {
                 if (!val && _isCollapsed)
                 {
@@ -372,20 +433,104 @@ namespace SteamSwitcher.Views
                 ApplySavedPosition();
         }
 
+        public void SetSavedMonitorPosition(string? id, double? relativeLeft, double? relativeTop)
+        {
+            _savedMonitorPosition = !string.IsNullOrWhiteSpace(id) && relativeLeft is { } x && relativeTop is { } y &&
+                double.IsFinite(x) && double.IsFinite(y)
+                ? new(id, Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1)) : null;
+            if (IsLoaded) ApplySavedPosition();
+        }
+
+        private IntPtr WindowMessages(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            const int WmDisplayChange = 0x007E, WmDpiChanged = 0x02E0, WmSettingChange = 0x001A;
+            if (message is WmDisplayChange or WmDpiChanged or WmSettingChange)
+            {
+                PostToUi(() =>
+                {
+                    if (!_readyToSavePosition || _isDragging) return;
+                    BeginAnimation(LeftProperty, null);
+                    BeginAnimation(TopProperty, null);
+                    _isCollapsed = false;
+                    Opacity = _normalOpacity;
+                    ApplySavedPosition();
+                    _autoHideTimer?.Start();
+                });
+            }
+            return IntPtr.Zero;
+        }
+
         private void ApplySavedPosition()
         {
-            var workArea = SystemParameters.WorkArea;
-            double width = ActualWidth > 0 ? ActualWidth : Width;
-            double height = ActualHeight > 0 ? ActualHeight : Height;
+            var monitors = FloatingWindowMonitors.Enumerate();
+            if (monitors.Count == 0) return;
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var bounds = FloatingWindowMonitors.GetBounds(hwnd);
+            if (bounds == null) return;
+            var scale = VisualTreeHelper.GetDpi(this);
+            var width = bounds.Value.Width / scale.DpiScaleX;
+            var height = bounds.Value.Height / scale.DpiScaleY;
+            Rect target;
+            if (_savedMonitorPosition != null)
+                target = FloatingPlacementGeometry.Restore(_savedMonitorPosition, monitors, width, height);
+            else
+            {
+                var primary = System.Linq.Enumerable.FirstOrDefault(monitors, monitor => monitor.Primary) ?? monitors[0];
+                var left = _savedLeft is { } x && double.IsFinite(x) ? x * scale.DpiScaleX
+                    : primary.WorkArea.Right - bounds.Value.Width - 72 * primary.ScaleX;
+                var top = _savedTop is { } y && double.IsFinite(y) ? y * scale.DpiScaleY
+                    : primary.WorkArea.Top + 92 * primary.ScaleY;
+                var proposed = new Rect(left, top, bounds.Value.Width, bounds.Value.Height);
+                target = FloatingPlacementGeometry.Clamp(proposed, FloatingPlacementGeometry.Nearest(monitors, proposed).WorkArea);
+            }
+            _restoringPosition = true;
+            try { FloatingWindowMonitors.Move(hwnd, target); }
+            finally { _restoringPosition = false; }
+        }
 
-            Left = Clamp(_savedLeft ?? workArea.Right - width - 72, workArea.Left + 12, workArea.Right - width - 12);
-            Top = Clamp(_savedTop ?? workArea.Top + 92, workArea.Top + 12, workArea.Bottom - height - 12);
+        private void SaveCurrentPosition()
+        {
+            var monitors = FloatingWindowMonitors.Enumerate();
+            var bounds = FloatingWindowMonitors.GetBounds(new WindowInteropHelper(this).Handle);
+            if (bounds is { } rect && monitors.Count > 0)
+            {
+                _savedMonitorPosition = FloatingPlacementGeometry.Capture(rect, FloatingPlacementGeometry.Nearest(monitors, rect));
+                MonitorPositionChanged?.Invoke(this, (_savedMonitorPosition.MonitorId,
+                    _savedMonitorPosition.RelativeLeft, _savedMonitorPosition.RelativeTop));
+            }
+            _savedLeft = Left;
+            _savedTop = Top;
+            PositionChanged?.Invoke(this, (Left, Top));
         }
 
         private void DesktopFloatingWindow_LocationChanged(object? sender, EventArgs e)
         {
-            if (_readyToSavePosition && !_locked && !_isCollapsed && !_isDragging)
-                PositionChanged?.Invoke(this, (Left, Top));
+            if (_readyToSavePosition && !_restoringPosition && !_locked && !_isCollapsed && !_isDragging)
+                SchedulePositionSave();
+        }
+
+        /// <summary>
+        /// LocationChanged fires at very high frequency while the user drags.
+        /// Debounce the PositionChanged event (and therefore SettingsService.Save)
+        /// so the disk is written at most every 400ms.
+        /// </summary>
+        private void SchedulePositionSave()
+        {
+            if (_positionSaveTimer == null)
+            {
+                _positionSaveTimer = new System.Windows.Threading.DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(400)
+                };
+                _positionSaveTimer.Tick += (s, e) =>
+                {
+                    _positionSaveTimer?.Stop();
+                    if (_readyToSavePosition && !_locked && !_isCollapsed)
+                        SaveCurrentPosition();
+                };
+            }
+            _positionSaveTimer.Stop();
+            _positionSaveTimer.Start();
         }
 
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -410,7 +555,7 @@ namespace SteamSwitcher.Views
             {
                 _isDragging = false;
                 if (_readyToSavePosition && !_locked && !_isCollapsed)
-                    PositionChanged?.Invoke(this, (Left, Top));
+                    SchedulePositionSave();
             }
         }
 
@@ -422,13 +567,19 @@ namespace SteamSwitcher.Views
 
         private void ShowContextMenu()
         {
+            var menu = BuildContextMenu();
+            menu.IsOpen = true;
+        }
+
+        private ContextMenu BuildContextMenu()
+        {
             var menu = SharedContextMenuBuilder.Build(
                 _viewModel?.Accounts,
-                _viewModel?.SelectedAccount,
+                _viewModel?.Accounts.FirstOrDefault(account => account.IsCurrent),
                 showMainWindow: () => ShowMainWindowRequested?.Invoke(this, EventArgs.Empty),
                 accountSelected: steamId =>
                 {
-                    var account = _pinnedAccounts.Find(a => a.SteamId == steamId);
+                    var account = _viewModel?.Accounts.FirstOrDefault(a => a.SteamId == steamId)?.Account ?? _pinnedAccounts.Find(a => a.SteamId == steamId);
                     if (account != null)
                         AccountSwitchRequested?.Invoke(this, account);
                 },
@@ -443,12 +594,10 @@ namespace SteamSwitcher.Views
                 toggleDesktopFloatingTopmost: enabled => ToggleDesktopFloatingTopmostRequested?.Invoke(this, enabled),
                 toggleTaskbarPinned: enabled => ToggleTaskbarPinnedRequested?.Invoke(this, enabled),
                 isTaskbarLyricsEnabled: _viewModel?.TaskbarLyricsEnabled ?? false,
-                isTaskbarAppearanceEnabled: _viewModel?.TaskbarAppearanceEnabled ?? false,
                 toggleTaskbarLyrics: enabled => ToggleTaskbarLyricsRequested?.Invoke(this, enabled),
-                toggleTaskbarAppearance: enabled => ToggleTaskbarAppearanceRequested?.Invoke(this, enabled),
                 exit: () => ExitRequested?.Invoke(this, EventArgs.Empty)
             );
-            menu.IsOpen = true;
+            return menu;
         }
 
         private static double Clamp(double value, double min, double max)
@@ -462,33 +611,17 @@ namespace SteamSwitcher.Views
         {
             if (RootGlass == null) return;
 
-            if (_glassEnabled)
-            {
-                var baseColor = ParseColor(_glassColor);
-                var r = baseColor.R;
-                var g = baseColor.G;
-                var b = baseColor.B;
-
-                // Keep the user-selected tint while anchoring the glass on a dark
-                // surface so white labels stay legible over bright wallpapers.
-                var tintR = (byte)Math.Clamp((r * 0.34) + 12, 0, 255);
-                var tintG = (byte)Math.Clamp((g * 0.34) + 18, 0, 255);
-                var tintB = (byte)Math.Clamp((b * 0.34) + 28, 0, 255);
-
-                RootGlass.Background = new LinearGradientBrush(
-                    Color.FromArgb(228, tintR, tintG, tintB),
-                    Color.FromArgb(202, (byte)Math.Max(8, tintR - 8), (byte)Math.Max(12, tintG - 8), (byte)Math.Max(18, tintB - 8)),
-                    new Point(0, 0), new Point(1, 1));
-                RootGlass.BorderBrush = new LinearGradientBrush(
-                    Color.FromArgb(108, 255, 255, 255),
-                    Color.FromArgb(92, r, g, b),
-                    new Point(0, 0), new Point(0, 1));
-            }
-            else
-            {
-                RootGlass.Background = new SolidColorBrush(Color.FromArgb(235, 15, 17, 26));
-                RootGlass.BorderBrush = new SolidColorBrush(Color.FromArgb(64, 255, 255, 255));
-            }
+            RootGlass.SetResourceReference(Border.BackgroundProperty,
+                _glassEnabled ? "FloatingSurfaceBrush" : "FloatingSolidBrush");
+            RootGlass.SetResourceReference(Border.BorderBrushProperty, "FloatingBorderBrush");
+            TintLayer.Background = new SolidColorBrush(ParseColor(_glassColor));
+            TintLayer.Visibility = _glassEnabled ? Visibility.Visible : Visibility.Collapsed;
+            Resources["FloatingTextPrimaryBrush"] = Application.Current.FindResource(
+                _glassEnabled ? "GlassTextPrimaryBrush" : "FloatingTextPrimaryBrush");
+            Resources["FloatingTextSecondaryBrush"] = Application.Current.FindResource(
+                _glassEnabled ? "GlassTextSecondaryBrush" : "FloatingTextSecondaryBrush");
+            RootGlass.Effect = new System.Windows.Media.Effects.DropShadowEffect
+            { Color = Colors.Black, BlurRadius = 12, ShadowDepth = 2, Opacity = 0.28 };
         }
 
         private static Color ParseColor(string hex)
@@ -506,35 +639,29 @@ namespace SteamSwitcher.Views
                 }
             }
             catch { }
-            return Color.FromRgb(0x4A, 0x90, 0xD9);
+            return Color.FromRgb(0x6A, 0xA7, 0xFF);
         }
 
         private static Brush CreateLiquidButtonBrush()
         {
-            return _liquidButtonBrush;
+            return Application.Current?.TryFindResource("FloatingButtonBrush") as Brush ?? _liquidButtonBrush;
         }
 
         private static Brush CreateLiquidHoverBrush()
         {
-            return _liquidHoverBrush;
+            return Application.Current?.TryFindResource("FloatingHoverBrush") as Brush ?? _liquidHoverBrush;
         }
 
         private static readonly Brush _liquidButtonBrush = CreateFrozenLiquidBrush(70, 26, 44);
         private static readonly Brush _liquidHoverBrush = CreateFrozenLiquidBrush(112, 52, 82);
-        private static readonly Brush _currentBorderBrush = CreateFrozenSolidBrush(0x0A, 0x84, 0xFF, 255);
-        private static readonly Brush _normalBorderBrush = CreateFrozenSolidBrush(255, 255, 255, 120);
-        private static readonly Brush _hoverBorderBrush = CreateFrozenSolidBrush(255, 255, 255, 190);
-        private static readonly Brush _bindingBorderBrush = CreateFrozenSolidBrush(48, 209, 88, 140);
+        private static readonly Brush _currentBorderBrush = CreateFrozenSolidBrush(0x6A, 0xA7, 0xFF, 255);
+        private static Brush _normalBorderBrush => Application.Current?.TryFindResource("FloatingBorderBrush") as Brush ?? Brushes.Transparent;
+        private static readonly Brush _hoverBorderBrush = CreateFrozenSolidBrush(106, 167, 255, 210);
+        private static readonly Brush _bindingBorderBrush = CreateFrozenSolidBrush(101, 214, 166, 190);
 
         private static Brush CreateFrozenLiquidBrush(byte a1, byte a2, byte a3)
         {
-            var brush = new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new(Color.FromArgb(a1, 255, 255, 255), 0),
-                    new(Color.FromArgb(a2, 230, 246, 255), 0.55),
-                    new(Color.FromArgb(a3, 255, 255, 255), 1)
-                }, new Point(0, 0), new Point(1, 1));
+            var brush = new SolidColorBrush(Color.FromArgb(a1, 106, 167, 255));
             brush.Freeze();
             return brush;
         }
@@ -599,7 +726,7 @@ namespace SteamSwitcher.Views
         private Border CreateGameButton(GameListViewModel game)
         {
             int size = _avatarSize;
-            int radius = 8;
+            int radius = Math.Max(6, (int)Math.Round(size * 0.26));
             var border = CreateIconShell(size, radius);
             border.ToolTip = $"{game.GameName}\n点击启动 (账号: {game.BindingAccountName ?? "未绑定"})";
             border.Tag = game;
@@ -649,7 +776,7 @@ namespace SteamSwitcher.Views
         private Border CreateQuickLaunchButton(QuickLaunchItem item)
         {
             int size = _avatarSize;
-            int radius = 8;
+            int radius = Math.Max(6, (int)Math.Round(size * 0.26));
             var border = CreateIconShell(size, radius);
             border.ToolTip = $"{item.Name}\n{item.ExecutablePath}";
             border.Tag = item;
@@ -730,7 +857,7 @@ namespace SteamSwitcher.Views
             if (AccountManager.AreSameAccount(account, _accountManager.CurrentAccount))
             {
                 border.BorderThickness = new Thickness(2.5);
-                border.BorderBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
+                border.BorderBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0xA7, 0xFF));
             }
 
             border.MouseRightButtonDown += (s, e) =>
@@ -747,13 +874,13 @@ namespace SteamSwitcher.Views
 
         private static Border CreateIconShell(int size, int radius)
         {
-            return new Border
+            return new RoundedClipBorder
             {
                 Width = size,
                 Height = size,
                 CornerRadius = new CornerRadius(radius),
                 Background = CreateLiquidButtonBrush(),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(148, 255, 255, 255)),
+                BorderBrush = _normalBorderBrush,
                 BorderThickness = new Thickness(1),
                 Margin = new Thickness(2, 0, 2, 0),
                 Cursor = Cursors.Hand,
@@ -762,17 +889,18 @@ namespace SteamSwitcher.Views
             };
         }
 
-        private static TextBlock CreateFallbackText(string text, int size)
+        private TextBlock CreateFallbackText(string text, int size)
         {
             var textBlock = new TextBlock
             {
                 Text = text,
                 FontSize = size > 40 ? 15 : 13,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(0x28, 0x30, 0x3A)),
+                Foreground = Application.Current?.TryFindResource("FloatingTextPrimaryBrush") as Brush ?? Brushes.White,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
+            textBlock.SetResourceReference(TextBlock.ForegroundProperty, "FloatingTextPrimaryBrush");
             if (!string.IsNullOrEmpty(text) && text[0] >= '\uE000' && text[0] <= '\uF8FF')
                 textBlock.FontFamily = new FontFamily("Segoe MDL2 Assets");
             return textBlock;
@@ -800,12 +928,12 @@ namespace SteamSwitcher.Views
                     if (!hasImage)
                         border.Background = CreateLiquidHoverBrush();
                     border.BorderBrush = new SolidColorBrush(active
-                        ? Color.FromArgb(168, 48, 209, 88)
-                        : Color.FromArgb(190, 255, 255, 255));
+                        ? Color.FromArgb(210, 101, 214, 166)
+                        : Color.FromArgb(210, 106, 167, 255));
                 }
                 if (border.RenderTransform is ScaleTransform scale)
                 {
-                    var anim = new DoubleAnimation(1.08, TimeSpan.FromMilliseconds(150))
+                    var anim = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150))
                     {
                         EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
                     };
@@ -865,10 +993,16 @@ namespace SteamSwitcher.Views
             double width = ActualWidth > 0 ? ActualWidth : Width;
             double height = ActualHeight > 0 ? ActualHeight : Height;
 
-            double screenLeft = SystemParameters.VirtualScreenLeft;
-            double screenWidth = SystemParameters.VirtualScreenWidth;
-            double screenTop = SystemParameters.VirtualScreenTop;
-            double screenRight = screenLeft + screenWidth;
+            var monitors = FloatingWindowMonitors.Enumerate();
+            var bounds = FloatingWindowMonitors.GetBounds(new WindowInteropHelper(this).Handle);
+            if (bounds == null || monitors.Count == 0) return AnchorEdge.None;
+            var monitor = FloatingPlacementGeometry.Nearest(monitors, bounds.Value);
+            var scale = VisualTreeHelper.GetDpi(this);
+            // Convert local pixel deltas rather than scaling virtual-desktop
+            // origins: adjacent monitors may use different DPI values.
+            double screenLeft = left + (monitor.WorkArea.Left - bounds.Value.Left) / scale.DpiScaleX;
+            double screenTop = top + (monitor.WorkArea.Top - bounds.Value.Top) / scale.DpiScaleY;
+            double screenRight = left + (monitor.WorkArea.Right - bounds.Value.Left) / scale.DpiScaleX;
 
             const double threshold = 15;
 

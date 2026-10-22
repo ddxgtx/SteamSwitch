@@ -31,6 +31,12 @@ namespace SteamSwitcher.Core
         private static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
 
         [DllImport("user32.dll")]
+        private static extern IntPtr GetParent(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
                                                  int X, int Y, int cx, int cy, uint uFlags);
 
@@ -54,6 +60,15 @@ namespace SteamSwitcher.Core
         [DllImport("user32.dll")]
         private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
+        [DllImport("user32.dll")]
+        private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+        private delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
+
+        private const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
         private const int WS_CHILD = 0x40000000;
@@ -81,6 +96,9 @@ namespace SteamSwitcher.Core
         private Window? _embeddedWindow;
         private IntPtr _parentHandle;
         private bool _isEmbedded;
+        // 重嵌尝试的节流时间戳：防止 UpdatePosition -> EmbedToTaskbar -> UpdatePosition
+        // 在句柄持续失效时形成紧密递归。
+        private DateTime _lastReembedAttemptUtc = DateTime.MinValue;
         private int _width;
         private TaskbarPosition _position = TaskbarPosition.Auto;
         private int _offsetX;
@@ -184,17 +202,24 @@ namespace SteamSwitcher.Core
                 return 720;
             }
         }
+        private void PositionTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_isEmbedded)
+                UpdatePosition();
+        }
+
         private void StartPositionTimer()
         {
-            _positionTimer = new System.Windows.Threading.DispatcherTimer();
-            _positionTimer.Interval = TimeSpan.FromSeconds(5);
-            _positionTimer.Tick += (s, e) =>
+            // Reuse a single timer: repeatedly constructing a new DispatcherTimer
+            // and overwriting the field leaked every previous timer instance.
+            if (_positionTimer == null)
             {
-                if (_isEmbedded)
+                _positionTimer = new System.Windows.Threading.DispatcherTimer
                 {
-                    UpdatePosition();
-                }
-            };
+                    Interval = TimeSpan.FromSeconds(5)
+                };
+                _positionTimer.Tick += PositionTimer_Tick;
+            }
             _positionTimer.Start();
         }
 
@@ -213,7 +238,11 @@ namespace SteamSwitcher.Core
 
                 IntPtr hwnd = new WindowInteropHelper(_embeddedWindow).Handle;
 
-                SetParent(hwnd, taskbarHandle);
+                // SetParent 失败（Explorer 正在重启、句柄失效）时返回 0。
+                // 不校验就把 _isEmbedded 置 true，窗口其实没成为任务栏子窗口，
+                // 歌词岛会跑到屏幕左上角或彻底不可见，而且不再走重试。
+                if (SetParent(hwnd, taskbarHandle) == IntPtr.Zero)
+                    throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
 
                 int style = GetWindowLong(hwnd, GWL_STYLE);
                 style = (style | WS_CHILD) & ~WS_POPUP;
@@ -281,6 +310,20 @@ namespace SteamSwitcher.Core
                 if (taskbarHandle == IntPtr.Zero) return;
 
                 IntPtr hwnd = new WindowInteropHelper(_embeddedWindow).Handle;
+
+                // Explorer 重启或任务栏移到别的显示器后，_parentHandle 可能已经失效。
+                // 此时 SetWindowPos 依然会"成功"，但窗口早就不是任务栏的子窗口了，
+                // 歌词岛就是这样静默消失的。这里校验一次，失效就重新嵌入。
+                if (!IsWindow(_parentHandle) || GetParent(hwnd) != _parentHandle)
+                {
+                    _isEmbedded = false;
+                    if (DateTime.UtcNow - _lastReembedAttemptUtc > TimeSpan.FromSeconds(2))
+                    {
+                        _lastReembedAttemptUtc = DateTime.UtcNow;
+                        EmbedToTaskbar();
+                    }
+                    return;
+                }
 
                 RECT taskbarRect;
                 GetWindowRect(taskbarHandle, out taskbarRect);
@@ -456,24 +499,60 @@ namespace SteamSwitcher.Core
             }
         }
 
+        private static List<IntPtr> GetMonitorHandles()
+        {
+            var monitors = new List<IntPtr>();
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero,
+                (IntPtr hMonitor, IntPtr hdc, ref RECT rect, IntPtr data) =>
+                {
+                    monitors.Add(hMonitor);
+                    return true;
+                }, IntPtr.Zero);
+            return monitors;
+        }
+
         private IntPtr FindTargetTaskbar()
         {
-            var taskbars = new List<(IntPtr Handle, bool Primary, int Left, int Top)>();
+            var taskbars = new List<(IntPtr Handle, bool Primary, IntPtr Monitor)>();
             EnumWindows((handle, _) =>
             {
                 var className = new StringBuilder(64);
                 GetClassName(handle, className, className.Capacity);
                 var name = className.ToString();
-                if (name is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" && GetWindowRect(handle, out var rect))
-                    taskbars.Add((handle, name == "Shell_TrayWnd", rect.Left, rect.Top));
+                if (name is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
+                {
+                    var monitor = MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST);
+                    taskbars.Add((handle, name == "Shell_TrayWnd", monitor));
+                }
                 return true;
             }, IntPtr.Zero);
 
-            var ordered = taskbars.OrderByDescending(item => item.Primary)
-                .ThenBy(item => item.Left)
-                .ThenBy(item => item.Top)
-                .ToList();
-            if (ordered.Count == 0) return FindWindow("Shell_TrayWnd", null);
+            if (taskbars.Count == 0)
+                return FindWindow("Shell_TrayWnd", null);
+
+            // Index 0 always targets the primary-monitor taskbar (Shell_TrayWnd).
+            if (_monitorIndex <= 0)
+            {
+                var primary = taskbars.FirstOrDefault(t => t.Primary);
+                return primary.Handle != IntPtr.Zero ? primary.Handle : taskbars[0].Handle;
+            }
+
+            // Match the requested monitor against the OS monitor list (same
+            // enumeration order as Screen.AllScreens / EnumDisplayMonitors).
+            // Position-sorted taskbar indexing misaligned whenever monitors
+            // were arranged left-to-right differently from device order.
+            var monitors = GetMonitorHandles();
+            if (_monitorIndex < monitors.Count)
+            {
+                var targetMonitor = monitors[_monitorIndex];
+                foreach (var taskbar in taskbars)
+                {
+                    if (taskbar.Monitor == targetMonitor)
+                        return taskbar.Handle;
+                }
+            }
+
+            var ordered = taskbars.OrderByDescending(t => t.Primary).ToList();
             return ordered[Math.Min(_monitorIndex, ordered.Count - 1)].Handle;
         }
 
@@ -495,20 +574,46 @@ namespace SteamSwitcher.Core
             return IntPtr.Zero;
         }
 
+        /// <summary>
+        /// Re-embeds the window after Explorer recreates the taskbar.
+        /// Safe to call from a WndProc that observed WM_TASKBAR_CREATED.
+        /// </summary>
+        public void HandleTaskbarCreated()
+        {
+            HandleWndProc(IntPtr.Zero, unchecked((int)WM_TASKBAR_CREATED));
+        }
+
         public void HandleWndProc(IntPtr hwnd, int msg)
         {
             if (msg == WM_TASKBAR_CREATED)
             {
                 _isEmbedded = false;
+                // Detach any stale parent left behind by the terminated Explorer
+                // process so EmbedToTaskbar can SetParent onto the new taskbar.
+                if (_embeddedWindow != null)
+                {
+                    try
+                    {
+                        var handle = new WindowInteropHelper(_embeddedWindow).Handle;
+                        if (handle != IntPtr.Zero)
+                            SetParent(handle, IntPtr.Zero);
+                    }
+                    catch { }
+                }
                 EmbedToTaskbar();
+                StartPositionTimer();
                 TaskbarCreated?.Invoke(this, EventArgs.Empty);
             }
         }
 
         public void Dispose()
         {
-            _positionTimer?.Stop();
-            _positionTimer = null;
+            if (_positionTimer != null)
+            {
+                _positionTimer.Stop();
+                _positionTimer.Tick -= PositionTimer_Tick;
+                _positionTimer = null;
+            }
             RemoveFromTaskbar();
         }
     }

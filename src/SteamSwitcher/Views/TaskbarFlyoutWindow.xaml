@@ -15,7 +15,7 @@
         UseLayoutRounding="True"
         FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI, sans-serif"
         TextOptions.TextFormattingMode="Display"
-        TextOptions.TextRenderingMode="ClearType"
+        TextOptions.TextRenderingMode="Grayscale"
         MouseEnter="Window_MouseEnter"
         MouseLeave="Window_MouseLeave">
 
@@ -26,7 +26,7 @@
             <Setter Property="Margin" Value="2,0"/>
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Foreground" Value="#E5FFFFFF"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTextPrimaryBrush}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -39,12 +39,12 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="BtnBorder" Property="Background" Value="#38FFFFFF"/>
-                                <Setter Property="Foreground" Value="#00F0FF"/>
+                                <Setter TargetName="BtnBorder" Property="Background" Value="{DynamicResource FloatingHoverBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassAccentBrush}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="BtnBorder" Property="Background" Value="#60FFFFFF"/>
-                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                                <Setter TargetName="BtnBorder" Property="Background" Value="{DynamicResource FloatingPressedBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassTextPrimaryBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.3"/>
@@ -59,34 +59,22 @@
             <Setter Property="Width" Value="36"/>
             <Setter Property="Height" Value="36"/>
             <Setter Property="FontSize" Value="15"/>
-            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTextPrimaryBrush}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="BtnBorder" CornerRadius="18" BorderThickness="1">
-                            <Border.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop Color="#50FFFFFF" Offset="0"/>
-                                    <GradientStop Color="#25FFFFFF" Offset="1"/>
-                                </LinearGradientBrush>
-                            </Border.Background>
-                            <Border.BorderBrush>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                    <GradientStop Color="#90FFFFFF" Offset="0"/>
-                                    <GradientStop Color="#30FFFFFF" Offset="1"/>
-                                </LinearGradientBrush>
-                            </Border.BorderBrush>
+                        <Border x:Name="BtnBorder" CornerRadius="22" BorderThickness="1" Background="{DynamicResource FloatingSurfaceBrush}" BorderBrush="{DynamicResource FloatingBorderBrush}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="BtnBorder" Property="Background" Value="#650A84FF"/>
-                                <Setter TargetName="BtnBorder" Property="BorderBrush" Value="#CC00F0FF"/>
-                                <Setter Property="Foreground" Value="#00F0FF"/>
+                                <Setter TargetName="BtnBorder" Property="Background" Value="{DynamicResource FloatingHoverBrush}"/>
+                                <Setter TargetName="BtnBorder" Property="BorderBrush" Value="{DynamicResource GlassAccentBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassAccentBrush}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="BtnBorder" Property="Background" Value="#990A84FF"/>
-                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                                <Setter TargetName="BtnBorder" Property="Background" Value="{DynamicResource FloatingPressedBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassTextPrimaryBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -98,28 +86,16 @@
     <Grid Margin="12">
         <!-- 模式 1：切歌悬浮岛 (上一首、播放/暂停、下一首 - 去除停止按键) -->
         <Border x:Name="ControlsHost"
-                CornerRadius="18"
+                CornerRadius="22"
                 Padding="6,3"
                 BorderThickness="1"
                 Visibility="Collapsed"
-                RenderTransformOrigin="0.5,0.5">
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#F80E182A" Offset="0"/>
-                    <GradientStop Color="#EE16243A" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.Background>
-            <Border.BorderBrush>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                    <GradientStop Color="#85FFFFFF" Offset="0"/>
-                    <GradientStop Color="#25FFFFFF" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.BorderBrush>
+                RenderTransformOrigin="0.5,0.5" Background="{DynamicResource FloatingSurfaceBrush}" BorderBrush="{DynamicResource FloatingBorderBrush}">
             <Border.RenderTransform>
                 <TranslateTransform x:Name="ControlsTranslate" Y="4"/>
             </Border.RenderTransform>
             <Border.Effect>
-                <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="3" Opacity="0.55"/>
+                <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="4" Opacity="0.16"/>
             </Border.Effect>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="PrevButton" Content="&#xE892;" Click="PrevButton_Click" ToolTip="上一首" Style="{StaticResource FlyoutMediaButton}"/>
@@ -130,49 +106,31 @@
 
         <!-- 模式 2：音量调节 HUD 胶囊 (图标 + 流光进度条 + 百分比) -->
         <Border x:Name="VolumeHost"
-                CornerRadius="18"
+                CornerRadius="22"
                 Padding="12,6"
                 BorderThickness="1"
                 Visibility="Collapsed"
-                RenderTransformOrigin="0.5,0.5">
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#F80E182A" Offset="0"/>
-                    <GradientStop Color="#EE16243A" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.Background>
-            <Border.BorderBrush>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                    <GradientStop Color="#85FFFFFF" Offset="0"/>
-                    <GradientStop Color="#25FFFFFF" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.BorderBrush>
+                RenderTransformOrigin="0.5,0.5" Background="{DynamicResource FloatingSurfaceBrush}" BorderBrush="{DynamicResource FloatingBorderBrush}">
             <Border.RenderTransform>
                 <TranslateTransform x:Name="VolumeTranslate" Y="4"/>
             </Border.RenderTransform>
             <Border.Effect>
-                <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="3" Opacity="0.55"/>
+                <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="4" Opacity="0.16"/>
             </Border.Effect>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock x:Name="VolumeIcon" Text="&#xE767;" FontFamily="Segoe MDL2 Assets" Foreground="#00F0FF" FontSize="13.5" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <ProgressBar x:Name="VolumeProgressBar" Width="84" Height="5" Minimum="0" Maximum="100" Value="50" Margin="0,0,10,0" Background="#35FFFFFF" Foreground="#00E5FF" BorderThickness="0">
+                <TextBlock x:Name="VolumeIcon" Text="&#xE767;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource GlassAccentBrush}" FontSize="13.5" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ProgressBar x:Name="VolumeProgressBar" Width="84" Height="5" Minimum="0" Maximum="100" Value="50" Margin="0,0,10,0" Background="{DynamicResource FloatingBorderBrush}" Foreground="{DynamicResource GlassAccentBrush}" BorderThickness="0">
                     <ProgressBar.Template>
                         <ControlTemplate TargetType="ProgressBar">
-                            <Grid ClipToBounds="True">
+                            <Grid x:Name="PART_Track" ClipToBounds="True">
                                 <Border Background="{TemplateBinding Background}" CornerRadius="2.5"/>
-                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="2.5">
-                                    <Border.Background>
-                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                            <GradientStop Color="#00E5FF" Offset="0"/>
-                                            <GradientStop Color="#0A84FF" Offset="1"/>
-                                        </LinearGradientBrush>
-                                    </Border.Background>
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="2.5" Background="{DynamicResource GlassAccentBrush}">
                                 </Border>
                             </Grid>
                         </ControlTemplate>
                     </ProgressBar.Template>
                 </ProgressBar>
-                <TextBlock x:Name="VolumePercentText" Text="50%" Foreground="#FFFFFF" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Width="34" TextAlignment="Right"/>
+                <TextBlock x:Name="VolumePercentText" Text="50%" Foreground="{DynamicResource GlassTextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Width="34" TextAlignment="Right"/>
             </StackPanel>
         </Border>
     </Grid>

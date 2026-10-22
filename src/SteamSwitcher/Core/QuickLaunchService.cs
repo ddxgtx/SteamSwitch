@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -17,7 +16,7 @@ namespace SteamSwitcher.Core
     public class QuickLaunchService : IDisposable
     {
         private readonly string _configPath;
-        private readonly ConcurrentDictionary<string, QuickLaunchItem> _items = new();
+        private readonly Dictionary<string, QuickLaunchItem> _items = new(StringComparer.Ordinal);
         private readonly object _saveLock = new();
         private readonly SemaphoreSlim _saveGate = new(1, 1);
 
@@ -37,48 +36,66 @@ namespace SteamSwitcher.Core
 
         public async Task LoadAsync()
         {
+            await _saveGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (File.Exists(_configPath))
+                var loaded = await AtomicJsonFile.ReadAsync<List<QuickLaunchItem>>(_configPath).ConfigureAwait(false);
+                if (loaded == null && (File.Exists(_configPath) || File.Exists(_configPath + ".bak")))
+                    throw new InvalidDataException("快速启动配置内容为空，请恢复配置后重新读取。");
+                loaded ??= new();
+                var snapshot = new Dictionary<string, QuickLaunchItem>(StringComparer.Ordinal);
+                foreach (var item in loaded)
                 {
-                    var loaded = await AtomicJsonFile.ReadAsync<List<QuickLaunchItem>>(_configPath) ?? new();
-                    _items.Clear();
-                    foreach (var item in loaded)
-                        _items.TryAdd(item.Id, item);
+                    if (item == null || string.IsNullOrWhiteSpace(item.Id) || !snapshot.TryAdd(item.Id, CloneItem(item)))
+                        throw new InvalidDataException("快速启动配置包含空记录或重复标识，原有条目已保留。");
                 }
+                ReplaceSnapshot(snapshot);
+                _loadFailed = false;
             }
             catch (Exception ex)
             {
                 AppLogger.Error("Failed to load quick launch items.", ex);
+                // 读取失败时不再清空：后续任意一次增删都会触发 SaveAsync，
+                // 把空列表写回磁盘，用户的项目就这样"凭空消失"了。
+                _loadFailed = true;
+                throw;
             }
+            finally { _saveGate.Release(); }
         }
 
-        public async Task SaveAsync()
+        /// <summary>加载失败后拒绝自动落盘，避免用空列表覆盖磁盘上的真实数据。</summary>
+        private volatile bool _loadFailed;
+
+        public async Task SaveAsync() => await MutateAsync(null);
+
+        private async Task<bool> MutateAsync(Func<Dictionary<string, QuickLaunchItem>, bool>? mutation)
         {
+            await _saveGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                await _saveGate.WaitAsync();
-                try
-                {
-                    // Snapshot under the serialization gate so a delayed older caller cannot
-                    // overwrite the file after a newer mutation has already been persisted.
-                    List<QuickLaunchItem> snapshot;
-                    lock (_saveLock)
-                        snapshot = _items.Values.OrderBy(x => x.SortOrder).Select(CloneItem).ToList();
-
-                    await AtomicJsonFile.WriteAsync(
-                        _configPath,
-                        snapshot,
-                        new JsonSerializerOptions { WriteIndented = true });
-                }
-                finally
-                {
-                    _saveGate.Release();
-                }
+                if (_loadFailed) throw new InvalidOperationException("快速启动配置尚未成功读取，请恢复配置并重新加载后再修改。");
+                Dictionary<string, QuickLaunchItem> snapshot;
+                lock (_saveLock) snapshot = _items.ToDictionary(pair => pair.Key, pair => CloneItem(pair.Value), StringComparer.Ordinal);
+                if (mutation != null && !mutation(snapshot)) return false;
+                await AtomicJsonFile.WriteAsync(_configPath, snapshot.Values.OrderBy(item => item.SortOrder).ToList(),
+                    new JsonSerializerOptions { WriteIndented = true }).ConfigureAwait(false);
+                ReplaceSnapshot(snapshot);
+                return true;
             }
             catch (Exception ex)
             {
                 AppLogger.Error("Failed to save quick launch items.", ex);
+                throw;
+            }
+            finally { _saveGate.Release(); }
+        }
+
+        private void ReplaceSnapshot(Dictionary<string, QuickLaunchItem> snapshot)
+        {
+            lock (_saveLock)
+            {
+                _items.Clear();
+                foreach (var pair in snapshot) _items.Add(pair.Key, CloneItem(pair.Value));
             }
         }
 
@@ -93,72 +110,68 @@ namespace SteamSwitcher.Core
                 WorkingDirectory = ResolveWorkingDirectory(launchPath)
             };
 
-            lock (_saveLock)
+            await MutateAsync(snapshot =>
             {
-                item.SortOrder = _items.Count;
-                _items[item.Id] = item;
-            }
-            await SaveAsync();
+                // Reindex first so deleting a middle item or importing sparse
+                // order values cannot give the newly appended item a duplicate rank.
+                var index = 0;
+                foreach (var existing in snapshot.Values.OrderBy(value => value.SortOrder)) existing.SortOrder = index++;
+                item.SortOrder = index;
+                snapshot[item.Id] = item;
+                return true;
+            });
             ItemsChanged?.Invoke(this, EventArgs.Empty);
-            return item;
+            return CloneItem(item);
         }
 
         public async Task RemoveAsync(string id)
         {
-            bool removed;
-            lock (_saveLock) removed = _items.TryRemove(id, out _);
-            if (removed)
+            if (await MutateAsync(snapshot => snapshot.Remove(id)))
             {
-                await SaveAsync();
                 ItemsChanged?.Invoke(this, EventArgs.Empty);
             }
         }
 
         public async Task TogglePinAsync(string id)
         {
-            var changed = false;
-            lock (_saveLock)
+            if (await MutateAsync(snapshot =>
             {
-                if (_items.TryGetValue(id, out var item))
-                {
-                    item.IsPinned = !item.IsPinned;
-                    changed = true;
-                }
-            }
-            if (changed)
+                if (!snapshot.TryGetValue(id, out var item)) return false;
+                item.IsPinned = !item.IsPinned;
+                return true;
+            }))
             {
-                await SaveAsync();
                 ItemsChanged?.Invoke(this, EventArgs.Empty);
             }
         }
 
         public async Task ReorderAsync(List<string> orderedIds)
         {
-            lock (_saveLock)
+            await MutateAsync(snapshot =>
             {
                 for (int i = 0; i < orderedIds.Count; i++)
                 {
-                    if (_items.TryGetValue(orderedIds[i], out var item))
+                    if (snapshot.TryGetValue(orderedIds[i], out var item))
                         item.SortOrder = i;
                 }
-            }
-            await SaveAsync();
+                return true;
+            });
             ItemsChanged?.Invoke(this, EventArgs.Empty);
         }
 
         public List<QuickLaunchItem> GetAll()
         {
-            return _items.Values.OrderBy(x => x.SortOrder).ToList();
+            lock (_saveLock) return _items.Values.OrderBy(x => x.SortOrder).Select(CloneItem).ToList();
         }
 
         public List<QuickLaunchItem> GetPinned()
         {
-            return _items.Values.Where(x => x.IsPinned).OrderBy(x => x.SortOrder).ToList();
+            lock (_saveLock) return _items.Values.Where(x => x.IsPinned).OrderBy(x => x.SortOrder).Select(CloneItem).ToList();
         }
 
         public QuickLaunchItem? GetById(string id)
         {
-            return _items.TryGetValue(id, out var item) ? item : null;
+            lock (_saveLock) return _items.TryGetValue(id, out var item) ? CloneItem(item) : null;
         }
 
         private static QuickLaunchItem CloneItem(QuickLaunchItem value) => new()
@@ -178,6 +191,15 @@ namespace SteamSwitcher.Core
         {
             try
             {
+                // Launch entries come from quicklaunch.json, so a stale or
+                // hand-edited entry must not be handed to ShellExecute blindly.
+                if (string.IsNullOrWhiteSpace(item.ExecutablePath) || !File.Exists(item.ExecutablePath))
+                {
+                    AppLogger.Warn(
+                        $"Quick launch item '{item.Name}' targets a missing file and was not started: '{item.ExecutablePath}'");
+                    return false;
+                }
+
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = item.ExecutablePath,
@@ -190,8 +212,8 @@ namespace SteamSwitcher.Core
                 if (!string.IsNullOrEmpty(item.WorkingDirectory) && Directory.Exists(item.WorkingDirectory))
                     startInfo.WorkingDirectory = item.WorkingDirectory;
 
-                Process.Start(startInfo);
-                return true;
+                using var process = Process.Start(startInfo);
+                return process != null;
             }
             catch (Exception ex)
             {
@@ -207,7 +229,8 @@ namespace SteamSwitcher.Core
                 if (!File.Exists(exePath)) return null;
 
                 var iconSource = ResolveIconSource(exePath);
-                var icon = Icon.ExtractAssociatedIcon(iconSource);
+                // using 保证中途抛异常（建目录/保存 PNG 失败）时也释放 GDI 句柄。
+                using var icon = Icon.ExtractAssociatedIcon(iconSource);
                 if (icon == null) return null;
 
                 var iconDir = Path.Combine(
@@ -215,12 +238,17 @@ namespace SteamSwitcher.Core
                     "SteamSwitch", "icons");
                 Directory.CreateDirectory(iconDir);
 
-                var iconPath = Path.Combine(iconDir, $"{Path.GetFileNameWithoutExtension(exePath)}.png");
+                // Include a short hash of the full source path so same-named
+                // executables from different folders do not overwrite each other.
+                var pathHash = Convert.ToHexString(
+                    System.Security.Cryptography.SHA1.HashData(
+                        System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(exePath))))
+                    .Substring(0, 8);
+                var iconPath = Path.Combine(iconDir, $"{Path.GetFileNameWithoutExtension(exePath)}-{pathHash}.png");
                 using (var bitmap = icon.ToBitmap())
                 {
                     bitmap.Save(iconPath, System.Drawing.Imaging.ImageFormat.Png);
                 }
-                icon.Dispose();
                 return iconPath;
             }
             catch
@@ -264,11 +292,19 @@ namespace SteamSwitcher.Core
             if (string.IsNullOrWhiteSpace(iconLocation))
                 return null;
 
-            var path = Environment.ExpandEnvironmentVariables(iconLocation).Trim().Trim('"');
+            var path = Environment.ExpandEnvironmentVariables(iconLocation).Trim();
+            // Only strip a trailing ",index" when that suffix is purely numeric;
+            // otherwise a comma inside a valid path (e.g. "C:\foo, bar\icon.ico")
+            // would be truncated.
             var commaIndex = path.LastIndexOf(',');
             if (commaIndex > 0)
-                path = path[..commaIndex].Trim().Trim('"');
+            {
+                var suffix = path[(commaIndex + 1)..].Trim();
+                if (suffix.Length > 0 && suffix.All(char.IsDigit))
+                    path = path[..commaIndex].Trim();
+            }
 
+            path = path.Trim().Trim('"');
             return File.Exists(path) ? path : null;
         }
 

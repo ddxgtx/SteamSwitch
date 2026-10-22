@@ -1,5 +1,9 @@
 # Third-Party Notices
 
+SteamSwitch itself is licensed under the MIT License; see [LICENSE](LICENSE).
+
+This file records the upstream projects that informed SteamSwitch's features, and the third-party packages that ship with it.
+
 ## WPF UI
 
 - Official project: https://github.com/lepoco/wpfui
@@ -23,16 +27,6 @@ SteamSwitch's optional taskbar-lyrics experience is inspired by the user-facing 
 - Service: https://lrclib.net/
 
 When the user enables online lyrics, SteamSwitch sends the current media title, artist, album, and duration to LRCLIB's public API to locate synchronized lyrics. This integration is optional and falls back to local Windows media-session metadata when unavailable.
-
-## TranslucentTB
-
-- Official project: https://github.com/TranslucentTB/TranslucentTB
-- License: GNU General Public License v3.0 (GPL-3.0)
-- Copyright: TranslucentTB contributors
-
-SteamSwitch's optional system-taskbar appearance feature is inspired by the user-facing functionality of TranslucentTB: normal, opaque, clear, blur, acrylic, color customization, and dynamic maximized-window appearance.
-
-The SteamSwitch implementation was written independently against Windows window-composition APIs. It does not copy, bundle, link, modify, or redistribute TranslucentTB source code or binaries. TranslucentTB is not required to use SteamSwitch. If TranslucentTB is already running, SteamSwitch releases taskbar appearance control to avoid conflicts.
 
 ## TcNo Account Switcher
 

@@ -1,5 +1,8 @@
+using System;
 using System.Windows;
 using System.Windows.Input;
+using SteamSwitcher.Core;
+using SteamSwitcher.Services;
 using SteamSwitcher.ViewModels;
 
 namespace SteamSwitcher.Views
@@ -25,7 +28,16 @@ namespace SteamSwitcher.Views
 
         private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            if (e.LeftButton == MouseButtonState.Pressed) DragMove();
+            WindowDragHelper.TryDrag(this, e);
+        }
+
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                Close();
+            }
         }
 
         private async void Save_Click(object sender, RoutedEventArgs e)
@@ -35,14 +47,25 @@ namespace SteamSwitcher.Views
                 MessageBox.Show(this, "启动参数不能超过 2048 个字符。", "游戏启动工作流", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            await _viewModel.SaveGameLaunchWorkflowAsync(
-                _game.AppId,
-                LaunchArgumentsBox.Text,
-                BackupBeforeLaunchCheck.IsChecked == true,
-                BackupAfterExitCheck.IsChecked == true,
-                CloseSteamAfterExitCheck.IsChecked == true,
-                BigPictureCheck.IsChecked == true);
-            DialogResult = true;
+
+            try
+            {
+                await _viewModel.SaveGameLaunchWorkflowAsync(
+                    _game.AppId,
+                    LaunchArgumentsBox.Text,
+                    BackupBeforeLaunchCheck.IsChecked == true,
+                    BackupAfterExitCheck.IsChecked == true,
+                    CloseSteamAfterExitCheck.IsChecked == true,
+                    BigPictureCheck.IsChecked == true);
+                DialogResult = true;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("GameLaunchWorkflowWindow save failed.", ex);
+                // Keep the dialog open so the user can correct input and retry.
+                MessageBox.Show(this, $"保存启动工作流失败：{ex.Message}", "游戏启动工作流",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;

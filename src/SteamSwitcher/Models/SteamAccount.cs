@@ -12,6 +12,14 @@ namespace SteamSwitcher.Models
         public long Timestamp { get; set; }
         public string? AvatarPath { get; set; }
 
+        /// <summary>
+        /// True when the account exists only in the local account library:
+        /// Steam has pruned it from loginusers.vdf, so switching to it first
+        /// restores the entry (Steam will ask for the password unless it
+        /// still remembers it).
+        /// </summary>
+        public bool IsArchived { get; set; }
+
         public DateTime LastLoginTime => DateTimeOffset.FromUnixTimeSeconds(Timestamp).LocalDateTime;
 
         public override string ToString() => $"{PersonaName} ({AccountName})";

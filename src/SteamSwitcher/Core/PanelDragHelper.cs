@@ -32,11 +32,29 @@ namespace SteamSwitcher.Core
             _panel = panel;
         }
 
+        private bool _attached;
+
         public void Attach()
         {
+            if (_attached)
+                return;
+
             _panel.AddHandler(UIElement.PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(OnDown), true);
             _panel.AddHandler(UIElement.PreviewMouseMoveEvent, new MouseEventHandler(OnMove), true);
             _panel.AddHandler(UIElement.PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler(OnUp), true);
+            _attached = true;
+        }
+
+        public void Detach()
+        {
+            if (!_attached)
+                return;
+
+            EndDrag();
+            _panel.RemoveHandler(UIElement.PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(OnDown));
+            _panel.RemoveHandler(UIElement.PreviewMouseMoveEvent, new MouseEventHandler(OnMove));
+            _panel.RemoveHandler(UIElement.PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler(OnUp));
+            _attached = false;
         }
 
         private void OnDown(object sender, MouseButtonEventArgs e)

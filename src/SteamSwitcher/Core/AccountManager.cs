@@ -14,27 +14,48 @@ namespace SteamSwitcher.Core
 {
     public class AccountManager : IDisposable
     {
+        private static readonly bool UseAvatarMirror = false;
+
         private readonly SteamService _steamService;
         private readonly VdfParser _vdfParser;
         private readonly RegistryHelper _registryHelper;
         private readonly HttpClient _httpClient;
+        private readonly AccountLibraryService _accountLibrary;
+        private readonly Func<string?> _autoLoginUserReader;
+        private readonly bool _avatarDownloadsEnabled;
         private readonly SemaphoreSlim _switchGate = new(1, 1);
+        private readonly CancellationTokenSource _operationLifetime = new();
+        private readonly CancellationToken _operationToken;
+        private Task? _gateDisposalTask;
         private CancellationTokenSource? _avatarDownloadCts;
-        private bool _disposed;
+        private int _disposeStarted;
+        private volatile bool _disposed;
 
         public List<SteamAccount> Accounts { get; private set; } = new();
         public SteamAccount? CurrentAccount { get; private set; }
+        public string? AccountSourceWarning { get; private set; }
+        public string AccountLibraryPath => _accountLibrary.LibraryPath;
+        public IReadOnlyList<string> IgnoredAccountIds => _accountLibrary.IgnoredAccountIds;
 
         public event EventHandler? AccountsChanged;
         public event EventHandler? CurrentAccountChanged;
         public Func<SteamAccount?, Task>? BeforeAccountSwitchAsync { get; set; }
         public Func<Task<bool>>? ConfirmForceCloseAfterTimeoutAsync { get; set; }
 
-        public AccountManager()
+        public AccountManager() : this(new SteamService(), new AccountLibraryService())
         {
-            _steamService = new SteamService();
+        }
+
+        internal AccountManager(SteamService steamService, AccountLibraryService accountLibrary,
+            Func<string?>? autoLoginUserReader = null, bool downloadAvatars = true)
+        {
+            _steamService = steamService;
             _vdfParser = new VdfParser();
             _registryHelper = new RegistryHelper();
+            _accountLibrary = accountLibrary;
+            _autoLoginUserReader = autoLoginUserReader ?? _registryHelper.GetAutoLoginUser;
+            _avatarDownloadsEnabled = downloadAvatars;
+            _operationToken = _operationLifetime.Token;
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         }
 
@@ -46,15 +67,47 @@ namespace SteamSwitcher.Core
         /// </summary>
         public bool RefreshCurrentAccountFromSteamSession()
         {
-            if (_disposed || Accounts.Count == 0)
+            if (_disposed)
                 return false;
 
-            var autoLoginUser = _registryHelper.GetAutoLoginUser();
+            var lockTaken = false;
+            try
+            {
+                try
+                {
+                    // Non-blocking: this is called from the UI status timer.
+                    // Blocking here would freeze the UI for the entire account switch.
+                    if (!_switchGate.Wait(0))
+                        return false;
+                    lockTaken = true;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return false;
+                }
+
+                return RefreshCurrentAccountCore();
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    try { _switchGate.Release(); } catch (ObjectDisposedException) { }
+                }
+            }
+        }
+
+        private bool RefreshCurrentAccountCore()
+        {
+            if (Accounts.Count == 0 || AccountSourceWarning != null)
+                return false;
+
+            var autoLoginUser = _autoLoginUserReader();
             string? mostRecentSteamId = null;
             try
             {
                 var loginUsersPath = _steamService.GetLoginUsersPath();
-                if (File.Exists(loginUsersPath))
+                if (!string.IsNullOrEmpty(loginUsersPath) && File.Exists(loginUsersPath))
                 {
                     var data = _vdfParser.Parse(loginUsersPath);
                     if (data.TryGetValue("users", out var usersObj) &&
@@ -102,80 +155,179 @@ namespace SteamSwitcher.Core
 
         public async Task<bool> InitializeAsync()
         {
-            if (!_steamService.DetectSteamPath())
-                return false;
-
+            var steamFound = _steamService.DetectSteamPath();
             await LoadAccountsAsync();
-            return true;
+            return steamFound || Accounts.Count > 0;
         }
 
-        public Task LoadAccountsAsync()
+        public async Task LoadAccountsAsync()
         {
-            _avatarDownloadCts?.Cancel();
-            _avatarDownloadCts?.Dispose();
-            _avatarDownloadCts = new CancellationTokenSource();
+            if (_disposed)
+                return;
 
-            Accounts.Clear();
-            CurrentAccount = null;
-
-            var loginUsersPath = _steamService.GetLoginUsersPath();
-            if (!File.Exists(loginUsersPath))
+            try
             {
-                RaiseSafely(AccountsChanged, nameof(AccountsChanged));
-                RaiseSafely(CurrentAccountChanged, nameof(CurrentAccountChanged));
-                return Task.CompletedTask;
+                await EnterOperationAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+            catch (OperationCanceledException) when (_operationToken.IsCancellationRequested)
+            {
+                return;
             }
 
             try
             {
-                var autoLoginUser = _registryHelper.GetAutoLoginUser();
-                var data = _vdfParser.Parse(loginUsersPath);
-                if (data.TryGetValue("users", out var usersObj) &&
-                    usersObj is Dictionary<string, object> users)
+                LoadAccountsCore();
+            }
+            finally
+            {
+                try { _switchGate.Release(); } catch (ObjectDisposedException) { }
+            }
+        }
+
+        private void LoadAccountsCore()
+        {
+            var avatarCts = CancellationTokenSource.CreateLinkedTokenSource(_operationToken);
+            var avatarToken = avatarCts.Token;
+            var previousAvatars = Interlocked.Exchange(ref _avatarDownloadCts, avatarCts);
+            try { previousAvatars?.Cancel(); } catch (ObjectDisposedException) { }
+            previousAvatars?.Dispose();
+
+            var vdfAccounts = new List<SteamAccount>();
+            var loginUsersPath = _steamService.GetLoginUsersPath();
+            var sourceAvailable = false;
+            AccountSourceWarning = null;
+            try
+            {
+                var data = ReadValidatedLoginUsers(loginUsersPath);
+                var users = (Dictionary<string, object>)data["users"];
+                foreach (var userEntry in users)
                 {
-                    foreach (var userEntry in users)
+                    if (userEntry.Value is Dictionary<string, object> userData &&
+                        !_accountLibrary.IsIgnored(userEntry.Key))
                     {
-                        if (userEntry.Value is Dictionary<string, object> userData)
+                        var account = new SteamAccount
                         {
-                            var account = new SteamAccount
-                            {
-                                SteamId = userEntry.Key,
-                                AccountName = GetValue(userData, "AccountName"),
-                                PersonaName = GetValue(userData, "PersonaName"),
-                                RememberPassword = GetValue(userData, "RememberPassword") == "1",
-                                MostRecent = GetValue(userData, "MostRecent") == "1",
-                                Timestamp = long.TryParse(GetValue(userData, "Timestamp"), out var ts) ? ts : 0
-                            };
-
-                            account.AvatarPath = GetAvatarPath(account.SteamId);
-
-                            Accounts.Add(account);
-                        }
+                            SteamId = userEntry.Key,
+                            AccountName = GetValue(userData, "AccountName"),
+                            PersonaName = GetValue(userData, "PersonaName"),
+                            RememberPassword = GetValue(userData, "RememberPassword") == "1",
+                            MostRecent = GetValue(userData, "MostRecent") == "1",
+                            Timestamp = long.TryParse(GetValue(userData, "Timestamp"), out var ts) &&
+                                ts >= 0 && ts <= 253402300799 ? ts : 0
+                        };
+                        if (string.IsNullOrWhiteSpace(account.PersonaName)) account.PersonaName = account.AccountName;
+                        account.AvatarPath = GetAvatarPath(account.SteamId);
+                        vdfAccounts.Add(account);
                     }
                 }
-
-                Accounts = Accounts.OrderByDescending(a => a.MostRecent).ThenByDescending(a => a.Timestamp).ToList();
-                CurrentAccount = Accounts.FirstOrDefault(a =>
-                        !string.IsNullOrWhiteSpace(autoLoginUser) &&
-                        string.Equals(a.AccountName, autoLoginUser, StringComparison.OrdinalIgnoreCase))
-                    ?? Accounts.FirstOrDefault(a => a.MostRecent);
-
-                AppLogger.Info(
-                    $"Resolved current Steam account: registry={autoLoginUser}, " +
-                    $"current={CurrentAccount?.AccountName ?? "<none>"}");
+                sourceAvailable = true;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error loading accounts: {ex.Message}");
+                AccountSourceWarning = "Steam 账号文件暂不可用，正在显示本地账号档案。请启动 Steam 完成登录后刷新；原文件不会被覆盖。";
+                AppLogger.Warn($"Unable to read loginusers.vdf; displaying local account metadata: {ex.Message}");
             }
+
+            if (_accountLibrary.MergeFromVdf(vdfAccounts)) _ = SaveLibraryAsync();
+            Accounts = vdfAccounts.OrderByDescending(a => a.MostRecent).ThenByDescending(a => a.Timestamp).ToList();
+            Accounts.AddRange(_accountLibrary.BuildArchivedAccounts(vdfAccounts));
+            var autoLoginUser = sourceAvailable ? _autoLoginUserReader() : null;
+            CurrentAccount = sourceAvailable ? Accounts.FirstOrDefault(a =>
+                    !a.IsArchived && !string.IsNullOrWhiteSpace(autoLoginUser) &&
+                    string.Equals(a.AccountName, autoLoginUser, StringComparison.OrdinalIgnoreCase))
+                ?? Accounts.FirstOrDefault(a => !a.IsArchived && a.MostRecent) : null;
 
             RaiseSafely(AccountsChanged, nameof(AccountsChanged));
             RaiseSafely(CurrentAccountChanged, nameof(CurrentAccountChanged));
 
             var accountSnapshot = Accounts.ToList();
-            _ = DownloadMissingAvatarsAsync(accountSnapshot, _avatarDownloadCts.Token);
+            if (_disposed)
+            {
+                if (ReferenceEquals(Interlocked.CompareExchange(ref _avatarDownloadCts, null, avatarCts), avatarCts))
+                    avatarCts.Dispose();
+            }
+            else if (_avatarDownloadsEnabled)
+                _ = DownloadMissingAvatarsAsync(accountSnapshot, avatarToken);
+        }
 
-            return Task.CompletedTask;
+        private Dictionary<string, object> ReadValidatedLoginUsers(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                throw new FileNotFoundException("loginusers.vdf 尚未生成，请先启动 Steam 完成登录。", path);
+            var data = _vdfParser.Parse(path);
+            if (!data.TryGetValue("users", out var usersObj) || usersObj is not Dictionary<string, object> users)
+                throw new InvalidDataException("loginusers.vdf 缺少 users 节。");
+            foreach (var pair in users)
+            {
+                if (!AccountLibraryService.IsValidSteamId(pair.Key) ||
+                    pair.Value is not Dictionary<string, object> user ||
+                    string.IsNullOrWhiteSpace(GetValue(user, "AccountName")) ||
+                    GetValue(user, "AccountName").Length > 128 || GetValue(user, "AccountName").Any(char.IsControl))
+                    throw new InvalidDataException("loginusers.vdf 包含无效账号条目，已停止修改。");
+            }
+            return data;
+        }
+
+        public IReadOnlyList<SavedAccountEntry> GetAccountArchiveEntries() => _accountLibrary.GetArchiveEntries();
+
+        public async Task ReloadAccountLibraryAsync(bool reloadAccounts = true)
+        {
+            await EnterOperationAsync();
+            try
+            {
+                _accountLibrary.Reload();
+                if (reloadAccounts) LoadAccountsCore();
+            }
+            finally { try { _switchGate.Release(); } catch (ObjectDisposedException) { } }
+        }
+
+        public async Task<bool> ForgetAccountAsync(string steamId)
+        {
+            await EnterOperationAsync();
+            try
+            {
+                var changed = await _accountLibrary.ForgetAsync(steamId);
+                LoadAccountsCore();
+                return changed;
+            }
+            finally { try { _switchGate.Release(); } catch (ObjectDisposedException) { } }
+        }
+
+        public async Task<bool> RestoreAccountCollectionAsync(string steamId)
+        {
+            await EnterOperationAsync();
+            try
+            {
+                var changed = await _accountLibrary.RestoreCollectionAsync(steamId);
+                LoadAccountsCore();
+                return changed;
+            }
+            finally { try { _switchGate.Release(); } catch (ObjectDisposedException) { } }
+        }
+
+        public async Task ExportAccountArchiveAsync(string path)
+        {
+            await EnterOperationAsync();
+            try { await _accountLibrary.ExportArchiveAsync(path); }
+            finally { try { _switchGate.Release(); } catch (ObjectDisposedException) { } }
+        }
+
+        public async Task<int> ImportAccountArchiveAsync(string path)
+        {
+            await EnterOperationAsync();
+            try { var count = await _accountLibrary.ImportArchiveAsync(path); LoadAccountsCore(); return count; }
+            finally { try { _switchGate.Release(); } catch (ObjectDisposedException) { } }
+        }
+
+        public async Task<int> ImportAccountEntriesAsync(IEnumerable<SavedAccountEntry> entries)
+        {
+            await EnterOperationAsync();
+            try { var count = await _accountLibrary.ImportEntriesAsync(entries); LoadAccountsCore(); return count; }
+            finally { try { _switchGate.Release(); } catch (ObjectDisposedException) { } }
         }
 
         private async Task DownloadMissingAvatarsAsync(
@@ -223,19 +375,36 @@ namespace SteamSwitcher.Core
 
         public async Task<bool> SwitchAccountAsync(SteamAccount account, bool forceClose = false)
         {
-            await _switchGate.WaitAsync();
+            if (_disposed) return false;
+            try { await EnterOperationAsync(); }
+            catch (ObjectDisposedException) { return false; }
+            catch (OperationCanceledException) when (_operationToken.IsCancellationRequested) { return false; }
             try
             {
                 return await SwitchAccountCoreAsync(account, forceClose);
             }
             finally
             {
-                _switchGate.Release();
+                try { _switchGate.Release(); } catch (ObjectDisposedException) { }
             }
         }
 
         private async Task<bool> SwitchAccountCoreAsync(SteamAccount account, bool forceClose)
         {
+            if (account == null || !AccountLibraryService.IsValidSteamId(account.SteamId) ||
+                string.IsNullOrWhiteSpace(account.AccountName) || account.AccountName.Length > 128 ||
+                account.AccountName.Any(char.IsControl) || _accountLibrary.IsIgnored(account.SteamId))
+                return false;
+            // Refuse a broken/missing source before shutting Steam down. The
+            // library contains metadata, never enough information to recreate a
+            // client's login state safely from a corrupt file.
+            try { ReadValidatedLoginUsers(_steamService.GetLoginUsersPath()); }
+            catch (Exception ex)
+            {
+                AccountSourceWarning = ex.Message;
+                AppLogger.Warn($"Account switch stopped before closing Steam: {ex.Message}");
+                return false;
+            }
             if (_steamService.IsSteamRunning())
             {
                 var closed = await _steamService.CloseSteamAsync(forceClose: forceClose);
@@ -244,8 +413,23 @@ namespace SteamSwitcher.Core
                 {
                     closed = await _steamService.CloseSteamAsync(forceClose: true);
                 }
+
+                if (closed && _steamService.IsSteamRunning())
+                {
+                    AppLogger.Warn("Steam close reported success but processes are still present; treating close as failed.");
+                    closed = false;
+                }
+
                 if (!closed)
+                {
+                    // 区分"Steam 还在跑但关不掉"与"压根识别不出可关闭的进程"：
+                    // 后者用户无从下手，必须给出明确指引，而不是笼统的关闭失败。
+                    AccountSourceWarning = _steamService.HasVerifiableSteamProcesses()
+                        ? "Steam 仍在运行且未能关闭，账号未切换。请手动退出 Steam 后重试。"
+                        : "无法确认 Steam 进程的安装路径，因此未能关闭 Steam，账号未切换。请以管理员身份运行本程序，或手动退出 Steam 后重试。";
+                    AppLogger.Error("SwitchAccount aborted: Steam could not be closed; loginusers.vdf and registry were left unchanged.");
                     return false;
+                }
             }
 
             if (BeforeAccountSwitchAsync != null)
@@ -263,7 +447,7 @@ namespace SteamSwitcher.Core
 
             try
             {
-                if (!await UpdateLoginUsersVdfAsync(account.SteamId))
+                if (!await UpdateLoginUsersVdfAsync(account))
                 {
                     AppLogger.Error($"SwitchAccountAsync aborted: failed to update loginusers.vdf for {account.AccountName}.");
                     return false;
@@ -281,12 +465,25 @@ namespace SteamSwitcher.Core
 
                 account.MostRecent = true;
                 account.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                // 必须按账号身份比较：重试路径传进来的可能是刷新前的旧实例，
+                // 引用相等会漏掉所有账号，导致列表里出现两个「当前账号」。
                 foreach (var acc in Accounts)
                 {
-                    if (acc != account)
+                    if (!AreSameAccount(acc, account))
                         acc.MostRecent = false;
                 }
+
+                // A restored archived account is now a real loginusers.vdf
+                // account, so drop the archived marker and refresh the library.
+                if (account.IsArchived)
+                {
+                    account.IsArchived = false;
+                    _accountLibrary.Upsert(account);
+                    _ = SaveLibraryAsync();
+                }
+
                 CurrentAccount = account;
+                AccountSourceWarning = null;
 
                 RaiseSafely(AccountsChanged, nameof(AccountsChanged));
                 RaiseSafely(CurrentAccountChanged, nameof(CurrentAccountChanged));
@@ -296,6 +493,19 @@ namespace SteamSwitcher.Core
             {
                 AppLogger.Error("SwitchAccountAsync failed.", ex);
                 return false;
+            }
+        }
+
+        private async Task SaveLibraryAsync()
+        {
+            try
+            {
+                await _accountLibrary.SaveAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // The library is a convenience cache; never fail a load for it.
+                AppLogger.Warn($"Account library could not be saved: {ex.Message}");
             }
         }
 
@@ -329,7 +539,7 @@ namespace SteamSwitcher.Core
             }
         }
 
-        private async Task<bool> UpdateLoginUsersVdfAsync(string activeSteamId)
+        internal async Task<bool> UpdateLoginUsersVdfAsync(SteamAccount account)
         {
             var loginUsersPath = _steamService.GetLoginUsersPath();
             if (!File.Exists(loginUsersPath))
@@ -343,21 +553,24 @@ namespace SteamSwitcher.Core
 
             try
             {
-                var data = _vdfParser.Parse(loginUsersPath);
-                if (!data.TryGetValue("users", out var usersObj) ||
-                    usersObj is not Dictionary<string, object> users)
-                {
-                    AppLogger.Error($"loginusers.vdf does not contain a users section: {loginUsersPath}");
+                if (!AccountLibraryService.IsValidSteamId(account.SteamId) ||
+                    string.IsNullOrWhiteSpace(account.AccountName) || account.AccountName.Length > 128 ||
+                    account.AccountName.Any(char.IsControl) || _accountLibrary.IsIgnored(account.SteamId))
                     return false;
-                }
+                var originalBytes = File.ReadAllBytes(loginUsersPath);
+                var data = ReadValidatedLoginUsers(loginUsersPath);
+                var users = (Dictionary<string, object>)data["users"];
+                var expectedIds = new HashSet<string>(users.Keys, StringComparer.OrdinalIgnoreCase) { account.SteamId };
 
                 var foundActiveAccount = false;
                 foreach (var userEntry in users)
                 {
                     if (userEntry.Value is Dictionary<string, object> userData)
                     {
-                        if (string.Equals(userEntry.Key, activeSteamId, StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(userEntry.Key, account.SteamId, StringComparison.OrdinalIgnoreCase))
                         {
+                            if (!string.Equals(GetValue(userData, "AccountName"), account.AccountName, StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidDataException("目标账号资料已变化，请刷新账号列表后重试。");
                             foundActiveAccount = true;
                             userData["MostRecent"] = "1";
                             userData["RememberPassword"] = "1";
@@ -370,10 +583,17 @@ namespace SteamSwitcher.Core
                     }
                 }
 
+                // Steam prunes remembered accounts from loginusers.vdf once too
+                // many are stored. The local account library keeps those
+                // accounts, so restore the entry instead of aborting the
+                // switch; Steam will prompt for the password if it no longer
+                // remembers it, with the account name already filled in.
                 if (!foundActiveAccount)
                 {
-                    AppLogger.Error($"Steam account {activeSteamId} was not found in loginusers.vdf.");
-                    return false;
+                    AccountLibraryService.EnsureUserEntry(users, account);
+                    AppLogger.Info(
+                        $"Restored archived account '{account.AccountName}' into loginusers.vdf " +
+                        "from the local account library; Steam may ask for its password once.");
                 }
 
                 var content = _vdfParser.Serialize(data);
@@ -391,10 +611,17 @@ namespace SteamSwitcher.Core
                     stream.Flush(flushToDisk: true);
                 }
 
-                var validation = _vdfParser.Parse(tempPath);
-                if (!validation.TryGetValue("users", out var validationUsers) ||
-                    validationUsers is not Dictionary<string, object>)
+                var validation = ReadValidatedLoginUsers(tempPath);
+                var validatedUsers = (Dictionary<string, object>)validation["users"];
+                if (!expectedIds.SetEquals(validatedUsers.Keys) ||
+                    validatedUsers[account.SteamId] is not Dictionary<string, object> validatedTarget ||
+                    GetValue(validatedTarget, "MostRecent") != "1" ||
+                    validatedUsers.Values.OfType<Dictionary<string, object>>()
+                        .Count(user => GetValue(user, "MostRecent") == "1") != 1 ||
+                    !string.Equals(content, _vdfParser.Serialize(validation), StringComparison.Ordinal))
                     throw new InvalidDataException("生成的 loginusers.vdf 未通过重新解析校验。");
+                if (!originalBytes.AsSpan().SequenceEqual(File.ReadAllBytes(loginUsersPath)))
+                    throw new IOException("Steam 账号文件在切换过程中已变化，请刷新后重试。");
 
                 var transientBackup = $"{backupPath}.{Guid.NewGuid():N}.tmp";
                 var preserveTransientBackup = false;
@@ -498,19 +725,33 @@ namespace SteamSwitcher.Core
 
         private string? GetAvatarPath(string steamId)
         {
-            var avatarCachePath = _steamService.GetAvatarCachePath();
-            if (string.IsNullOrEmpty(avatarCachePath))
-                return null;
+            var appAvatarFile = Path.Combine(GetAppAvatarCacheDirectory(), $"{steamId}.png");
+            if (File.Exists(appAvatarFile))
+                return appAvatarFile;
 
-            var avatarFile = Path.Combine(avatarCachePath, $"{steamId}.png");
-            return File.Exists(avatarFile) ? avatarFile : null;
+            var legacyCachePath = _steamService.GetAvatarCachePath();
+            if (!string.IsNullOrEmpty(legacyCachePath))
+            {
+                var legacyAvatarFile = Path.Combine(legacyCachePath, $"{steamId}.png");
+                if (File.Exists(legacyAvatarFile))
+                    return legacyAvatarFile;
+            }
+
+            return null;
+        }
+
+        private static string GetAppAvatarCacheDirectory()
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SteamSwitch",
+                "avatarcache");
         }
 
         private async Task<string?> DownloadAvatarAsync(string steamId, CancellationToken cancellationToken)
         {
             string? response = null;
 
-            // 1. 尝试直接请求官方接口
             try
             {
                 var url = $"https://steamcommunity.com/profiles/{steamId}/?xml=1";
@@ -522,20 +763,26 @@ namespace SteamSwitcher.Core
             }
             catch (Exception ex)
             {
-                AppLogger.Warn($"直连 steamcommunity.com 获取头像失败: {ex.Message}。将尝试国内镜像反代重试...");
-                // 2. 备用降级方案，利用国内可靠的反代镜像重试
-                try
+                if (!UseAvatarMirror)
                 {
-                    var fallbackUrl = $"https://shared.steamcommunity.li-sub.cn/profiles/{steamId}/?xml=1";
-                    response = await _httpClient.GetStringAsync(fallbackUrl, cancellationToken);
+                    AppLogger.Warn($"Failed to fetch avatar profile from steamcommunity.com: {ex.Message}. Avatar mirror is disabled.");
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                else
                 {
-                    throw;
-                }
-                catch (Exception fallbackEx)
-                {
-                    AppLogger.Warn($"镜像重试失败: {fallbackEx.Message}。如果未开启代理，头像可能无法显示。");
+                    AppLogger.Warn($"Failed to fetch avatar profile from steamcommunity.com: {ex.Message}. Trying avatar mirror...");
+                    try
+                    {
+                        var fallbackUrl = $"https://shared.steamcommunity.li-sub.cn/profiles/{steamId}/?xml=1";
+                        response = await _httpClient.GetStringAsync(fallbackUrl, cancellationToken);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception fallbackEx)
+                    {
+                        AppLogger.Warn($"Avatar mirror retry failed: {fallbackEx.Message}.");
+                    }
                 }
             }
 
@@ -555,7 +802,6 @@ namespace SteamSwitcher.Core
                     var avatarUrl = match.Groups[1].Value;
                     byte[]? avatarBytes = null;
 
-                    // 1. 尝试下载头像图片本身
                     try
                     {
                         avatarBytes = await _httpClient.GetByteArrayAsync(avatarUrl, cancellationToken);
@@ -566,27 +812,33 @@ namespace SteamSwitcher.Core
                     }
                     catch (Exception ex)
                     {
-                        AppLogger.Warn($"直连下载头像文件失败: {ex.Message}。将尝试通过镜像替换下载...");
-                        try
+                        if (!UseAvatarMirror)
                         {
-                            var fallbackAvatarUrl = avatarUrl.Replace("avatars.steamstatic.com", "shared.steamcommunity.li-sub.cn/avatars");
-                            avatarBytes = await _httpClient.GetByteArrayAsync(fallbackAvatarUrl, cancellationToken);
+                            AppLogger.Warn($"Failed to download avatar file: {ex.Message}. Avatar mirror is disabled.");
                         }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        else
                         {
-                            throw;
-                        }
-                        catch (Exception fallbackEx)
-                        {
-                            AppLogger.Error($"镜像下载头像文件亦失败: {fallbackEx.Message}");
+                            AppLogger.Warn($"Failed to download avatar file: {ex.Message}. Trying mirror download...");
+                            try
+                            {
+                                var fallbackAvatarUrl = avatarUrl.Replace("avatars.steamstatic.com", "shared.steamcommunity.li-sub.cn/avatars");
+                                avatarBytes = await _httpClient.GetByteArrayAsync(fallbackAvatarUrl, cancellationToken);
+                            }
+                            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                            {
+                                throw;
+                            }
+                            catch (Exception fallbackEx)
+                            {
+                                AppLogger.Error($"Avatar mirror download failed: {fallbackEx.Message}");
+                            }
                         }
                     }
 
                     if (avatarBytes != null)
                     {
-                        var avatarCachePath = _steamService.GetAvatarCachePath();
-                        if (!Directory.Exists(avatarCachePath))
-                            Directory.CreateDirectory(avatarCachePath);
+                        var avatarCachePath = GetAppAvatarCacheDirectory();
+                        Directory.CreateDirectory(avatarCachePath);
 
                         var avatarFile = Path.Combine(avatarCachePath, $"{steamId}.png");
                         await File.WriteAllBytesAsync(avatarFile, avatarBytes, cancellationToken);
@@ -594,9 +846,13 @@ namespace SteamSwitcher.Core
                     }
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                AppLogger.Error($"解析头像数据时发生异常: {ex.Message}", ex);
+                AppLogger.Error($"Failed to parse avatar data: {ex.Message}", ex);
             }
 
             return null;
@@ -631,18 +887,50 @@ namespace SteamSwitcher.Core
             return dict.TryGetValue(key, out var value) ? value?.ToString() ?? "" : "";
         }
 
+        private async Task EnterOperationAsync()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            try
+            {
+                await _switchGate.WaitAsync(_operationToken).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // 退出时 CTS 可能被先释放，此时并发进入的操作应安静放弃，
+                // 而不是把 ODE 抛到 async void 事件处理器里弹出崩溃框。
+                throw;
+            }
+
+            if (_disposed)
+            {
+                try { _switchGate.Release(); } catch (ObjectDisposedException) { }
+                throw new ObjectDisposedException(nameof(AccountManager));
+            }
+        }
+
+        internal Task DisposalCompletion => _gateDisposalTask ?? Task.CompletedTask;
+
+        private async Task DisposeOperationGateWhenIdleAsync()
+        {
+            // All queued callers were cancelled before this wait. An operation
+            // already writing a transaction can finish and release normally.
+            await _switchGate.WaitAsync().ConfigureAwait(false);
+            _switchGate.Dispose();
+        }
+
         public void Dispose()
         {
-            if (!_disposed)
-            {
-                BeforeAccountSwitchAsync = null;
-                ConfirmForceCloseAfterTimeoutAsync = null;
-                _avatarDownloadCts?.Cancel();
-                _avatarDownloadCts?.Dispose();
-                _avatarDownloadCts = null;
-                _httpClient?.Dispose();
-                _disposed = true;
-            }
+            if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
+            _disposed = true;
+            _operationLifetime.Cancel();
+            BeforeAccountSwitchAsync = null;
+            ConfirmForceCloseAfterTimeoutAsync = null;
+            var avatars = Interlocked.Exchange(ref _avatarDownloadCts, null);
+            try { avatars?.Cancel(); } catch { }
+            avatars?.Dispose();
+            _httpClient?.Dispose();
+            _gateDisposalTask = DisposeOperationGateWhenIdleAsync();
+            _operationLifetime.Dispose();
         }
     }
 }

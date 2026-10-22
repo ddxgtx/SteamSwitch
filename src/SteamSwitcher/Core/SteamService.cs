@@ -35,7 +35,12 @@ namespace SteamSwitcher.Core
         {
             "steam",
             "steamwebhelper",
-            "gameoverlayui"
+            "gameoverlayui",
+            "steamservice",
+            "htmlcrashhandler",
+            "steamerrorreporter",
+            "steamerrorreporter64",
+            "streaming_client"
         };
 
         public string? SteamPath { get; private set; }
@@ -46,9 +51,52 @@ namespace SteamSwitcher.Core
 
         public void SetCustomPaths(string? customSteamPath, string? customLoginUsersPath)
         {
-            CustomSteamPath = customSteamPath;
-            CustomLoginUsersPath = customLoginUsersPath;
+            CustomSteamPath = RejectNonLocalPath(customSteamPath, "Steam 目录");
+            CustomLoginUsersPath = RejectNonLocalPath(customLoginUsersPath, "loginusers.vdf 目录");
             DetectSteamPath();
+        }
+
+        /// <summary>
+        /// Imported settings can carry arbitrary paths, and a UNC/network
+        /// Steam directory would make Steam launch steam.exe from a remote
+        /// share. Only fixed or removable local drives are accepted; anything
+        /// else is dropped so detection falls back to the registry.
+        /// </summary>
+        private static string? RejectNonLocalPath(string? path, string label)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return path;
+
+            if (path.StartsWith(@"\\", StringComparison.Ordinal) ||
+                path.StartsWith("//", StringComparison.Ordinal))
+            {
+                AppLogger.Warn($"已拒绝网络路径 {label}（存在远程执行风险）：{path}");
+                return null;
+            }
+
+            try
+            {
+                var root = Path.GetPathRoot(Path.GetFullPath(path));
+                if (string.IsNullOrEmpty(root) || !root.Contains(':'))
+                {
+                    AppLogger.Warn($"已拒绝非本地盘符的 {label}：{path}");
+                    return null;
+                }
+
+                var drive = new DriveInfo(root);
+                if (drive.DriveType is not (DriveType.Fixed or DriveType.Removable))
+                {
+                    AppLogger.Warn($"已拒绝网络驱动器上的 {label}（{drive.DriveType}）：{path}");
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"无法校验 {label}，已忽略该自定义路径：{path}（{ex.Message}）");
+                return null;
+            }
+
+            return path;
         }
 
         public bool DetectSteamPath()
@@ -66,6 +114,22 @@ namespace SteamSwitcher.Core
 
             if (!string.IsNullOrEmpty(SteamPath) && Directory.Exists(SteamPath))
             {
+                // 注册表的 SteamExe 可能缺失，也可能指向 Steam 迁移前的旧位置。
+                // 只有确认 steam.exe 真实存在，后续的优雅关闭（-shutdown）
+                // 与 StartSteam 才不会静默失败。
+                if (string.IsNullOrEmpty(SteamExePath) || !File.Exists(SteamExePath))
+                {
+                    var derivedExe = Path.Combine(SteamPath, "steam.exe");
+                    if (File.Exists(derivedExe))
+                    {
+                        SteamExePath = derivedExe;
+                    }
+                    else
+                    {
+                        AppLogger.Warn($"Steam directory was found, but steam.exe is missing: {SteamPath}");
+                    }
+                }
+
                 AppLogger.Info($"Detected Steam path from registry: {SteamPath}");
                 return true;
             }
@@ -98,6 +162,57 @@ namespace SteamSwitcher.Core
         {
             if (string.IsNullOrWhiteSpace(SteamPath))
                 DetectSteamPath();
+
+            // Path-verified processes (safe for force-kill / window-hide).
+            var processes = GetSteamProcesses();
+            try
+            {
+                if (processes.Count > 0)
+                    return true;
+            }
+            finally
+            {
+                foreach (var process in processes)
+                    process.Dispose();
+            }
+
+            // Conservative fallback: any Steam-named process exists but its path
+            // could not be verified (SteamPath unknown, MainModule unreadable).
+            // Report Steam as running so callers skip account switches / VDF
+            // writes, but ForceKill/GetSteamProcesses still only target
+            // path-verified processes. This prevents killing unrelated
+            // same-named processes while still detecting a live Steam client.
+            return HasAnySteamNamedProcess();
+        }
+
+        private static bool HasAnySteamNamedProcess()
+        {
+            foreach (var processName in SteamProcessNames)
+            {
+                try
+                {
+                    var found = Process.GetProcessesByName(processName);
+                    var any = found.Length > 0;
+                    foreach (var process in found)
+                        process.Dispose();
+                    if (any)
+                        return true;
+                }
+                catch
+                {
+                    // Ignore enumeration errors; fall through to next name.
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 是否存在"可校验安装路径"的 Steam 进程——只有这类进程允许被强制结束。
+        /// 用于区分「Steam 还在跑但关不掉」与「压根识别不出可关闭的进程」，
+        /// 后者的报错必须给出可执行的指引，而不是笼统的"关闭失败"。
+        /// </summary>
+        public bool HasVerifiableSteamProcesses()
+        {
             var processes = GetSteamProcesses();
             try
             {
@@ -253,13 +368,29 @@ namespace SteamSwitcher.Core
 
         private bool IsProcessFromSteamInstallation(Process process)
         {
+            // Unknown Steam installation path: cannot verify any process.
+            // Exclude from force-kill / window-hide lists (conservative).
+            // IsSteamRunning uses HasAnySteamNamedProcess for the soft check.
             if (string.IsNullOrWhiteSpace(SteamPath))
+                return false;
+
+            string? executablePath;
+            try
+            {
+                executablePath = process.MainModule?.FileName;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Debug(
+                    $"MainModule is unreadable for {process.ProcessName}; excluding from verified Steam process list: {ex.Message}");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(executablePath))
                 return false;
 
             try
             {
-                var executablePath = process.MainModule?.FileName;
-                if (string.IsNullOrWhiteSpace(executablePath)) return false;
                 var steamRoot = Path.GetFullPath(SteamPath)
                     .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
                 var fullExecutablePath = Path.GetFullPath(executablePath);
@@ -267,37 +398,78 @@ namespace SteamSwitcher.Core
             }
             catch (Exception ex)
             {
-                AppLogger.Debug($"Ignored an unverifiable Steam-named process: {ex.Message}");
+                AppLogger.Debug(
+                    $"Could not verify Steam path for {process.ProcessName}; excluding from verified Steam process list: {ex.Message}");
                 return false;
             }
         }
 
         private async Task ForceKillSteamProcessesAsync()
         {
-            var processes = GetSteamProcesses();
-            try
+            const int maxRounds = 3;
+            for (var round = 0; round < maxRounds; round++)
             {
-                foreach (var process in processes)
-                {
-                    try
-                    {
-                        if (process.HasExited)
-                            continue;
+                var processes = GetSteamProcesses();
+                if (processes.Count == 0)
+                    return;
 
-                        AppLogger.Info($"Terminating Steam process tree: {process.ProcessName} ({process.Id})");
-                        process.Kill(entireProcessTree: true);
-                        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-                    }
-                    catch (Exception ex)
+                if (round > 0)
+                    AppLogger.Warn($"Force-kill round {round + 1}: {processes.Count} Steam process(es) still running.");
+
+                try
+                {
+                    foreach (var process in processes)
                     {
-                        AppLogger.Error($"Failed to terminate Steam process {process.Id}.", ex);
+                        try
+                        {
+                            if (process.HasExited)
+                                continue;
+
+                            AppLogger.Info($"Terminating Steam process tree: {process.ProcessName} ({process.Id})");
+                            process.Kill(entireProcessTree: true);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.Error($"Failed to terminate Steam process {SafeProcessId(process)}.", ex);
+                        }
+                    }
+
+                    foreach (var process in processes)
+                    {
+                        try
+                        {
+                            if (process.HasExited)
+                                continue;
+
+                            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                        }
+                        catch (TimeoutException)
+                        {
+                            AppLogger.Warn($"Steam process {SafeProcessId(process)} did not exit within the wait window.");
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.Warn($"Waiting for Steam process {SafeProcessId(process)} exit failed: {ex.Message}");
+                        }
                     }
                 }
+                finally
+                {
+                    foreach (var process in processes)
+                        process.Dispose();
+                }
             }
-            finally
+        }
+
+        private static string SafeProcessId(Process process)
+        {
+            try
             {
-                foreach (var process in processes)
-                    process.Dispose();
+                return process.Id.ToString();
+            }
+            catch
+            {
+                return "<unknown>";
             }
         }
 
@@ -406,12 +578,19 @@ namespace SteamSwitcher.Core
             {
                 return CustomLoginUsersPath;
             }
-            return Path.Combine(SteamPath ?? "", "config", "loginusers.vdf");
+
+            if (string.IsNullOrWhiteSpace(SteamPath))
+                return string.Empty;
+
+            return Path.Combine(SteamPath, "config", "loginusers.vdf");
         }
 
         public string GetAvatarCachePath()
         {
-            return Path.Combine(SteamPath ?? "", "config", "avatarcache");
+            if (string.IsNullOrWhiteSpace(SteamPath))
+                return string.Empty;
+
+            return Path.Combine(SteamPath, "config", "avatarcache");
         }
 
         public string GetConfigPath()

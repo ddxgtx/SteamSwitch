@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace SteamSwitcher.Models
 {
@@ -28,10 +29,10 @@ namespace SteamSwitcher.Models
         public string AccountDisplayName => string.IsNullOrWhiteSpace(PersonaName) ? AccountName : PersonaName;
         public string AppIdDisplay => AppId > 0 ? $" · App {AppId}" : string.Empty;
         public string SourceDisplay => IsDetected
-            ? "智能识别"
+            ? IsAvailable ? "智能识别" : "智能识别目录缺失 · 可恢复"
             : IsCustom
             ? IsAvailable ? "自定义目录" : "自定义目录不可用"
-            : "Steam userdata";
+            : IsAvailable ? "Steam userdata" : "目录缺失 · 可恢复";
         public string SizeDisplay => FormatSize(TotalSize);
         public string LastWriteDisplay => LastWriteTime == DateTime.MinValue ? "未知" : LastWriteTime.ToString("yyyy-MM-dd HH:mm");
         public string BackupDisplay => LastBackupTime.HasValue
@@ -71,6 +72,16 @@ namespace SteamSwitcher.Models
             ? $"{Size / 1024d:F1} KB"
             : $"{Size / 1024d / 1024d:F1} MB";
         public string DisplayName => $"{CreatedAt:yyyy-MM-dd HH:mm:ss} · {KindDisplay} · {SizeDisplay}";
+
+        public string GetExportFileName(string gameName)
+        {
+            var invalid = System.IO.Path.GetInvalidFileNameChars();
+            var safeName = string.Concat((gameName ?? string.Empty)
+                .Select(character => invalid.Contains(character) ? '_' : character)).Trim().TrimEnd('.');
+            if (safeName.Length == 0) safeName = "SteamSave";
+            if (safeName.Length > 100) safeName = safeName[..100];
+            return $"{safeName}-{CreatedAt:yyyyMMdd-HHmmss}.zip";
+        }
     }
 
     public class GameSaveChangeSummary
@@ -88,6 +99,15 @@ namespace SteamSwitcher.Models
                 : $"没有变化 · {Unchanged} 个文件与最新备份一致";
     }
 
+    public sealed record GameSaveImportPreview(
+        string GameName,
+        string AccountName,
+        string SourceSavePath,
+        string EntryId,
+        string ArchiveSha256,
+        bool MatchesTarget,
+        bool CanReassociate);
+
     internal class GameSaveBackupManifest
     {
         public int FormatVersion { get; set; } = 1;
@@ -98,6 +118,10 @@ namespace SteamSwitcher.Models
         public string AccountName { get; set; } = string.Empty;
         public int AppId { get; set; }
         public string GameName { get; set; } = string.Empty;
+        // Optional in format 3 for backwards compatibility. Discovery never trusts
+        // this path without checking it against the known game's detection rules.
+        public string SourceSavePath { get; set; } = string.Empty;
+        public bool IsDetected { get; set; }
         public DateTime CreatedAtUtc { get; set; }
         public bool IsSafetyBackup { get; set; }
         public string BackupMode { get; set; } = "full";

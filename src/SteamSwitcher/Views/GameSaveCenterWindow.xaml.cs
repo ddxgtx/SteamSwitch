@@ -29,8 +29,12 @@ namespace SteamSwitcher.Views
         private readonly CancellationTokenSource _lifetimeCts = new();
         private GameSaveBackupService? _backupService;
         private bool _isBusy;
+        private bool _synchronizingSettings;
         private bool _disposed;
         private int _changeAnalysisVersion;
+
+        public event EventHandler? CloseRequested;
+        public bool IsBusy => _isBusy;
 
         public GameSaveCenterWindow(MainViewModel mainViewModel)
         {
@@ -40,11 +44,7 @@ namespace SteamSwitcher.Views
             _entryView.Filter = FilterEntry;
             SaveList.ItemsSource = _entryView;
             BackupHistoryCombo.ItemsSource = _selectedBackups;
-            ManualRetentionCombo.ItemsSource = new[] { 3, 5, 10, 20, 50, 100 };
-            SafetyRetentionCombo.ItemsSource = new[] { 1, 3, 5, 10, 20, 50 };
-            ManualRetentionCombo.SelectedItem = _mainViewModel.GameSaveManualRetention;
-            SafetyRetentionCombo.SelectedItem = _mainViewModel.GameSaveSafetyRetention;
-            SyncAutoBackupInterval();
+            SyncSaveSettingsControls();
             _mainViewModel.GetSettings().CustomGameSaveFolders ??= new List<CustomGameSaveDefinition>();
             AccountFilter.Items.Add(AllAccounts);
             AccountFilter.SelectedIndex = 0;
@@ -72,6 +72,31 @@ namespace SteamSwitcher.Views
             }
             SetStatus($"已发现 {_entries.Count} 组账号存档 · 预览数据", false);
             SetActionButtonsEnabled(true);
+        }
+
+        public async Task ReloadSettingsAsync()
+        {
+            if (_disposed) return;
+            if (_isBusy)
+                throw new InvalidOperationException("存档操作正在进行，请等待操作完成后重新加载设置。");
+            SyncSaveSettingsControls();
+            await RefreshEntriesAsync();
+        }
+
+        private void SyncSaveSettingsControls()
+        {
+            _synchronizingSettings = true;
+            try
+            {
+                ManualRetentionCombo.ItemsSource = new[] { 1, 3, 5, 10, 20, 50, 100, _mainViewModel.GameSaveManualRetention }
+                    .Distinct().OrderBy(value => value).ToList();
+                SafetyRetentionCombo.ItemsSource = new[] { 1, 3, 5, 10, 20, 50, _mainViewModel.GameSaveSafetyRetention }
+                    .Distinct().OrderBy(value => value).ToList();
+                ManualRetentionCombo.SelectedItem = _mainViewModel.GameSaveManualRetention;
+                SafetyRetentionCombo.SelectedItem = _mainViewModel.GameSaveSafetyRetention;
+                SyncAutoBackupInterval();
+            }
+            finally { _synchronizingSettings = false; }
         }
 
         private async Task RefreshEntriesAsync()
@@ -123,7 +148,13 @@ namespace SteamSwitcher.Views
                     return;
                 }
             }
-            AutoBackupIntervalCombo.SelectedIndex = 1;
+            var customInterval = new ComboBoxItem
+            {
+                Content = $"每 {_mainViewModel.GameSavePeriodicIntervalMinutes} 分钟",
+                Tag = _mainViewModel.GameSavePeriodicIntervalMinutes.ToString()
+            };
+            AutoBackupIntervalCombo.Items.Add(customInterval);
+            AutoBackupIntervalCombo.SelectedItem = customInterval;
         }
 
         private void AutoBackup_Changed(object sender, RoutedEventArgs e)
@@ -140,6 +171,7 @@ namespace SteamSwitcher.Views
 
         private void AutoBackupInterval_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_synchronizingSettings) return;
             if (AutoBackupIntervalCombo?.SelectedItem is ComboBoxItem { Tag: string tag } &&
                 int.TryParse(tag, out var minutes))
                 _mainViewModel.GameSavePeriodicIntervalMinutes = minutes;
@@ -157,8 +189,8 @@ namespace SteamSwitcher.Views
                 return;
 
             var settings = _mainViewModel.GetSettings();
-            var normalizedPath = Path.GetFullPath(dialog.Definition.FolderPath).TrimEnd(Path.DirectorySeparatorChar);
-            var rootPath = Path.GetPathRoot(normalizedPath)?.TrimEnd(Path.DirectorySeparatorChar);
+            var normalizedPath = NormalizeDirectoryPath(dialog.Definition.FolderPath);
+            var rootPath = Path.GetPathRoot(normalizedPath);
             var backupRoot = _backupService?.BackupRoot.TrimEnd(Path.DirectorySeparatorChar);
             if (string.IsNullOrWhiteSpace(rootPath) ||
                 string.Equals(normalizedPath, rootPath, StringComparison.OrdinalIgnoreCase) ||
@@ -177,7 +209,7 @@ namespace SteamSwitcher.Views
             }
 
             settings.CustomGameSaveFolders.Add(dialog.Definition);
-            SettingsService.Save(settings);
+            _mainViewModel.SaveSettingsNow();
             await RefreshEntriesAsync();
             SetStatus($"已添加自定义存档目录：{dialog.Definition.GameName}", false);
         }
@@ -195,7 +227,7 @@ namespace SteamSwitcher.Views
             var settings = _mainViewModel.GetSettings();
             settings.CustomGameSaveFolders.RemoveAll(item =>
                 string.Equals(item.Id, entry.CustomId, StringComparison.Ordinal));
-            SettingsService.Save(settings);
+            _mainViewModel.SaveSettingsNow();
             await RefreshEntriesAsync();
             SetStatus($"已移除自定义存档目录：{entry.GameName}", false);
         }
@@ -328,6 +360,27 @@ namespace SteamSwitcher.Views
             });
         }
 
+        private async void PruneBackups_Click(object sender, RoutedEventArgs e)
+        {
+            var backupService = _backupService;
+            if (_isBusy || backupService == null || _entries.Count == 0) return;
+            var confirm = MessageBox.Show(Window.GetWindow(this),
+                "将按当前保留策略删除超出数量的旧备份，是否继续？",
+                "清理旧备份", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            await RunBusyAsync("正在清理旧备份…", async token =>
+            {
+                // 先做快照：_entries 绑定在 UI 上，用户此刻切筛选会触发
+                // 集合刷新，直接把集合交给后台线程会撞上「集合已修改」。
+                var snapshot = _entries.ToList();
+                var removed = await Task.Run(() => snapshot.Sum(entry => backupService.PruneBackupsForEntry(entry)), token);
+                foreach (var entry in snapshot)
+                    await RefreshEntryBackupStateAsync(entry);
+                SetStatus(removed > 0 ? $"已清理 {removed} 份超出保留策略的旧备份。" : "没有需要清理的旧备份。", false);
+            });
+        }
+
         private async void ExportBackup_Click(object sender, RoutedEventArgs e)
         {
             if (SaveList.SelectedItem is not GameSaveEntry entry ||
@@ -335,20 +388,29 @@ namespace SteamSwitcher.Views
                 _backupService == null)
                 return;
 
-            var dialog = new SaveFileDialog
+            if (!_mainViewModel.CanExportBackup)
             {
-                Title = "导出存档备份",
-                Filter = "SteamSwitch 存档备份 (*.zip)|*.zip",
-                FileName = $"{entry.GameName}-{backup.DisplayName}.zip",
-                AddExtension = true,
-                DefaultExt = ".zip"
-            };
-            if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+                SetStatus("请等待当前备份或账号操作完成后再导出。", false);
+                return;
+            }
 
             await RunBusyAsync("正在校验并导出备份…", async token =>
             {
-                await _backupService.ExportBackupAsync(entry, backup.FilePath, dialog.FileName, token);
-                SetStatus($"备份已导出：{dialog.FileName}", false);
+                var path = await _mainViewModel.ExportBackupAsync(BackupExportKind.GameSaves,
+                    backup.GetExportFileName(entry.GameName), destination => _backupService.ExportBackupAsync(entry, backup.FilePath, destination, token),
+                    suggested =>
+                    {
+                        var dialog = new SaveFileDialog
+                        {
+                            Title = "导出存档备份", Filter = "SteamSwitch 存档备份 (*.zip)|*.zip",
+                            FileName = Path.GetFileName(suggested), AddExtension = true, DefaultExt = ".zip",
+                            InitialDirectory = BackupExportService.GetInitialDirectory(suggested)
+                        };
+                        return dialog.ShowDialog(Window.GetWindow(this)) == true ? dialog.FileName : null;
+                    },
+                    // 导出到备份仓库里会被当成一个可恢复版本列出，还可能被清理规则删掉。
+                    _backupService.BackupRoot);
+                SetStatus(path == null ? "已取消导出" : $"备份已导出：{path}", false);
             });
         }
 
@@ -368,15 +430,37 @@ namespace SteamSwitcher.Views
 
             await RunBusyAsync("正在校验并导入备份…", async token =>
             {
-                var imported = await _backupService.ImportBackupAsync(entry, dialog.FileName, token);
+                var preview = await _backupService.GetImportPreviewAsync(entry, dialog.FileName, token);
+                string imported;
+                if (preview.MatchesTarget)
+                    imported = await _backupService.ImportBackupAsync(entry, dialog.FileName, token);
+                else
+                {
+                    if (!preview.CanReassociate)
+                        throw new InvalidDataException("备份所属存档不匹配。请为迁移的自定义存档先添加目标目录，再导入并确认重新关联。");
+                    var confirmation = MessageBox.Show(Window.GetWindow(this),
+                        "这份备份属于另一项自定义存档。是否将其重新关联到当前目录？\n\n" +
+                        $"原游戏：{preview.GameName}\n原账号：{preview.AccountName}\n原位置：{preview.SourceSavePath}\n\n" +
+                        $"目标游戏：{entry.GameName}\n目标账号：{entry.AccountDisplayName}\n恢复位置：{entry.SavePath}\n\n" +
+                        "导入完成后，可点击“恢复所选备份”写入目标目录。",
+                        "确认迁移并重新关联存档", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                    if (confirmation != MessageBoxResult.Yes)
+                    {
+                        SetStatus("已取消存档重新关联。", false);
+                        return;
+                    }
+                    imported = await _backupService.ImportReassociatedCustomBackupAsync(
+                        entry, dialog.FileName, preview.ArchiveSha256, token);
+                }
                 LoadBackupHistory(entry, imported);
                 entry.BackupCount = _selectedBackups.Count;
                 entry.LastBackupTime = _selectedBackups.FirstOrDefault()?.CreatedAt;
+                UpdateSelectionDetails(entry);
                 SetStatus("完整备份已安全导入。", false);
             });
         }
 
-        private void DeleteBackup_Click(object sender, RoutedEventArgs e)
+        private async void DeleteBackup_Click(object sender, RoutedEventArgs e)
         {
             if (SaveList.SelectedItem is not GameSaveEntry entry ||
                 BackupHistoryCombo.SelectedItem is not GameSaveBackupInfo backup ||
@@ -389,26 +473,25 @@ namespace SteamSwitcher.Views
             if (result != MessageBoxResult.Yes)
                 return;
 
-            try
+            // 必须走忙碌态：否则删除期间按钮仍可点，重复点击会让第二次
+            // File.Delete 抛 FileNotFoundException 并弹出误导性的错误框。
+            // 错误提示与按钮恢复由 RunBusyAsync 统一处理。
+            await RunBusyAsync("正在删除备份…", async cancellationToken =>
             {
-                _backupService.DeleteBackup(entry, backup.FilePath);
+                // Off the UI thread: DeleteBackup blocks on the per-entry IO gate.
+                await Task.Run(() => _backupService.DeleteBackup(entry, backup.FilePath), cancellationToken);
                 LoadBackupHistory(entry);
                 entry.BackupCount = _selectedBackups.Count;
                 entry.LastBackupTime = _selectedBackups.FirstOrDefault()?.CreatedAt;
                 UpdateSelectionDetails(entry);
                 _entryView.Refresh();
-                SetActionButtonsEnabled(true);
                 SetStatus("所选备份已删除。", false);
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("Unable to delete game save backup.", ex);
-                MessageBox.Show(Window.GetWindow(this), ex.Message, "删除备份失败", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            });
         }
 
         private void RetentionCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
+            if (_synchronizingSettings) return;
             if (ManualRetentionCombo.SelectedItem is not int manual || SafetyRetentionCombo.SelectedItem is not int safety)
                 return;
             _mainViewModel.GameSaveManualRetention = manual;
@@ -443,10 +526,15 @@ namespace SteamSwitcher.Views
         {
             var state = await Task.Run(() =>
             {
+                // 目录可能刚好被还原/删除，或含无权限子目录：这里只是刷新显示，
+                // 抛异常会把「还原成功」的结果盖成「操作失败」。
+                if (string.IsNullOrWhiteSpace(entry.SavePath) || !Directory.Exists(entry.SavePath))
+                    return new { Count = 0, Size = 0L, LastWrite = DateTime.MinValue };
+
                 var files = Directory.EnumerateFiles(entry.SavePath, "*", new EnumerationOptions
                     {
                         RecurseSubdirectories = true,
-                        IgnoreInaccessible = false,
+                        IgnoreInaccessible = true,
                         AttributesToSkip = FileAttributes.ReparsePoint
                     })
                     .Select(path => new FileInfo(path))
@@ -461,6 +549,11 @@ namespace SteamSwitcher.Views
             entry.FileCount = state.Count;
             entry.TotalSize = state.Size;
             entry.LastWriteTime = state.LastWrite;
+            // 刷新可用性：还原一个「目录缺失」的存档后若仍留着 IsAvailable=false，
+            // 条目会继续显示“目录缺失 · 可恢复”，且依赖 IsAvailable 的
+            // 「备份所选」按钮会一直保持禁用。
+            entry.IsAvailable = state.Count > 0;
+            _entryView.Refresh();
             await RefreshEntryBackupStateAsync(entry);
             UpdateSelectionDetails(entry);
         }
@@ -513,8 +606,8 @@ namespace SteamSwitcher.Views
         {
             if (SaveList.SelectedItem is GameSaveEntry entry)
             {
-                UpdateSelectionDetails(entry);
                 LoadBackupHistory(entry);
+                UpdateSelectionDetails(entry);
                 _ = AnalyzeSelectedEntryAsync(entry);
             }
             else
@@ -524,6 +617,8 @@ namespace SteamSwitcher.Views
 
         private void UpdateSelectionDetails(GameSaveEntry entry)
         {
+            DetailEmptyHint.Visibility = Visibility.Collapsed;
+            DetailContent.Visibility = Visibility.Visible;
             SelectedGameText.Text = entry.GameName;
             SelectedAccountText.Text = entry.IsDetected
                 ? $"{entry.AccountDisplayName} · 智能识别 · {entry.DetectionRule}"
@@ -533,7 +628,10 @@ namespace SteamSwitcher.Views
             FileCountText.Text = $"{entry.FileCount} 个";
             TotalSizeText.Text = entry.SizeDisplay;
             LastWriteText.Text = entry.LastWriteDisplay;
-            BackupCountText.Text = entry.BackupDisplay;
+            var backupBytes = _selectedBackups.Sum(backup => backup.Size);
+            BackupCountText.Text = entry.BackupCount == 0
+                ? "暂无备份"
+                : $"{entry.BackupCount} 份 · {FormatStorageSize(backupBytes)}";
             SavePathText.Text = entry.SavePath;
             SelectedGameIcon.Source = LoadGameIcon(entry.IconPath);
             SelectedGameIcon.Visibility = SelectedGameIcon.Source == null ? Visibility.Collapsed : Visibility.Visible;
@@ -586,6 +684,8 @@ namespace SteamSwitcher.Views
         private void ClearSelectionDetails()
         {
             SelectedGameText.Text = "请选择一个存档";
+            DetailContent.Visibility = Visibility.Collapsed;
+            DetailEmptyHint.Visibility = Visibility.Visible;
             SelectedAccountText.Text = "—";
             FileCountText.Text = "—";
             TotalSizeText.Text = "—";
@@ -598,6 +698,14 @@ namespace SteamSwitcher.Views
             SelectedGameFallbackIcon.Visibility = Visibility.Visible;
             _changeAnalysisVersion++;
             _selectedBackups.Clear();
+        }
+
+        private static string FormatStorageSize(long bytes)
+        {
+            if (bytes < 1024) return $"{bytes} B";
+            if (bytes < 1024 * 1024) return $"{bytes / 1024d:0.0} KB";
+            if (bytes < 1024L * 1024 * 1024) return $"{bytes / 1024d / 1024d:0.0} MB";
+            return $"{bytes / 1024d / 1024d / 1024d:0.00} GB";
         }
 
         private static BitmapImage? LoadGameIcon(string? path)
@@ -661,15 +769,22 @@ namespace SteamSwitcher.Views
         {
             try
             {
-                return string.Equals(
-                    Path.GetFullPath(Environment.ExpandEnvironmentVariables(candidate)).TrimEnd(Path.DirectorySeparatorChar),
-                    normalizedPath,
+                return string.Equals(NormalizeDirectoryPath(candidate), normalizedPath,
                     StringComparison.OrdinalIgnoreCase);
             }
             catch
             {
                 return false;
             }
+        }
+
+        private static string NormalizeDirectoryPath(string path)
+        {
+            var fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()));
+            var root = Path.GetPathRoot(fullPath);
+            return string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase)
+                ? fullPath
+                : fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
         private void SetStatus(string text, bool busy)
@@ -680,6 +795,7 @@ namespace SteamSwitcher.Views
 
         private void Close_Click(object sender, RoutedEventArgs e)
         {
+            CloseRequested?.Invoke(this, EventArgs.Empty);
         }
 
         private void OpenLog_Click(object sender, RoutedEventArgs e)
@@ -742,7 +858,13 @@ namespace SteamSwitcher.Views
             if (_disposed) return;
             _disposed = true;
             _changeAnalysisVersion++;
-            _lifetimeCts.Cancel();
+            try
+            {
+                // 只取消、不立刻 Dispose：还在跑的后台任务会继续用这个 token，
+                // 提前释放会让它们抛 ObjectDisposedException 并被报成操作失败。
+                _lifetimeCts.Cancel();
+            }
+            catch (ObjectDisposedException) { }
             GC.SuppressFinalize(this);
         }
 

@@ -39,7 +39,17 @@ namespace SteamSwitcher.Core
         int Skipped,
         int Failed,
         int Unavailable,
-        DateTime CompletedAt);
+        DateTime CompletedAt)
+    {
+        public bool HasUsableBackup => Created + Skipped > 0;
+        public int Total => Created + Skipped + Failed + Unavailable;
+        /// <summary>
+        /// 本轮是否真的存在可备份的候选。false 表示根本没找到存档目录
+        /// （纯云存档，或存档位于未识别的位置）。
+        /// </summary>
+        public bool HasWork => Total > 0;
+        public bool IsComplete => HasUsableBackup && Failed == 0 && Unavailable == 0;
+    }
 
     public sealed class GameSaveAutoBackupService : IDisposable
     {
@@ -47,6 +57,9 @@ namespace SteamSwitcher.Core
         private readonly Func<AppSettings> _settingsProvider;
         private readonly SteamExitTrigger _exitTrigger = new();
         private readonly SemaphoreSlim _backupGate = new(1, 1);
+        // Independent of the monitor lifetime: a switch-time backup must not be
+        // cancelled just because monitoring was stopped/disposed mid-switch.
+        private readonly CancellationTokenSource _switchBackupCts = new();
         private CancellationTokenSource? _monitorCts;
         private Task? _monitorTask;
         private DateTime _lastBackupUtc = DateTime.MinValue;
@@ -76,7 +89,7 @@ namespace SteamSwitcher.Core
 
         public Task BackupBeforeAccountSwitchAsync(SteamAccount? currentAccount) =>
             Enabled && _settingsProvider().GameSaveAutoBackupEnabled
-                ? BackupCurrentAccountAsync(currentAccount?.SteamId, force: true, _monitorCts?.Token ?? CancellationToken.None)
+                ? BackupCurrentAccountAsync(currentAccount?.SteamId, force: true, _switchBackupCts.Token)
                 : Task.CompletedTask;
 
         public async Task<GameSaveAutoBackupResult> BackupGameAsync(
@@ -86,17 +99,26 @@ namespace SteamSwitcher.Core
             CancellationToken cancellationToken = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            await _backupGate.WaitAsync(cancellationToken);
+            // 与强制备份一致加超时：UI 上可能正在恢复同一个 EntryId 的大存档
+            // （共享静态 IoGates），无限等待会让启动流程长时间挂起且不给提示。
+            var acquired = await _backupGate.WaitAsync(TimeSpan.FromMinutes(2), cancellationToken);
+            if (!acquired)
+            {
+                AppLogger.Error(
+                    "Game save launch-workflow backup timed out waiting for the backup gate; " +
+                    "proceeding without this backup so the game can launch.");
+                return new GameSaveAutoBackupResult(0, 0, 0, 0, DateTime.Now);
+            }
             try
             {
                 var (service, entries) = await DiscoverEntriesAsync(cancellationToken);
-                var selected = entries.Where(entry => entry.IsAvailable &&
-                    (entry.IsDetected
+                var selected = entries.Where(entry =>
+                    entry.IsDetected
                         ? entry.AppId == appId
                         : entry.IsCustom
                             ? string.Equals(entry.GameName, gameName, StringComparison.CurrentCultureIgnoreCase) &&
                               (entry.SteamId == "custom" || string.Equals(entry.SteamId, steamId, StringComparison.Ordinal))
-                            : entry.AppId == appId && string.Equals(entry.SteamId, steamId, StringComparison.Ordinal)))
+                            : entry.AppId == appId && string.Equals(entry.SteamId, steamId, StringComparison.Ordinal))
                     .ToList();
                 return await BackupEntriesAsync(service, selected, "Launch workflow backup", cancellationToken);
             }
@@ -187,10 +209,12 @@ namespace SteamSwitcher.Core
                         var intervalMinutes = Math.Clamp(settings.GameSavePeriodicIntervalMinutes, 1, 1440);
                         if (DateTime.UtcNow - _lastPeriodicBackupUtc >= TimeSpan.FromMinutes(intervalMinutes))
                         {
-                            _lastPeriodicBackupUtc = DateTime.UtcNow;
                             try
                             {
-                                await BackupPeriodicAsync(_accountManager.CurrentAccount?.SteamId, cancellationToken);
+                                // 备份真的跑过才记账：先更新时间戳会让本轮失败被
+                                // 静默跳过，下一次真正尝试要等一整个间隔。
+                                if (await BackupPeriodicAsync(_accountManager.CurrentAccount?.SteamId, cancellationToken))
+                                    _lastPeriodicBackupUtc = DateTime.UtcNow;
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                             {
@@ -213,15 +237,16 @@ namespace SteamSwitcher.Core
             }
         }
 
-        private async Task BackupPeriodicAsync(string? steamId, CancellationToken cancellationToken)
+        /// <returns>本轮是否真的执行了一次备份（false 表示被跳过）。</returns>
+        private async Task<bool> BackupPeriodicAsync(string? steamId, CancellationToken cancellationToken)
         {
-            if (!_enabled || _disposed) return;
-            if (!await _backupGate.WaitAsync(0, cancellationToken)) return;
+            if (!_enabled || _disposed) return false;
+            if (!await _backupGate.WaitAsync(0, cancellationToken)) return false;
 
             try
             {
                 var steamService = _accountManager.GetSteamService();
-                if (string.IsNullOrWhiteSpace(steamService.SteamPath)) return;
+                if (string.IsNullOrWhiteSpace(steamService.SteamPath)) return false;
 
                 var (service, entries) = await DiscoverEntriesAsync(cancellationToken);
                 var selected = entries.Where(entry =>
@@ -233,6 +258,7 @@ namespace SteamSwitcher.Core
 
                 var resultSummary = await BackupEntriesAsync(service, selected, "Periodic backup", cancellationToken);
                 BackupCompleted?.Invoke(this, resultSummary);
+                return true;
             }
             finally
             {
@@ -244,7 +270,21 @@ namespace SteamSwitcher.Core
         {
             if (!_enabled || _disposed) return;
             if (!force && DateTime.UtcNow - _lastBackupUtc < TimeSpan.FromSeconds(15)) return;
-            if (!await _backupGate.WaitAsync(0, cancellationToken)) return;
+            if (force)
+            {
+                // Force backups run on the account-switch path and hold
+                // AccountManager._switchGate. If a periodic backup is stuck
+                // holding the gate, waiting forever would block the switch
+                // indefinitely. Cap the wait and proceed without this backup.
+                if (!await _backupGate.WaitAsync(TimeSpan.FromMinutes(2), cancellationToken))
+                {
+                    AppLogger.Error(
+                        "Game save force backup timed out waiting for the backup gate; " +
+                        "proceeding without this backup so the account switch is not blocked.");
+                    return;
+                }
+            }
+            else if (!await _backupGate.WaitAsync(0, cancellationToken)) return;
 
             try
             {
@@ -261,8 +301,12 @@ namespace SteamSwitcher.Core
                             : string.Equals(entry.SteamId, steamId, StringComparison.Ordinal)))
                     .ToList();
 
-                _lastBackupUtc = DateTime.UtcNow;
                 var resultSummary = await BackupEntriesAsync(service, selected, "Auto-backup", cancellationToken);
+                // 备份真的落盘了才占用去抖窗口：先记账会让本轮失败被静默跳过，
+                // 下一次真实尝试要再等 15 秒（Steam 刚退出、Steam Cloud 仍在写
+                // 导致全部 requireExclusiveAccess 失败时最容易踩到）。
+                if (resultSummary.Created + resultSummary.Skipped > 0)
+                    _lastBackupUtc = DateTime.UtcNow;
                 BackupCompleted?.Invoke(this, resultSummary);
             }
             finally
@@ -338,6 +382,8 @@ namespace SteamSwitcher.Core
             if (_disposed) return;
             _disposed = true;
             _enabled = false;
+            try { _switchBackupCts.Cancel(); }
+            catch (ObjectDisposedException) { }
             StopMonitor();
             GC.SuppressFinalize(this);
         }

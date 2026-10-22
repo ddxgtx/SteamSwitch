@@ -1,6 +1,7 @@
 <Window x:Class="SteamSwitcher.Views.TaskbarBandWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:SteamSwitcher.Controls"
         Title="Steam Switch Taskbar"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -8,108 +9,108 @@
         ShowInTaskbar="False"
         Topmost="True"
         ResizeMode="NoResize"
-        SizeToContent="WidthAndHeight"
+        Width="220"
+        Height="42"
+        SizeToContent="Manual"
         FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI, sans-serif"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display"
-        TextOptions.TextRenderingMode="ClearType"
+        TextOptions.TextRenderingMode="Grayscale"
         TextOptions.TextHintingMode="Fixed">
 
+    <!-- SizeToContent 必须是 Manual：WidthAndHeight 会让 WPF 在每次内容测量后自动
+         调整窗口尺寸，而歌词每句都在变——歌词岛于是被反复 resize。AllowsTransparency
+         的 layered 窗口每 resize 一次就整窗重绘一次，看上去就是"整个窗口在闪"。
+         窗口尺寸改由 ApplyLayout() 显式管理。 -->
+
     <Window.Resources>
+        <Style TargetType="ToolTip">
+            <Setter Property="Foreground" Value="{DynamicResource FloatingTextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource FloatingSolidBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource FloatingBorderBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="12" Padding="{TemplateBinding Padding}" Margin="6">
+                            <Border.Effect><DropShadowEffect Color="#171C32" BlurRadius="12" ShadowDepth="2" Opacity="0.16"/></Border.Effect>
+                            <ContentPresenter/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="MediaControlButton" TargetType="Button">
-            <Setter Property="Width" Value="28"/>
-            <Setter Property="Height" Value="28"/>
-            <Setter Property="Margin" Value="1,0"/>
+            <Setter Property="Width" Value="26"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Margin" Value="2,0"/>
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Foreground" Value="#E0FFFFFF"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassTextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource FloatingButtonBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource FloatingBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0.5"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="MediaButtonBorder" Background="{TemplateBinding Background}" CornerRadius="14">
+                        <Border x:Name="Surface" CornerRadius="13" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="MediaButtonBorder" Property="Background" Value="#38FFFFFF"/>
-                                <Setter Property="Foreground" Value="#00F0FF"/>
+                                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource FloatingHoverBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource GlassAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource FloatingAccentBrush}"/>
+                                <Setter TargetName="Surface" Property="BorderThickness" Value="2"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="MediaButtonBorder" Property="Background" Value="#65FFFFFF"/>
-                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource FloatingPressedBrush}"/>
                             </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.3"/>
-                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-
         <Style x:Key="PlayPauseControlButton" TargetType="Button" BasedOn="{StaticResource MediaControlButton}">
-            <Setter Property="Width" Value="30"/>
-            <Setter Property="Height" Value="30"/>
+            <Setter Property="Foreground" Value="{DynamicResource GlassAccentBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource FloatingHoverBrush}"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Foreground" Value="#FFFFFF"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="PlayButtonBorder" Background="#28FFFFFF" BorderBrush="#40FFFFFF" BorderThickness="1" CornerRadius="15">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="PlayButtonBorder" Property="Background" Value="#4500D2FF"/>
-                                <Setter TargetName="PlayButtonBorder" Property="BorderBrush" Value="#8000E5FF"/>
-                                <Setter Property="Foreground" Value="#FFFFFF"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="PlayButtonBorder" Property="Background" Value="#700A84FF"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
         </Style>
     </Window.Resources>
 
-    <Grid>
+    <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Right" VerticalAlignment="Center">
+    <Grid x:Name="BandContent" Width="220" Height="42">
         <Border x:Name="GlassBorder"
                 Background="Transparent"
                 BorderThickness="1"
                 ClipToBounds="True">
-            <Border.Effect>
-                <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="2" Opacity="0.2"/>
-            </Border.Effect>
 
             <DockPanel x:Name="ContentPanel" LastChildFill="False">
                 <!-- 左侧：独立歌词岛 (无边框直接融入任务栏，放大字号与封面) -->
-                <Border DockPanel.Dock="Left"
+                <controls:RoundedClipBorder DockPanel.Dock="Left"
                         x:Name="LyricsHost"
                         Height="40"
                         Margin="0,0,14,0"
-                        BorderBrush="#55FFFFFF"
+                        BorderBrush="{DynamicResource CompactBorderBrush}"
                         BorderThickness="1"
-                        CornerRadius="13"
+                        CornerRadius="18"
                         Visibility="Collapsed"
                         Cursor="Hand"
                         AutomationProperties.Name="任务栏歌词与媒体控制"
                         MouseEnter="LyricsHost_MouseEnter"
                         MouseLeave="LyricsHost_MouseLeave"
                         MouseLeftButtonUp="LyricsHost_MouseLeftButtonUp"
-                        PreviewMouseWheel="LyricsHost_PreviewMouseWheel">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#A90A1320" Offset="0"/>
-                            <GradientStop Color="#B20F1B2B" Offset="1"/>
-                        </LinearGradientBrush>
-                    </Border.Background>
-                    <Grid Margin="8,0,7,0" ClipToBounds="True">
+                        PreviewMouseWheel="LyricsHost_PreviewMouseWheel" Background="{DynamicResource CompactSurfaceBrush}">
+                    <Grid>
+                        <Grid Margin="8,0,7,0" ClipToBounds="True">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
@@ -117,49 +118,52 @@
 
                         <!-- 左侧/中间：放大双行歌词（右对齐，第一排歌词 + 第二排翻译）与悬停控制器 -->
                         <Grid Grid.Column="0" VerticalAlignment="Center">
-                            <StackPanel x:Name="LyricsTextPanel" HorizontalAlignment="Right" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
-                                <StackPanel.RenderTransform><TranslateTransform x:Name="LyricsTranslate" Y="0"/></StackPanel.RenderTransform>
-                                <!-- 第一排：14px 半粗体主歌词，清晰突出但不过度拥挤 -->
-                                <TextBlock x:Name="LyricText" Text="等待媒体播放" Foreground="#FFFFFF" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Right" TextAlignment="Right" TextTrimming="CharacterEllipsis">
+                            <StackPanel x:Name="LyricsTextPanel" HorizontalAlignment="Stretch" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                                <StackPanel.CacheMode><BitmapCache EnableClearType="False"/></StackPanel.CacheMode>
+                                <StackPanel.RenderTransform>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="LyricsTextScale" ScaleX="1" ScaleY="1"/>
+                                        <TranslateTransform x:Name="LyricsTranslate" Y="0"/>
+                                    </TransformGroup>
+                                </StackPanel.RenderTransform>
+                                <!-- 文字配色由玻璃 / 透明背景模式选择，保持清晰对比。 -->
+                                <TextBlock x:Name="LyricText" Foreground="{DynamicResource CompactTextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Stretch" TextAlignment="Right" TextTrimming="CharacterEllipsis">
                                     <TextBlock.Effect>
                                         <DropShadowEffect Color="#000000" BlurRadius="6" ShadowDepth="1" Opacity="0.65"/>
                                     </TextBlock.Effect>
                                 </TextBlock>
-                                <!-- 第二排：增大歌手、专辑、翻译或下一句的信息层级 -->
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,1,0,0">
-                                    <TextBlock x:Name="MediaIcon" Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" Foreground="#B8DDFF" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0">
+                                <!-- 有限宽度让长翻译正确省略，不再由水平 StackPanel 无限测量。 -->
+                                <Grid HorizontalAlignment="Right" Margin="0,1,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <!-- 固定占位 14px：用不透明度而非可见性隐藏，避免
+                                         切歌时图标出现/消失让副行文字左右跳一格 -->
+                                    <TextBlock x:Name="MediaIcon" Width="14" Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource CompactTextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0">
                                         <TextBlock.Effect>
                                             <DropShadowEffect Color="#000000" BlurRadius="4" ShadowDepth="1" Opacity="0.5"/>
                                         </TextBlock.Effect>
                                     </TextBlock>
-                                    <TextBlock x:Name="MediaText" Text="打开播放器后将在此显示歌词" Foreground="#E8F3FF" FontSize="11.5" FontWeight="Medium" HorizontalAlignment="Right" TextAlignment="Right" TextTrimming="CharacterEllipsis">
+                                    <TextBlock x:Name="MediaText" Grid.Column="1" Foreground="{DynamicResource CompactTextSecondaryBrush}" FontSize="12" FontWeight="Medium" HorizontalAlignment="Stretch" TextAlignment="Right" TextTrimming="CharacterEllipsis">
                                         <TextBlock.Effect>
-                                            <DropShadowEffect Color="#000000" BlurRadius="5" ShadowDepth="1" Opacity="0.55"/>
+                                            <DropShadowEffect Color="#000000" BlurRadius="5" ShadowDepth="1" Opacity="0.2"/>
                                         </TextBlock.Effect>
                                     </TextBlock>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
 
-                            <!-- 框内悬停磨砂亚克力媒体控制器 (上一首、播放/暂停、下一首 - 去除停止按键) -->
-                            <Border x:Name="LyricsControlsGlass" HorizontalAlignment="Right" VerticalAlignment="Center" CornerRadius="16" Padding="4,2" BorderThickness="1" Opacity="0" IsHitTestVisible="False">
-                                <Border.Background>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                        <GradientStop Color="#F40E1624" Offset="0"/>
-                                        <GradientStop Color="#E818273D" Offset="1"/>
-                                    </LinearGradientBrush>
-                                </Border.Background>
-                                <Border.BorderBrush>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                        <GradientStop Color="#75FFFFFF" Offset="0"/>
-                                        <GradientStop Color="#20FFFFFF" Offset="1"/>
-                                    </LinearGradientBrush>
-                                </Border.BorderBrush>
+                            <!-- Lyricify 式悬浮控制条：同一块液态玻璃材质，浮在上层
+                                 （ZIndex 高于歌词），歌词横向让位而不是被抹掉。 -->
+                            <Border x:Name="LyricsControlsGlass" HorizontalAlignment="Right" VerticalAlignment="Center" CornerRadius="18" Padding="4" BorderThickness="1" Opacity="0" IsHitTestVisible="False" RenderTransformOrigin="1,0.5" Panel.ZIndex="3">
+                                <Border.CacheMode><BitmapCache EnableClearType="False"/></Border.CacheMode>
+                                <Border.Background><DynamicResource ResourceKey="FloatingSurfaceBrush"/></Border.Background><Border.BorderBrush><DynamicResource ResourceKey="FloatingBorderBrush"/></Border.BorderBrush>
                                 <Border.RenderTransform>
-                                    <TranslateTransform x:Name="LyricsControlsTranslate" X="6"/>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="LyricsControlsScale" ScaleX="1" ScaleY="1"/>
+                                        <TranslateTransform x:Name="LyricsControlsTranslate" X="6"/>
+                                    </TransformGroup>
                                 </Border.RenderTransform>
-                                <Border.Effect>
-                                    <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="2" Opacity="0.55"/>
-                                </Border.Effect>
                                 <StackPanel x:Name="LyricsControls" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button x:Name="PrevButton" Content="&#xE892;" Click="PreviousTrack_Click" ToolTip="上一首" Style="{StaticResource MediaControlButton}" AutomationProperties.Name="上一首"/>
                                     <Button x:Name="PlayPauseButton" Content="&#xE768;" Click="PlayPause_Click" ToolTip="播放 / 暂停" Style="{StaticResource PlayPauseControlButton}" AutomationProperties.Name="播放或暂停"/>
@@ -173,95 +177,83 @@
                             <Grid.RenderTransform>
                                 <ScaleTransform x:Name="ArtworkScale" ScaleX="1" ScaleY="1"/>
                             </Grid.RenderTransform>
-                            <Border x:Name="ArtworkBorder" Width="36" Height="36" CornerRadius="8" BorderBrush="#35FFFFFF" BorderThickness="1" ClipToBounds="True">
-                                <Border.Background>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                        <GradientStop Color="#30FFFFFF" Offset="0"/>
-                                        <GradientStop Color="#18FFFFFF" Offset="1"/>
-                                    </LinearGradientBrush>
-                                </Border.Background>
+                            <Border x:Name="ArtworkBorder" Width="36" Height="36" CornerRadius="8" BorderBrush="{DynamicResource CompactBorderBrush}" BorderThickness="1" ClipToBounds="True" Background="{DynamicResource CompactSurfaceBrush}">
                                 <Border.Effect>
-                                    <DropShadowEffect Color="#000000" BlurRadius="8" ShadowDepth="1.5" Opacity="0.38"/>
+                                    <DropShadowEffect Color="#000000" BlurRadius="8" ShadowDepth="1.5" Opacity="0.2"/>
                                 </Border.Effect>
                                 <Grid>
-                                    <TextBlock x:Name="ArtworkFallback" Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" Foreground="#DFFFFFFF" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="ArtworkFallback" Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource CompactTextPrimaryBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     <Image x:Name="AlbumArtwork" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="当前专辑封面"/>
                                 </Grid>
                             </Border>
 
                             <!-- 悬浮律动音波小徽章 -->
-                            <Border x:Name="VisualizerBadge" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Background="#85000000" CornerRadius="3" Padding="2,1">
+                            <Border x:Name="VisualizerBadge" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Background="{DynamicResource CompactSurfaceBrush}" CornerRadius="3" Padding="2,1">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
-                                    <Border x:Name="VisualizerBar1" Width="2" Height="4" CornerRadius="1" Margin="0.5,0">
-                                        <Border.Background>
-                                            <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
-                                                <GradientStop Color="#00D2FF" Offset="0"/>
-                                                <GradientStop Color="#FFFFFF" Offset="1"/>
-                                            </LinearGradientBrush>
-                                        </Border.Background>
+                                    <Border x:Name="VisualizerBar1" Width="2" Height="4" CornerRadius="1" Margin="0.5,0" Background="{DynamicResource CompactAccentBrush}">
                                     </Border>
-                                    <Border x:Name="VisualizerBar2" Width="2" Height="7" CornerRadius="1" Margin="0.5,0">
-                                        <Border.Background>
-                                            <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
-                                                <GradientStop Color="#00D2FF" Offset="0"/>
-                                                <GradientStop Color="#FFFFFF" Offset="1"/>
-                                            </LinearGradientBrush>
-                                        </Border.Background>
+                                    <Border x:Name="VisualizerBar2" Width="2" Height="7" CornerRadius="1" Margin="0.5,0" Background="{DynamicResource CompactAccentBrush}">
                                     </Border>
-                                    <Border x:Name="VisualizerBar3" Width="2" Height="5" CornerRadius="1" Margin="0.5,0">
-                                        <Border.Background>
-                                            <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
-                                                <GradientStop Color="#00D2FF" Offset="0"/>
-                                                <GradientStop Color="#FFFFFF" Offset="1"/>
-                                            </LinearGradientBrush>
-                                        </Border.Background>
+                                    <Border x:Name="VisualizerBar3" Width="2" Height="5" CornerRadius="1" Margin="0.5,0" Background="{DynamicResource CompactAccentBrush}">
+                                    </Border>
+                                    <Border x:Name="VisualizerBar4" Width="2" Height="6" CornerRadius="1" Margin="0.5,0" Background="{DynamicResource CompactAccentBrush}">
                                     </Border>
                                 </StackPanel>
                             </Border>
                         </Grid>
 
-                        <!-- 底部发光流动进度条 -->
-                        <ProgressBar x:Name="LyricsProgress" Grid.ColumnSpan="2" Height="2.5" Margin="0,0,0,0" VerticalAlignment="Bottom" Minimum="0" Maximum="1" Value="0" Background="#15FFFFFF" Foreground="#0A84FF" BorderThickness="0">
+                        <!-- 底部发光流动进度条：固定宽度并右对齐到歌词列。
+                             之前跨满两列会随歌词长度伸缩，每首歌长短不一；
+                             右边距留给封面列，避开悬浮在封面右下角的律动徽章。 -->
+                        <ProgressBar x:Name="LyricsProgress" Grid.ColumnSpan="2" Width="84" HorizontalAlignment="Right" Height="6" Margin="0,0,46,0" VerticalAlignment="Bottom" Minimum="0" Maximum="1" Value="0" Background="{DynamicResource CompactSubtleBrush}" Foreground="{DynamicResource CompactAccentBrush}" BorderThickness="0">
                             <ProgressBar.Template>
                                 <ControlTemplate TargetType="ProgressBar">
-                                    <Grid ClipToBounds="True">
-                                        <Border Background="{TemplateBinding Background}" CornerRadius="1.2"/>
-                                        <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="1.2">
+                                    <Grid x:Name="PART_Track">
+                                        <Border Background="{TemplateBinding Background}" Height="2" VerticalAlignment="Center" CornerRadius="1"/>
+                                        <Border x:Name="PART_Indicator" HorizontalAlignment="Left" Height="2" VerticalAlignment="Center" CornerRadius="1">
                                             <Border.Background>
                                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                                    <GradientStop Color="#00E5FF" Offset="0"/>
-                                                    <GradientStop Color="#0A84FF" Offset="0.7"/>
-                                                    <GradientStop Color="#FFFFFF" Offset="1"/>
+                                                    <GradientStop Color="#5B93F0" Offset="0"/>
+                                                    <GradientStop Color="#9FC6FF" Offset="1"/>
                                                 </LinearGradientBrush>
                                             </Border.Background>
+                                            <Grid>
+                                                <Ellipse Width="4" Height="4" Fill="#EAF3FF" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-1.5,0">
+                                                    <Ellipse.Effect>
+                                                        <DropShadowEffect Color="#6AA7FF" BlurRadius="6" ShadowDepth="0" Opacity="0.9"/>
+                                                    </Ellipse.Effect>
+                                                </Ellipse>
+                                            </Grid>
                                         </Border>
                                     </Grid>
                                 </ControlTemplate>
                             </ProgressBar.Template>
                         </ProgressBar>
+                        </Grid>
                     </Grid>
-                </Border>
+                </controls:RoundedClipBorder>
 
                 <!-- 右侧：独立游戏与头像管理玻璃框 (独立分离) -->
-                <Border DockPanel.Dock="Right"
+                <controls:RoundedClipBorder DockPanel.Dock="Right"
                         x:Name="GameAvatarContainer"
                         VerticalAlignment="Center"
                         BorderThickness="1"
                         ClipToBounds="True">
                     <Border.Effect>
-                        <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="1.5" Opacity="0.25"/>
+                        <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="1.5" Opacity="0.2"/>
                     </Border.Effect>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel x:Name="GamePanel" Orientation="Horizontal"/>
                         <Border x:Name="GameAvatarSeparator"
                                 Width="1" Margin="4,4"
-                                Background="#40FFFFFF"
+                                Background="{DynamicResource FloatingSubtleBrush}"
                                 Visibility="Collapsed"/>
                         <StackPanel x:Name="AvatarPanel" Orientation="Horizontal"/>
                     </StackPanel>
-                </Border>
+                </controls:RoundedClipBorder>
             </DockPanel>
         </Border>
     </Grid>
+    </Viewbox>
 
 </Window>

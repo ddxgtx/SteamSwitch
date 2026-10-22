@@ -27,21 +27,41 @@ namespace SteamSwitcher.ViewModels
     {
         private const int SteamDebugPort = 8080;
         private readonly AccountManager _accountManager;
-        private readonly AppSettings _settings;
+        private readonly SettingsSession _settingsSession;
+        private AppSettings _settings => _settingsSession.Current;
+        private bool _applyingSettings;
         private readonly GameAccountBinding _gameBinding;
         private readonly QuickLaunchService _quickLaunch;
+        private readonly Func<bool> _readStartupState;
+        private readonly Func<bool, bool> _writeStartupState;
+        private readonly bool _monitorSystemState;
+        private readonly string _configurationDirectory;
         private readonly GameSaveAutoBackupService _gameSaveAutoBackupService;
         private readonly CancellationTokenSource _launchWorkflowCts = new();
         private readonly CancellationTokenSource _lifetimeCts = new();
+        private readonly SemaphoreSlim _operationGate = new(1, 1);
+        private readonly SemaphoreSlim _injectorGate = new(1, 1);
+        private CancellationTokenSource? _injectorAttemptCts;
+        private bool _suppressInjectorPrompt;
+        // Shared client for the CEF debug-port probe. Creating a client per
+        // probe would exhaust sockets when the scan runs repeatedly.
+        private static readonly HttpClient DebugPortProbeClient = new()
+        {
+            Timeout = TimeSpan.FromSeconds(3)
+        };
+
         private int _updateCheckInProgress;
         private int _gameScanInProgress;
         private SteamCEFInjector? _injector;
         private WebSocketServer? _wsServer;
         private readonly DispatcherTimer _settingsSaveTimer;
         private readonly DispatcherTimer _steamStatusTimer;
-        private bool _settingsDirty;
         private bool _restoringStartWithWindows;
         private bool _disposed;
+        private AccountViewModel? _lastFailedSwitchAccount;
+        private bool _lastFailedSwitchLaunchSteam;
+
+        public bool HasFailedAccountSwitch => _lastFailedSwitchAccount != null;
 
         [ObservableProperty]
         private ObservableCollection<AccountViewModel> _accounts = new();
@@ -75,6 +95,17 @@ namespace SteamSwitcher.ViewModels
 
         [ObservableProperty]
         private string _statusText = "就绪";
+
+        [ObservableProperty]
+        private string _backupExportDirectory = "";
+
+        [ObservableProperty]
+        private bool _askBeforeBackupExport;
+
+        public string BackupExportDirectoryDisplay => string.IsNullOrWhiteSpace(BackupExportDirectory)
+            ? BackupExportService.DefaultDirectory : BackupExportDirectory;
+
+        partial void OnBackupExportDirectoryChanged(string value) => OnPropertyChanged(nameof(BackupExportDirectoryDisplay));
 
         [ObservableProperty]
         private bool _isSteamRunning;
@@ -123,42 +154,6 @@ namespace SteamSwitcher.ViewModels
 
         [ObservableProperty]
         private bool _taskbarRoundedMode;
-
-        [ObservableProperty]
-        private bool _taskbarAppearanceEnabled;
-
-        [ObservableProperty]
-        private TaskbarAppearanceMode _taskbarAppearanceMode;
-
-        [ObservableProperty]
-        private string _taskbarAppearanceColor = "#000000";
-
-        [ObservableProperty]
-        private int _taskbarAppearanceOpacity;
-
-        [ObservableProperty]
-        private bool _taskbarDynamicMaximized;
-
-        [ObservableProperty]
-        private TaskbarAppearanceMode _taskbarMaximizedMode;
-
-        [ObservableProperty]
-        private bool _taskbarDynamicStartMenu;
-
-        [ObservableProperty]
-        private TaskbarAppearanceMode _taskbarStartMenuMode;
-
-        [ObservableProperty]
-        private bool _taskbarDynamicSearch;
-
-        [ObservableProperty]
-        private TaskbarAppearanceMode _taskbarSearchMode;
-
-        [ObservableProperty]
-        private bool _taskbarDynamicTaskView;
-
-        [ObservableProperty]
-        private TaskbarAppearanceMode _taskbarTaskViewMode;
 
         [ObservableProperty]
         private bool _desktopAutoHideIconsEnabled;
@@ -258,6 +253,14 @@ namespace SteamSwitcher.ViewModels
         [ObservableProperty]
         private bool _taskbarLyricsShowSecondaryLine = true;
 
+        /// <summary>是否显示歌词岛底部的播放进度条。</summary>
+        [ObservableProperty]
+        private bool _taskbarLyricsShowProgressBar = true;
+
+        /// <summary>没有媒体播放时把歌词岛（乃至整个任务栏条）收起来，有歌再贴回。</summary>
+        [ObservableProperty]
+        private bool _taskbarLyricsHideWhenNoMedia = true;
+
         [ObservableProperty]
         private int _taskbarLyricsPollingIntervalMs = 120;
 
@@ -281,6 +284,9 @@ namespace SteamSwitcher.ViewModels
 
         [ObservableProperty]
         private bool _lyricSplitLongLines = false;
+
+        [ObservableProperty]
+        private bool _taskbarLyricsMusicOnly = true;
 
         [ObservableProperty]
         private int _gameSaveManualRetention;
@@ -417,6 +423,25 @@ namespace SteamSwitcher.ViewModels
         public event EventHandler<bool>? DesktopFloatingDockEnabledChanged;
 
         public string AccountCountText => Accounts.Count.ToString();
+
+        /// <summary>
+        /// 本地账号库指标：Steam 的 loginusers.vdf 只保留有限账号，被裁掉的账号
+        /// 由本地库继续保存（IsArchived）。这两个数字就是"保存多个账号"功能
+        /// 在界面上的直接呈现。
+        /// </summary>
+        public int ArchivedAccountCount => Accounts.Count(a => a.IsArchived);
+        public bool HasArchivedAccounts => ArchivedAccountCount > 0;
+        public int SteamListedAccountCount => Accounts.Count(account => !account.IsArchived);
+        public string AccountLibraryCountsText => $"本地收录 {Accounts.Count} 个  ·  Steam 记录 {SteamListedAccountCount} 个  ·  待找回 {ArchivedAccountCount} 个";
+        public string AccountRecoveryButtonText => $"待找回 · {ArchivedAccountCount}";
+        public string AccountLibraryBadgeText => HasArchivedAccounts
+            ? $"{ArchivedAccountCount} 个仅本地账号 · 可找回"
+            : "读取到的账号会自动收录";
+        public string AccountLibrarySummaryText => HasArchivedAccounts
+            ? "Steam 未列出的历史账号仍保留在本地。点击「待找回」筛选，再选择账号找回。"
+            : Accounts.Count == 0 ? "先在 Steam 登录账号，再点击「收录账号」。以后读取到的账号会自动保留在本地。"
+            : "读取到的账号资料会保留在本地，Steam 不再列出时，也能在这里找到。";
+
         public string BindingCountText => GameBindings.Count.ToString();
         public string GameCountText => GameList.Count.ToString();
         public string QuickLaunchCountText => QuickLaunchList.Count.ToString();
@@ -586,7 +611,7 @@ namespace SteamSwitcher.ViewModels
             else
                 _settings.PinnedGameIds.Add(appId);
 
-            SettingsService.Save(_settings);
+            SaveSettingsNow();
 
             var game = GameList.FirstOrDefault(g => g.AppId == appId);
             if (game != null)
@@ -603,7 +628,7 @@ namespace SteamSwitcher.ViewModels
             else
                 _settings.PinnedAccountIds.Add(steamId);
 
-            SettingsService.Save(_settings);
+            SaveSettingsNow();
 
             var account = Accounts.FirstOrDefault(a => a.SteamId == steamId);
             if (account != null)
@@ -624,7 +649,7 @@ namespace SteamSwitcher.ViewModels
             if (toIndex > fromIndex) toIndex--;
             pinnedIds.Insert(toIndex, item);
 
-            SettingsService.Save(_settings);
+            SaveSettingsNow();
             PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -637,7 +662,7 @@ namespace SteamSwitcher.ViewModels
             ordered.AddRange(_settings.PinnedGameIds.Where(id => !ordered.Contains(id)));
 
             _settings.PinnedGameIds = ordered;
-            SettingsService.Save(_settings);
+            SaveSettingsNow();
             PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -658,7 +683,7 @@ namespace SteamSwitcher.ViewModels
                 .Select(appId => appId!.Value)
                 .ToList();
 
-            SettingsService.Save(_settings);
+            SaveSettingsNow();
 
             var quickLaunchIds = ordered
                 .Select(TryParsePanelQuickLaunchKey)
@@ -681,7 +706,7 @@ namespace SteamSwitcher.ViewModels
             if (toIndex > fromIndex) toIndex--;
             pinnedIds.Insert(toIndex, item);
 
-            SettingsService.Save(_settings);
+            SaveSettingsNow();
             PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -694,7 +719,7 @@ namespace SteamSwitcher.ViewModels
             ordered.AddRange(_settings.PinnedAccountIds.Where(id => !ordered.Contains(id)));
 
             _settings.PinnedAccountIds = ordered;
-            SettingsService.Save(_settings);
+            SaveSettingsNow();
             PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -705,7 +730,7 @@ namespace SteamSwitcher.ViewModels
             {
                 var appId = pinnedIds[index];
                 pinnedIds.RemoveAt(index);
-                SettingsService.Save(_settings);
+                SaveSettingsNow();
 
                 var game = GameList.FirstOrDefault(g => g.AppId == appId);
                 if (game != null)
@@ -723,7 +748,7 @@ namespace SteamSwitcher.ViewModels
             {
                 var steamId = pinnedIds[index];
                 pinnedIds.RemoveAt(index);
-                SettingsService.Save(_settings);
+                SaveSettingsNow();
 
                 var account = Accounts.FirstOrDefault(a => a.SteamId == steamId);
                 if (account != null)
@@ -736,18 +761,20 @@ namespace SteamSwitcher.ViewModels
 
         public async Task LaunchPinnedGameAsync(int appId)
         {
-            if (IsLoading)
+            if (!await _operationGate.WaitAsync(0))
             {
                 StatusText = "已有账号或游戏操作正在进行，请稍候";
                 return;
             }
+
+            try
+            {
             IsLoading = true;
 
             var game = GameList.FirstOrDefault(g => g.AppId == appId);
             if (game == null || !game.HasBinding || string.IsNullOrEmpty(game.BindingAccountSteamId))
             {
                 StatusText = "该游戏未绑定账号";
-                IsLoading = false;
                 return;
             }
 
@@ -755,7 +782,6 @@ namespace SteamSwitcher.ViewModels
             if (account == null)
             {
                 StatusText = "绑定的账号不存在";
-                IsLoading = false;
                 return;
             }
 
@@ -793,7 +819,6 @@ namespace SteamSwitcher.ViewModels
                 finally
                 {
                     IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-                    IsLoading = false;
                 }
                 return;
             }
@@ -836,142 +861,54 @@ namespace SteamSwitcher.ViewModels
                 if (!_disposed)
                 {
                     IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-                    IsLoading = false;
                 }
+            }
+            }
+            finally
+            {
+                IsLoading = false;
+                _operationGate.Release();
             }
         }
 
-        public MainViewModel()
+        public MainViewModel() : this(new AccountManager(), new GameAccountBinding(), new QuickLaunchService(),
+            new SettingsSession(SettingsService.Load(), SettingsService.Save),
+            SettingsService.IsStartWithWindowsEnabled, SettingsService.SetStartWithWindows,
+            SettingsService.SettingsDirectory, monitorSystemState: true)
         {
-            _accountManager = new AccountManager();
+        }
+
+        internal MainViewModel(AccountManager accountManager, GameAccountBinding gameBinding,
+            QuickLaunchService quickLaunch, SettingsSession settingsSession,
+            Func<bool> readStartupState, Func<bool, bool> writeStartupState,
+            string configurationDirectory, bool monitorSystemState = false)
+        {
+            _readStartupState = readStartupState;
+            _writeStartupState = writeStartupState;
+            _monitorSystemState = monitorSystemState;
+            _configurationDirectory = configurationDirectory;
+            _accountManager = accountManager;
             _accountManager.AccountsChanged += OnAccountsChanged;
 
-            _gameBinding = new GameAccountBinding();
+            _gameBinding = gameBinding;
             _gameBinding.BindingsChanged += OnGameBindingsChanged;
 
-            _quickLaunch = new QuickLaunchService();
+            _quickLaunch = quickLaunch;
             _quickLaunch.ItemsChanged += OnQuickLaunchItemsChanged;
 
-            _settings = SettingsService.Load();
+            _settingsSession = settingsSession;
             _settings.CustomGameSaveFolders ??= new List<CustomGameSaveDefinition>();
             _gameSaveAutoBackupService = new GameSaveAutoBackupService(_accountManager, () => _settings);
             _gameSaveAutoBackupService.BackupCompleted += OnGameSaveAutoBackupCompleted;
             _accountManager.BeforeAccountSwitchAsync = _gameSaveAutoBackupService.BackupBeforeAccountSwitchAsync;
-            var registryStartWithWindows = SettingsService.IsStartWithWindowsEnabled();
+            var registryStartWithWindows = _readStartupState();
             if (_settings.StartWithWindows != registryStartWithWindows)
             {
                 _settings.StartWithWindows = registryStartWithWindows;
-                SettingsService.Save(_settings);
+                SaveSettingsNow();
             }
 
-            _autoStartSteam = _settings.AutoStartSteam;
-            _minimizeToTray = _settings.MinimizeToTray;
-            _startWithWindows = _settings.StartWithWindows;
-            _isTaskbarPinned = _settings.TaskbarPinned;
-            _taskbarPosition = _settings.TaskbarPosition;
-            _taskbarMonitorIndex = Math.Clamp(_settings.TaskbarMonitorIndex, 0, 8);
-            _taskbarOffsetX = _settings.TaskbarOffsetX;
-            _taskbarOffsetY = _settings.TaskbarOffsetY;
-            _taskbarWindowSize = _settings.TaskbarWindowSize;
-            _taskbarAvatarSize = _settings.TaskbarAvatarSize;
-            _taskbarGlassEnabled = _settings.TaskbarGlassEnabled;
-            _taskbarRoundedMode = _settings.TaskbarRoundedMode;
-            _taskbarAppearanceEnabled = _settings.TaskbarAppearanceEnabled;
-            _taskbarAppearanceMode = Enum.IsDefined(_settings.TaskbarAppearanceMode)
-                ? _settings.TaskbarAppearanceMode
-                : TaskbarAppearanceMode.Acrylic;
-            var configuredTaskbarColor = _settings.TaskbarAppearanceColor ?? string.Empty;
-            _taskbarAppearanceColor = System.Text.RegularExpressions.Regex.IsMatch(
-                configuredTaskbarColor, "^#[0-9A-Fa-f]{6}$")
-                ? configuredTaskbarColor.ToUpperInvariant()
-                : "#000000";
-            _taskbarAppearanceOpacity = Math.Clamp(_settings.TaskbarAppearanceOpacity, 0, 100);
-            _taskbarDynamicMaximized = _settings.TaskbarDynamicMaximized;
-            _taskbarMaximizedMode = Enum.IsDefined(_settings.TaskbarMaximizedMode)
-                ? _settings.TaskbarMaximizedMode
-                : TaskbarAppearanceMode.Opaque;
-            _taskbarDynamicStartMenu = _settings.TaskbarDynamicStartMenu;
-            _taskbarStartMenuMode = Enum.IsDefined(_settings.TaskbarStartMenuMode)
-                ? _settings.TaskbarStartMenuMode
-                : TaskbarAppearanceMode.Normal;
-            _taskbarDynamicSearch = _settings.TaskbarDynamicSearch;
-            _taskbarSearchMode = Enum.IsDefined(_settings.TaskbarSearchMode)
-                ? _settings.TaskbarSearchMode
-                : TaskbarAppearanceMode.Normal;
-            _taskbarDynamicTaskView = _settings.TaskbarDynamicTaskView;
-            _taskbarTaskViewMode = Enum.IsDefined(_settings.TaskbarTaskViewMode)
-                ? _settings.TaskbarTaskViewMode
-                : TaskbarAppearanceMode.Normal;
-            var desktopEnhance = _settings.DesktopEnhance ??= new DesktopEnhanceSettings();
-            _desktopAutoHideIconsEnabled = desktopEnhance.EnableAutoHideIcons;
-            _desktopIconHideMode = Enum.IsDefined(desktopEnhance.HideMode) ? desktopEnhance.HideMode : DesktopIconHideMode.Smart;
-            _desktopIconIdleSeconds = Math.Clamp(desktopEnhance.IdleSeconds, 5, 300);
-            _desktopRestoreByMouseMove = desktopEnhance.RestoreByMouseMove;
-            _desktopRestoreByTaskbarClick = desktopEnhance.RestoreByTaskbarClick;
-            _desktopToggleIconsOnClick = desktopEnhance.ToggleIconsOnDesktopClick;
-            _desktopIconAnimationType = Enum.IsDefined(desktopEnhance.AnimationType) ? desktopEnhance.AnimationType : DesktopIconAnimationType.Fade;
-            _desktopIconAnimationDuration = Math.Clamp(desktopEnhance.AnimationDuration, 200, 1000);
-            _desktopImmersiveModeEnabled = desktopEnhance.EnableImmersiveMode;
-            _desktopIconsHiddenByApp = _settings.DesktopIconsHiddenByApp;
-            _taskbarLyricsEnabled = _settings.TaskbarLyricsEnabled;
-            _taskbarLyricsShowControls = _settings.TaskbarLyricsShowControls;
-            _taskbarLyricsOnlineEnabled = _settings.TaskbarLyricsOnlineEnabled;
-            _taskbarLyricsArtworkRounded = _settings.TaskbarLyricsArtworkRounded;
-            _taskbarLyricsShowVisualizer = _settings.TaskbarLyricsShowVisualizer;
-            _taskbarLyricsTransparentBackground = _settings.TaskbarLyricsTransparentBackground;
-            _taskbarLyricsAdaptiveWidth = _settings.TaskbarLyricsAdaptiveWidth;
-            _taskbarLyricsWidth = Math.Clamp(_settings.TaskbarLyricsWidth, 240, 720);
-            _taskbarLyricsTrackInfoOnly = _settings.TaskbarLyricsTrackInfoOnly;
-            _taskbarLyricsShowSecondaryLine = _settings.TaskbarLyricsShowSecondaryLine;
-            _taskbarLyricsPollingIntervalMs = Math.Clamp(_settings.TaskbarLyricsPollingIntervalMs, 60, 1000);
-            _taskbarLyricsVerticalOffset = Math.Clamp(_settings.TaskbarLyricsVerticalOffset, -12, 12);
-            _lyricSourceQQEnabled = _settings.LyricSourceQQEnabled;
-            _lyricSourceNeteaseEnabled = _settings.LyricSourceNeteaseEnabled;
-            _lyricSourceKugouEnabled = _settings.LyricSourceKugouEnabled;
-            _lyricSourceLrclibEnabled = _settings.LyricSourceLrclibEnabled;
-            _lyricOffsetMs = Math.Clamp(_settings.LyricOffsetMs, -2000, 2000);
-            _lyricSplitLongLines = _settings.LyricSplitLongLines;
-            _settings.TaskbarAppearanceMode = _taskbarAppearanceMode;
-            _settings.TaskbarAppearanceColor = _taskbarAppearanceColor;
-            _settings.TaskbarAppearanceOpacity = _taskbarAppearanceOpacity;
-            _settings.TaskbarMaximizedMode = _taskbarMaximizedMode;
-            _settings.TaskbarLyricsWidth = _taskbarLyricsWidth;
-            _gameSaveManualRetention = Math.Clamp(_settings.GameSaveManualRetention, 1, 100);
-            _gameSaveSafetyRetention = Math.Clamp(_settings.GameSaveSafetyRetention, 1, 50);
-            _settings.GameSaveManualRetention = _gameSaveManualRetention;
-            _settings.GameSaveSafetyRetention = _gameSaveSafetyRetention;
-            _gameSaveAutoBackupEnabled = _settings.GameSaveAutoBackupEnabled;
-            _gameSavePeriodicBackupEnabled = _settings.GameSavePeriodicBackupEnabled;
-            _gameSavePeriodicIntervalMinutes = Math.Clamp(_settings.GameSavePeriodicIntervalMinutes, 5, 1440);
-            _settings.GameSavePeriodicIntervalMinutes = _gameSavePeriodicIntervalMinutes;
-            _smartSaveDiscoveryEnabled = _settings.SmartSaveDiscoveryEnabled;
-            _gameSaveAutoBackupStatusText = CreateGameSaveAutoBackupStatusText();
-
-            _desktopFloatingEnabled = _settings.DesktopFloatingEnabled;
-            _desktopFloatingTopmost = _settings.DesktopFloatingTopmost;
-            _desktopFloatingLocked = _settings.DesktopFloatingLocked;
-            _desktopFloatingOpacity = _settings.DesktopFloatingOpacity;
-            _desktopFloatingAvatarSize = _settings.DesktopFloatingAvatarSize;
-            _desktopFloatingGlassEnabled = _settings.DesktopFloatingGlassEnabled;
-            _desktopFloatingRoundedMode = _settings.DesktopFloatingRoundedMode;
-            _desktopFloatingGlassColor = _settings.DesktopFloatingGlassColor;
-            _playSoundOnSwitch = _settings.PlaySoundOnSwitch;
-            _showSwitchNotification = _settings.ShowSwitchNotification;
-            _taskbarLyricsFontSize = Math.Clamp(_settings.TaskbarLyricsFontSize, 12, 18);
-            _taskbarLyricsFontFamily = _settings.TaskbarLyricsFontFamily;
-            _theme = _settings.Theme;
-            _minimalMode = _settings.MinimalMode;
-            _desktopFloatingDockEnabled = _settings.DesktopFloatingDockEnabled;
-            _enableLibraryInjection = _settings.EnableLibraryInjection;
-            _autoScanGamesOnStartup = _settings.AutoScanGamesOnStartup;
-            _confirmBeforeGameLaunch = _settings.ConfirmBeforeGameLaunch;
-            _silentCloseSteam = _settings.SilentCloseSteam;
-            _useBetaUpdateChannel = _settings.UseBetaUpdateChannel;
-            _checkUpdateOnStartup = _settings.CheckUpdateOnStartup;
-            _autoInstallUpdates = _settings.AutoInstallUpdates;
-            _showNotificationOnSteamClose = _settings.ShowNotificationOnSteamClose;
-            _customSteamPath = _settings.CustomSteamPath ?? "";
-            _customLoginUsersPath = _settings.CustomLoginUsersPath ?? "";
+            LoadSettingsFields();
             _settingsSaveTimer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromMilliseconds(500)
@@ -983,8 +920,8 @@ namespace SteamSwitcher.ViewModels
                 Interval = TimeSpan.FromSeconds(2)
             };
             _steamStatusTimer.Tick += OnSteamStatusTimerTick;
-            IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-            _steamStatusTimer.Start();
+            IsSteamRunning = _monitorSystemState && _accountManager.GetSteamService().IsSteamRunning();
+            if (_monitorSystemState) _steamStatusTimer.Start();
 
             PropertyChanged += OnPropertyChanged;
             Accounts.CollectionChanged += OnDashboardCollectionChanged;
@@ -1013,8 +950,8 @@ namespace SteamSwitcher.ViewModels
 
         private void SyncGameSaveAutoBackupService()
         {
-            _gameSaveAutoBackupService.Enabled =
-                GameSaveAutoBackupEnabled || GameSavePeriodicBackupEnabled;
+            _gameSaveAutoBackupService.Enabled = _monitorSystemState &&
+                (GameSaveAutoBackupEnabled || GameSavePeriodicBackupEnabled);
         }
 
         private string CreateGameSaveAutoBackupStatusText()
@@ -1050,14 +987,7 @@ namespace SteamSwitcher.ViewModels
             });
         }
 
-        private void SavePendingSettings()
-        {
-            if (!_settingsDirty)
-                return;
 
-            _settingsDirty = false;
-            SettingsService.Save(_settings);
-        }
 
         private void OnDashboardCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         {
@@ -1071,11 +1001,13 @@ namespace SteamSwitcher.ViewModels
 
         private void NotifyDashboardMetrics()
         {
+            NotifyAccountLibraryMetrics();
             OnPropertyChanged(nameof(AccountCountText));
             OnPropertyChanged(nameof(BindingCountText));
             OnPropertyChanged(nameof(GameCountText));
             OnPropertyChanged(nameof(PinnedCountText));
             OnPropertyChanged(nameof(BoundGameCount));
+            OnPropertyChanged(nameof(SelectedAccountBoundGameCount));
             OnPropertyChanged(nameof(UnboundGameCount));
             OnPropertyChanged(nameof(GameBindingCoverage));
             OnPropertyChanged(nameof(GameBindingCoverageText));
@@ -1165,7 +1097,7 @@ namespace SteamSwitcher.ViewModels
             NotifyDashboardMetrics();
         }
 
-        public async Task ScanGamesAsync()
+        public async Task ScanGamesAsync(bool manageLoadingState = true)
         {
             if (_disposed) return;
             if (Interlocked.CompareExchange(ref _gameScanInProgress, 1, 0) != 0)
@@ -1175,7 +1107,8 @@ namespace SteamSwitcher.ViewModels
             }
             var cancellationToken = _lifetimeCts.Token;
             IsGameScanInProgress = true;
-            IsLoading = true;
+            if (manageLoadingState)
+                IsLoading = true;
             StatusText = "正在扫描本地 Steam 游戏...";
 
             try
@@ -1233,7 +1166,8 @@ namespace SteamSwitcher.ViewModels
             {
                 if (!_disposed)
                 {
-                    IsLoading = false;
+                    if (manageLoadingState)
+                        IsLoading = false;
                     IsGameScanInProgress = false;
                 }
                 Interlocked.Exchange(ref _gameScanInProgress, 0);
@@ -1293,565 +1227,6 @@ namespace SteamSwitcher.ViewModels
             OnPropertyChanged(nameof(BindingCountText));
             NotifyDashboardMetrics();
             StatusText = "已删除绑定";
-        }
-
-        private async Task<bool> LaunchGameWithWorkflowAsync(int appId, string gameName, SteamAccount account)
-        {
-            var binding = _gameBinding.GetBinding(appId);
-            gameName = !string.IsNullOrWhiteSpace(gameName)
-                ? gameName
-                : !string.IsNullOrWhiteSpace(binding?.GameName) ? binding.GameName : $"Steam App {appId}";
-            var needsMonitor = binding?.BackupAfterExit == true || binding?.CloseSteamAfterExit == true;
-            SteamLibraryGame? installedGame = null;
-            HashSet<int>? processIdsBeforeLaunch = null;
-
-            if (binding?.BackupBeforeLaunch == true)
-            {
-                StatusText = $"正在备份《{gameName}》启动前存档…";
-                var backup = await _gameSaveAutoBackupService.BackupGameAsync(
-                    account.SteamId,
-                    appId,
-                    gameName,
-                    _launchWorkflowCts.Token);
-                if (backup.Failed > 0)
-                {
-                    StatusText = $"启动前存档备份失败，已取消启动《{gameName}》";
-                    NotificationRequested?.Invoke(this, StatusText);
-                    return false;
-                }
-            }
-
-            if (needsMonitor)
-            {
-                installedGame = await Task.Run(
-                    () => _accountManager.GetSteamService().GetInstalledGames().FirstOrDefault(game => game.AppId == appId),
-                    _launchWorkflowCts.Token);
-                if (installedGame != null)
-                    processIdsBeforeLaunch = GameProcessMonitor.CaptureProcessIds();
-            }
-
-            var launched = _accountManager.LaunchGame(
-                appId,
-                launchArguments: binding?.LaunchArguments,
-                startInBigPicture: binding?.StartInBigPicture == true);
-            if (!launched)
-                return false;
-
-            await _gameBinding.RecordPlayAsync(appId, account.SteamId, account.AccountName);
-            if (needsMonitor && installedGame != null && processIdsBeforeLaunch != null)
-                _ = MonitorGameWorkflowAsync(installedGame, account, binding!, processIdsBeforeLaunch, _launchWorkflowCts.Token);
-            else if (needsMonitor)
-                AppLogger.Warn($"Launch workflow could not monitor appId={appId}: install directory was not found.");
-            return true;
-        }
-
-        private async Task MonitorGameWorkflowAsync(
-            SteamLibraryGame game,
-            SteamAccount account,
-            GameBinding binding,
-            ISet<int> processIdsBeforeLaunch,
-            CancellationToken cancellationToken)
-        {
-            try
-            {
-                var installRoot = Path.Combine(game.LibraryPath, "steamapps", "common", game.InstallDir);
-                if (!await GameProcessMonitor.WaitForExitAsync(installRoot, processIdsBeforeLaunch, cancellationToken))
-                {
-                    DispatchToUi(() =>
-                    {
-                        var message = $"未能识别《{game.Name}》的运行进程，退出后操作未执行";
-                        StatusText = message;
-                        NotificationRequested?.Invoke(this, message);
-                    });
-                    return;
-                }
-                if (binding.BackupAfterExit)
-                {
-                    var backup = await _gameSaveAutoBackupService.BackupGameAsync(
-                        account.SteamId,
-                        game.AppId,
-                        game.Name,
-                        cancellationToken);
-                    var message = backup.Failed > 0
-                        ? $"《{game.Name}》退出后存档备份有 {backup.Failed} 项失败"
-                        : $"《{game.Name}》退出后存档已备份";
-                    DispatchToUi(() =>
-                    {
-                        StatusText = message;
-                        NotificationRequested?.Invoke(this, message);
-                    });
-                }
-                if (binding.CloseSteamAfterExit)
-                    await _accountManager.GetSteamService().CloseSteamAsync(SilentCloseSteam);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error($"Game launch workflow monitor failed. appId={game.AppId}", ex);
-            }
-        }
-
-        [RelayCommand]
-        private void OpenDataFolder()
-        {
-            OpenFolder(SettingsService.SettingsDirectory, "数据目录");
-        }
-
-        [RelayCommand]
-        private void OpenLogFolder()
-        {
-            OpenFolder(AppLogger.LogDirectory, "日志目录");
-        }
-
-        private void OpenFolder(string path, string name)
-        {
-            try
-            {
-                Directory.CreateDirectory(path);
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = path,
-                    UseShellExecute = true
-                });
-                StatusText = $"已打开{name}";
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error($"OpenFolder failed: {path}", ex);
-                StatusText = $"无法打开{name}: {ex.Message}";
-            }
-        }
-
-        [RelayCommand]
-        private void CopyDiagnostics()
-        {
-            try
-            {
-                var steamService = _accountManager.GetSteamService();
-                var sb = new StringBuilder();
-                sb.AppendLine("Steam Switch 诊断信息");
-                sb.AppendLine($"时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                sb.AppendLine($"Steam 路径: {steamService.SteamPath ?? "未检测"}");
-                sb.AppendLine($"Steam 运行状态: {SteamStateText}");
-                sb.AppendLine($"当前账号: {CurrentAccountName}");
-                sb.AppendLine($"账号数量: {Accounts.Count}");
-                sb.AppendLine($"游戏数量: {GameList.Count}");
-                sb.AppendLine($"绑定数量: {GameBindings.Count}");
-                sb.AppendLine($"固定入口: {PinnedCountText}");
-                sb.AppendLine($"任务栏常驻: {(IsTaskbarPinned ? "开启" : "关闭")}");
-                sb.AppendLine($"透明任务栏: {(TaskbarAppearanceEnabled ? TaskbarAppearanceMode.ToString() : "关闭")} / {TaskbarAppearanceOpacity}% / {TaskbarAppearanceColor}");
-                sb.AppendLine($"桌面悬浮窗: {(DesktopFloatingEnabled ? "开启" : "关闭")}");
-                sb.AppendLine($"库界面注入: {(EnableLibraryInjection ? "开启" : "关闭")} / {InjectorStateText}");
-                sb.AppendLine($"主题: {Theme}");
-                sb.AppendLine($"更新保护: {UpdateProtectionText}");
-                sb.AppendLine($"本地控制保护: {LocalControlProtectionText}");
-                sb.AppendLine($"配置保护: {DataProtectionText}");
-                sb.AppendLine($"数据目录: {SettingsService.SettingsDirectory}");
-                sb.AppendLine($"日志目录: {AppLogger.LogDirectory}");
-
-                Clipboard.SetText(sb.ToString());
-                StatusText = "已复制诊断信息";
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("CopyDiagnostics failed.", ex);
-                StatusText = $"复制诊断信息失败: {ex.Message}";
-            }
-        }
-
-        private void OnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-        {
-            var shouldSaveSettings = true;
-            switch (e.PropertyName)
-            {
-                case nameof(AutoStartSteam):
-                    _settings.AutoStartSteam = AutoStartSteam;
-                    break;
-                case nameof(MinimizeToTray):
-                    _settings.MinimizeToTray = MinimizeToTray;
-                    break;
-                case nameof(StartWithWindows):
-                    if (_restoringStartWithWindows)
-                    {
-                        shouldSaveSettings = false;
-                        break;
-                    }
-
-                    var requestedStartWithWindows = StartWithWindows;
-                    var registrationSucceeded = SettingsService.SetStartWithWindows(requestedStartWithWindows);
-                    var actualStartWithWindows = SettingsService.IsStartWithWindowsEnabled();
-                    _settings.StartWithWindows = actualStartWithWindows;
-                    if (!registrationSucceeded || actualStartWithWindows != requestedStartWithWindows)
-                    {
-                        _restoringStartWithWindows = true;
-                        StartWithWindows = actualStartWithWindows;
-                        _restoringStartWithWindows = false;
-                        StatusText = requestedStartWithWindows
-                            ? "开机自启设置失败，请检查当前用户注册表权限"
-                            : "关闭开机自启失败，请检查当前用户注册表权限";
-                    }
-                    break;
-                case nameof(IsTaskbarPinned):
-                    _settings.TaskbarPinned = IsTaskbarPinned;
-                    break;
-                case nameof(TaskbarPosition):
-                    _settings.TaskbarPosition = TaskbarPosition;
-                    break;
-                case nameof(TaskbarMonitorIndex):
-                    _settings.TaskbarMonitorIndex = Math.Clamp(TaskbarMonitorIndex, 0, 8);
-                    break;
-                case nameof(TaskbarOffsetX):
-                    _settings.TaskbarOffsetX = TaskbarOffsetX;
-                    break;
-                case nameof(TaskbarOffsetY):
-                    _settings.TaskbarOffsetY = TaskbarOffsetY;
-                    break;
-                case nameof(TaskbarWindowSize):
-                    _settings.TaskbarWindowSize = TaskbarWindowSize;
-                    break;
-                case nameof(TaskbarAvatarSize):
-                    _settings.TaskbarAvatarSize = TaskbarAvatarSize;
-                    break;
-                case nameof(TaskbarGlassEnabled):
-                    _settings.TaskbarGlassEnabled = TaskbarGlassEnabled;
-                    break;
-                case nameof(TaskbarRoundedMode):
-                    _settings.TaskbarRoundedMode = TaskbarRoundedMode;
-                    break;
-                case nameof(TaskbarAppearanceEnabled):
-                    _settings.TaskbarAppearanceEnabled = TaskbarAppearanceEnabled;
-                    break;
-                case nameof(TaskbarAppearanceMode):
-                    _settings.TaskbarAppearanceMode = TaskbarAppearanceMode;
-                    break;
-                case nameof(TaskbarAppearanceColor):
-                    _settings.TaskbarAppearanceColor = TaskbarAppearanceColor;
-                    break;
-                case nameof(TaskbarAppearanceOpacity):
-                    _settings.TaskbarAppearanceOpacity = Math.Clamp(TaskbarAppearanceOpacity, 0, 100);
-                    break;
-                case nameof(TaskbarDynamicMaximized):
-                    _settings.TaskbarDynamicMaximized = TaskbarDynamicMaximized;
-                    break;
-                case nameof(TaskbarMaximizedMode):
-                    _settings.TaskbarMaximizedMode = TaskbarMaximizedMode;
-                    break;
-                case nameof(TaskbarDynamicStartMenu):
-                    _settings.TaskbarDynamicStartMenu = TaskbarDynamicStartMenu;
-                    break;
-                case nameof(TaskbarStartMenuMode):
-                    _settings.TaskbarStartMenuMode = TaskbarStartMenuMode;
-                    break;
-                case nameof(TaskbarDynamicSearch):
-                    _settings.TaskbarDynamicSearch = TaskbarDynamicSearch;
-                    break;
-                case nameof(TaskbarSearchMode):
-                    _settings.TaskbarSearchMode = TaskbarSearchMode;
-                    break;
-                case nameof(TaskbarDynamicTaskView):
-                    _settings.TaskbarDynamicTaskView = TaskbarDynamicTaskView;
-                    break;
-                case nameof(TaskbarTaskViewMode):
-                    _settings.TaskbarTaskViewMode = TaskbarTaskViewMode;
-                    break;
-                case nameof(DesktopAutoHideIconsEnabled):
-                    _settings.DesktopEnhance.EnableAutoHideIcons = DesktopAutoHideIconsEnabled;
-                    break;
-                case nameof(DesktopIconHideMode):
-                    _settings.DesktopEnhance.HideMode = DesktopIconHideMode;
-                    break;
-                case nameof(DesktopIconIdleSeconds):
-                    _settings.DesktopEnhance.IdleSeconds = Math.Clamp(DesktopIconIdleSeconds, 5, 300);
-                    break;
-                case nameof(DesktopRestoreByMouseMove):
-                    _settings.DesktopEnhance.RestoreByMouseMove = DesktopRestoreByMouseMove;
-                    break;
-                case nameof(DesktopRestoreByTaskbarClick):
-                    _settings.DesktopEnhance.RestoreByTaskbarClick = DesktopRestoreByTaskbarClick;
-                    break;
-                case nameof(DesktopToggleIconsOnClick):
-                    _settings.DesktopEnhance.ToggleIconsOnDesktopClick = DesktopToggleIconsOnClick;
-                    break;
-                case nameof(DesktopIconAnimationType):
-                    _settings.DesktopEnhance.AnimationType = DesktopIconAnimationType;
-                    break;
-                case nameof(DesktopIconAnimationDuration):
-                    _settings.DesktopEnhance.AnimationDuration = Math.Clamp(DesktopIconAnimationDuration, 200, 1000);
-                    break;
-                case nameof(DesktopImmersiveModeEnabled):
-                    _settings.DesktopEnhance.EnableImmersiveMode = DesktopImmersiveModeEnabled;
-                    break;
-                case nameof(DesktopIconsHiddenByApp):
-                    _settings.DesktopIconsHiddenByApp = DesktopIconsHiddenByApp;
-                    break;
-                case nameof(TaskbarLyricsEnabled):
-                    _settings.TaskbarLyricsEnabled = TaskbarLyricsEnabled;
-                    break;
-                case nameof(TaskbarLyricsShowControls):
-                    _settings.TaskbarLyricsShowControls = TaskbarLyricsShowControls;
-                    break;
-                case nameof(TaskbarLyricsOnlineEnabled):
-                    _settings.TaskbarLyricsOnlineEnabled = TaskbarLyricsOnlineEnabled;
-                    break;
-                case nameof(TaskbarLyricsArtworkRounded):
-                    _settings.TaskbarLyricsArtworkRounded = TaskbarLyricsArtworkRounded;
-                    break;
-                case nameof(TaskbarLyricsShowVisualizer):
-                    _settings.TaskbarLyricsShowVisualizer = TaskbarLyricsShowVisualizer;
-                    break;
-                case nameof(TaskbarLyricsTransparentBackground):
-                    _settings.TaskbarLyricsTransparentBackground = TaskbarLyricsTransparentBackground;
-                    break;
-                case nameof(TaskbarLyricsAdaptiveWidth):
-                    _settings.TaskbarLyricsAdaptiveWidth = TaskbarLyricsAdaptiveWidth;
-                    break;
-                case nameof(TaskbarLyricsWidth):
-                    _settings.TaskbarLyricsWidth = Math.Clamp(TaskbarLyricsWidth, 240, 720);
-                    break;
-                case nameof(TaskbarLyricsTrackInfoOnly):
-                    _settings.TaskbarLyricsTrackInfoOnly = TaskbarLyricsTrackInfoOnly;
-                    break;
-                case nameof(TaskbarLyricsShowSecondaryLine):
-                    _settings.TaskbarLyricsShowSecondaryLine = TaskbarLyricsShowSecondaryLine;
-                    break;
-                case nameof(TaskbarLyricsPollingIntervalMs):
-                    _settings.TaskbarLyricsPollingIntervalMs = Math.Clamp(TaskbarLyricsPollingIntervalMs, 60, 1000);
-                    break;
-                case nameof(TaskbarLyricsVerticalOffset):
-                    _settings.TaskbarLyricsVerticalOffset = Math.Clamp(TaskbarLyricsVerticalOffset, -12, 12);
-                    break;
-                case nameof(LyricSourceQQEnabled):
-                    _settings.LyricSourceQQEnabled = LyricSourceQQEnabled;
-                    break;
-                case nameof(LyricSourceNeteaseEnabled):
-                    _settings.LyricSourceNeteaseEnabled = LyricSourceNeteaseEnabled;
-                    break;
-                case nameof(LyricSourceKugouEnabled):
-                    _settings.LyricSourceKugouEnabled = LyricSourceKugouEnabled;
-                    break;
-                case nameof(LyricSourceLrclibEnabled):
-                    _settings.LyricSourceLrclibEnabled = LyricSourceLrclibEnabled;
-                    break;
-                case nameof(LyricOffsetMs):
-                    _settings.LyricOffsetMs = Math.Clamp(LyricOffsetMs, -2000, 2000);
-                    break;
-                case nameof(LyricSplitLongLines):
-                    _settings.LyricSplitLongLines = LyricSplitLongLines;
-                    break;
-                case nameof(GameSaveManualRetention):
-                    _settings.GameSaveManualRetention = Math.Clamp(GameSaveManualRetention, 1, 100);
-                    break;
-                case nameof(GameSaveSafetyRetention):
-                    _settings.GameSaveSafetyRetention = Math.Clamp(GameSaveSafetyRetention, 1, 50);
-                    break;
-                case nameof(GameSaveAutoBackupEnabled):
-                    _settings.GameSaveAutoBackupEnabled = GameSaveAutoBackupEnabled;
-                    SyncGameSaveAutoBackupService();
-                    GameSaveAutoBackupStatusText = CreateGameSaveAutoBackupStatusText();
-                    break;
-                case nameof(GameSavePeriodicBackupEnabled):
-                    _settings.GameSavePeriodicBackupEnabled = GameSavePeriodicBackupEnabled;
-                    SyncGameSaveAutoBackupService();
-                    GameSaveAutoBackupStatusText = CreateGameSaveAutoBackupStatusText();
-                    break;
-                case nameof(GameSavePeriodicIntervalMinutes):
-                    _settings.GameSavePeriodicIntervalMinutes = Math.Clamp(GameSavePeriodicIntervalMinutes, 5, 1440);
-                    if (GameSavePeriodicBackupEnabled)
-                        GameSaveAutoBackupStatusText = CreateGameSaveAutoBackupStatusText();
-                    break;
-                case nameof(SmartSaveDiscoveryEnabled):
-                    _settings.SmartSaveDiscoveryEnabled = SmartSaveDiscoveryEnabled;
-                    break;
-                case nameof(PlaySoundOnSwitch):
-                    _settings.PlaySoundOnSwitch = PlaySoundOnSwitch;
-                    break;
-                case nameof(ShowSwitchNotification):
-                    _settings.ShowSwitchNotification = ShowSwitchNotification;
-                    break;
-                case nameof(TaskbarLyricsFontSize):
-                    _settings.TaskbarLyricsFontSize = Math.Clamp(TaskbarLyricsFontSize, 12, 18);
-                    break;
-                case nameof(TaskbarLyricsFontFamily):
-                    _settings.TaskbarLyricsFontFamily = string.IsNullOrWhiteSpace(TaskbarLyricsFontFamily)
-                        ? "Segoe UI Variable Text"
-                        : TaskbarLyricsFontFamily.Trim();
-                    break;
-                case nameof(DesktopFloatingEnabled):
-                    _settings.DesktopFloatingEnabled = DesktopFloatingEnabled;
-                    break;
-                case nameof(DesktopFloatingTopmost):
-                    _settings.DesktopFloatingTopmost = DesktopFloatingTopmost;
-                    break;
-                case nameof(DesktopFloatingLocked):
-                    _settings.DesktopFloatingLocked = DesktopFloatingLocked;
-                    break;
-                case nameof(DesktopFloatingOpacity):
-                    _settings.DesktopFloatingOpacity = Math.Clamp(DesktopFloatingOpacity, 20, 100);
-                    break;
-                case nameof(DesktopFloatingAvatarSize):
-                    _settings.DesktopFloatingAvatarSize = DesktopFloatingAvatarSize;
-                    break;
-                case nameof(DesktopFloatingGlassEnabled):
-                    _settings.DesktopFloatingGlassEnabled = DesktopFloatingGlassEnabled;
-                    break;
-                case nameof(DesktopFloatingRoundedMode):
-                    _settings.DesktopFloatingRoundedMode = DesktopFloatingRoundedMode;
-                    break;
-                case nameof(DesktopFloatingGlassColor):
-                    _settings.DesktopFloatingGlassColor = DesktopFloatingGlassColor;
-                    break;
-                case nameof(Theme):
-                    _settings.Theme = Theme;
-                    ThemeManager.ApplyTheme(Theme);
-                    OnPropertyChanged(nameof(IsDarkTheme));
-                    break;
-                case nameof(EnableLibraryInjection):
-                    _settings.EnableLibraryInjection = EnableLibraryInjection;
-                    if (EnableLibraryInjection)
-                    {
-                        _ = StartInjectorAsync().ContinueWith(t =>
-                        {
-                            if (t.IsFaulted)
-                            {
-                                AppLogger.Error("StartInjectorAsync failed", t.Exception);
-                            }
-                            if (t.IsFaulted || !IsInjectorConnected)
-                            {
-                                Application.Current.Dispatcher.Invoke(() =>
-                                {
-                                    EnableLibraryInjection = false;
-                                });
-                            }
-                        }, TaskContinuationOptions.NotOnCanceled);
-                    }
-                    else
-                        StopInjector();
-                    break;
-                case nameof(AutoScanGamesOnStartup):
-                    _settings.AutoScanGamesOnStartup = AutoScanGamesOnStartup;
-                    break;
-                case nameof(ConfirmBeforeGameLaunch):
-                    _settings.ConfirmBeforeGameLaunch = ConfirmBeforeGameLaunch;
-                    break;
-                case nameof(SilentCloseSteam):
-                    _settings.SilentCloseSteam = SilentCloseSteam;
-                    break;
-                case nameof(UseBetaUpdateChannel):
-                    _settings.UseBetaUpdateChannel = UseBetaUpdateChannel;
-                    break;
-                case nameof(CheckUpdateOnStartup):
-                    _settings.CheckUpdateOnStartup = CheckUpdateOnStartup;
-                    break;
-                case nameof(AutoInstallUpdates):
-                    _settings.AutoInstallUpdates = AutoInstallUpdates;
-                    break;
-                case nameof(ShowNotificationOnSteamClose):
-                    _settings.ShowNotificationOnSteamClose = ShowNotificationOnSteamClose;
-                    break;
-                case nameof(CustomSteamPath):
-                    _settings.CustomSteamPath = CustomSteamPath;
-                    _accountManager.GetSteamService().SetCustomPaths(CustomSteamPath, CustomLoginUsersPath);
-                    _ = _accountManager.LoadAccountsAsync();
-                    break;
-                case nameof(CustomLoginUsersPath):
-                    _settings.CustomLoginUsersPath = CustomLoginUsersPath;
-                    _accountManager.GetSteamService().SetCustomPaths(CustomSteamPath, CustomLoginUsersPath);
-                    _ = _accountManager.LoadAccountsAsync();
-                    break;
-                case nameof(MinimalMode):
-                    _settings.MinimalMode = MinimalMode;
-                    InitializeMinimalModeTimer();
-                    MinimalModeChanged?.Invoke(this, MinimalMode);
-                    break;
-                case nameof(DesktopFloatingDockEnabled):
-                    _settings.DesktopFloatingDockEnabled = DesktopFloatingDockEnabled;
-                    DesktopFloatingDockEnabledChanged?.Invoke(this, DesktopFloatingDockEnabled);
-                    break;
-                default:
-                    shouldSaveSettings = false;
-                    break;
-            }
-
-            if (!shouldSaveSettings)
-                return;
-
-            ScheduleSettingsSave();
-        }
-
-        private void ScheduleSettingsSave()
-        {
-            _settingsDirty = true;
-            _settingsSaveTimer.Stop();
-            _settingsSaveTimer.Start();
-        }
-
-        private void OnAccountsChanged(object? sender, EventArgs e)
-        {
-            DispatchToUi(UpdateAccountsList);
-        }
-
-        public async Task InitializeAsync()
-        {
-            IsLoading = true;
-            StatusText = "正在检测 Steam...";
-
-            try
-            {
-                _accountManager.GetSteamService().SetCustomPaths(CustomSteamPath, CustomLoginUsersPath);
-                var success = await _accountManager.InitializeAsync();
-                if (!success)
-                {
-                    StatusText = "未找到 Steam 安装路径";
-                    return;
-                }
-
-                StatusText = $"已检测到 {_accountManager.Accounts.Count} 个账号";
-                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-                SyncGameSaveAutoBackupService();
-
-                UpdateAccountsList();
-
-                await _gameBinding.LoadAsync();
-                await _quickLaunch.LoadAsync();
-                UpdateQuickLaunchList();
-                UpdateGameBindingsList();
-
-                if (AutoScanGamesOnStartup)
-                    await ScanGamesAsync();
-
-                if (EnableLibraryInjection)
-                {
-                    AppLogger.Info("Library injection is enabled; auto-starting injector after initialization.");
-                    _ = StartInjectorAsync();
-                }
-
-                if (CheckUpdateOnStartup)
-                    _ = CheckForUpdatesAsync(isManual: false);
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("MainViewModel initialization failed.", ex);
-                StatusText = $"初始化失败: {ex.Message}";
-            }
-            finally
-            {
-                IsLoading = false;
-            }
-        }
-
-        public async Task AddQuickLaunchItemAsync(string launchPath)
-        {
-            if (string.IsNullOrEmpty(launchPath) || !System.IO.File.Exists(launchPath))
-            {
-                StatusText = "无效的快速启动路径";
-                return;
-            }
-            var name = System.IO.Path.GetFileNameWithoutExtension(launchPath);
-            await _quickLaunch.AddAsync(name, launchPath);
-            StatusText = $"已添加快速启动: {name}";
-            NotificationRequested?.Invoke(this, $"已添加: {name}");
         }
 
         public async Task RemoveQuickLaunchItemAsync(string id)
@@ -1984,130 +1359,6 @@ namespace SteamSwitcher.ViewModels
             }
         }
 
-        [RelayCommand]
-        private async Task CheckForUpdatesManually()
-        {
-            await CheckForUpdatesAsync(isManual: true);
-        }
-
-        [RelayCommand]
-        private void OpenGitHubReleases()
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = GitHubReleasesUrl,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("Open GitHub releases failed.", ex);
-                StatusText = $"无法打开 GitHub Releases: {ex.Message}";
-            }
-        }
-
-        private async Task CheckForUpdatesAsync(bool isManual)
-        {
-            if (_disposed) return;
-            var cancellationToken = _lifetimeCts.Token;
-            if (Interlocked.Exchange(ref _updateCheckInProgress, 1) != 0)
-            {
-                if (isManual)
-                    StatusText = "更新检查正在进行，请稍候…";
-                return;
-            }
-
-            try
-            {
-                if (isManual)
-                    StatusText = UseBetaUpdateChannel ? "正在检查 GitHub 测试版更新..." : "正在检查 GitHub 正式版更新...";
-
-                using var updateService = new UpdateService();
-                var updateInfo = await updateService.CheckForUpdateAsync(UseBetaUpdateChannel, cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                if (updateInfo != null)
-                {
-                    StatusText = $"发现新版本 v{updateInfo.Version}";
-                    AppLogger.Info($"New version available: v{updateInfo.Version}");
-
-                    if (AutoInstallUpdates)
-                    {
-                        await DownloadAndInstallUpdateAsync(updateService, updateInfo, cancellationToken);
-                        return;
-                    }
-
-                    UpdateAvailable?.Invoke(this, updateInfo);
-                }
-                else if (isManual)
-                {
-                    StatusText = $"当前已是最新版本 v{UpdateService.GetCurrentVersion()}";
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                AppLogger.Info("Update check canceled during shutdown.");
-            }
-            catch (UpdateCheckException ex)
-            {
-                if (isManual)
-                {
-                    AppLogger.Error("Manual update check failed.", ex);
-                    StatusText = $"检查更新失败: {ex.Message}";
-                }
-                else
-                {
-                    AppLogger.Warn($"Startup update check skipped: {ex.Message}");
-                }
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("Unexpected update check failure.", ex);
-                if (isManual)
-                    StatusText = $"检查更新失败: {ex.Message}";
-            }
-            finally
-            {
-                Volatile.Write(ref _updateCheckInProgress, 0);
-            }
-        }
-        private async Task DownloadAndInstallUpdateAsync(UpdateService updateService, UpdateInfo updateInfo, CancellationToken cancellationToken)
-        {
-            if (string.IsNullOrEmpty(updateInfo.DownloadUrl))
-            {
-                StatusText = "发现新版本，但没有可用的安装包下载链接";
-                UpdateAvailable?.Invoke(this, updateInfo);
-                return;
-            }
-
-            if (!updateInfo.FileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-            {
-                StatusText = "发现新版本，但自动更新需要 setup 安装包";
-                UpdateAvailable?.Invoke(this, updateInfo);
-                return;
-            }
-
-            try
-            {
-                StatusText = $"正在下载 v{updateInfo.Version} 更新...";
-                var filePath = await updateService.DownloadUpdateToFileAsync(updateInfo, cancellationToken);
-                StatusText = "更新下载完成，正在启动安装器...";
-                if (!UpdateService.LaunchInstaller(filePath, updateInfo.ExpectedSha256, silent: true))
-                    StatusText = "无法启动更新安装器，请稍后重试";
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                AppLogger.Info("Automatic update download canceled during shutdown.");
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("Auto update failed.", ex);
-                StatusText = $"自动更新失败: {ex.Message}";
-                UpdateAvailable?.Invoke(this, updateInfo);
-            }
-        }
-
         private void UpdateAccountsList()
         {
             var pinnedIds = _settings.PinnedAccountIds ?? new List<string>();
@@ -2134,14 +1385,27 @@ namespace SteamSwitcher.ViewModels
             }
 
             UpdateCurrentAccount();
+            NotifyAccountLibraryMetrics();
             OnPropertyChanged(nameof(AccountCountText));
             OnPropertyChanged(nameof(PinnedCountText));
+        }
+
+        private void NotifyAccountLibraryMetrics()
+        {
+            OnPropertyChanged(nameof(ArchivedAccountCount));
+            OnPropertyChanged(nameof(HasArchivedAccounts));
+            OnPropertyChanged(nameof(SteamListedAccountCount));
+            OnPropertyChanged(nameof(AccountLibraryCountsText));
+            OnPropertyChanged(nameof(AccountRecoveryButtonText));
+            OnPropertyChanged(nameof(AccountLibraryBadgeText));
+            OnPropertyChanged(nameof(AccountLibrarySummaryText));
         }
 
         partial void OnIsSteamRunningChanged(bool value)
         {
             OnPropertyChanged(nameof(SteamStateText));
             OnPropertyChanged(nameof(SteamStatusText));
+            OnPropertyChanged(nameof(AccountActionHint));
         }
 
         partial void OnIsInjectorConnectedChanged(bool value)
@@ -2158,9 +1422,26 @@ namespace SteamSwitcher.ViewModels
 
         partial void OnIsTaskbarPinnedChanged(bool value) => OnPropertyChanged(nameof(TaskbarPinnedStatusText));
 
-        partial void OnAutoInstallUpdatesChanged(bool value) => OnPropertyChanged(nameof(AutoUpdateStatusText));
+        partial void OnAutoInstallUpdatesChanged(bool value)
+        {
+            // Automatic installation has no effect without an update check.
+            // Keep the two settings consistent when the user enables it at runtime.
+            if (value && !CheckUpdateOnStartup)
+                CheckUpdateOnStartup = true;
+            OnPropertyChanged(nameof(AutoUpdateStatusText));
+        }
 
-        partial void OnCheckUpdateOnStartupChanged(bool value) => OnPropertyChanged(nameof(AutoUpdateStatusText));
+        partial void OnCheckUpdateOnStartupChanged(bool value)
+        {
+            // Do not allow a contradictory state where auto-install is enabled
+            // but startup checks are disabled.
+            if (!value && AutoInstallUpdates)
+            {
+                CheckUpdateOnStartup = true;
+                return;
+            }
+            OnPropertyChanged(nameof(AutoUpdateStatusText));
+        }
 
         partial void OnSelectedGameChanged(GameListViewModel? value)
         {
@@ -2175,8 +1456,11 @@ namespace SteamSwitcher.ViewModels
         partial void OnSelectedBindingAccountChanged(AccountViewModel? value) =>
             OnPropertyChanged(nameof(CanSaveGameBinding));
 
-        partial void OnSelectedAccountChanged(AccountViewModel? value) =>
+        partial void OnSelectedAccountChanged(AccountViewModel? value)
+        {
             OnPropertyChanged(nameof(CanSaveGameBinding));
+            NotifyAccountPresentation();
+        }
 
         partial void OnGameListChanged(ObservableCollection<GameListViewModel> value)
         {
@@ -2186,11 +1470,22 @@ namespace SteamSwitcher.ViewModels
 
         private void OnAccountPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            if (e.PropertyName == nameof(AccountViewModel.IsPinned))
+            if (e.PropertyName == nameof(AccountViewModel.IsCurrent) && ReferenceEquals(sender, SelectedAccount))
+                NotifyAccountPresentation();
+            if (e.PropertyName == nameof(AccountViewModel.IsPinned) && sender is AccountViewModel account)
             {
-                var pinnedIds = Accounts.Where(a => a.IsPinned).Select(a => a.SteamId).ToList();
+                var pinnedIds = _settings.PinnedAccountIds ?? new List<string>();
+                if (account.IsPinned)
+                {
+                    if (!pinnedIds.Contains(account.SteamId))
+                        pinnedIds.Add(account.SteamId);
+                }
+                else
+                {
+                    pinnedIds.Remove(account.SteamId);
+                }
                 _settings.PinnedAccountIds = pinnedIds;
-                SettingsService.Save(_settings);
+                SaveSettingsNow();
                 OnPropertyChanged(nameof(PinnedCountText));
                 PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -2235,12 +1530,14 @@ namespace SteamSwitcher.ViewModels
         private async Task SwitchAccountAsync(bool launchSteam)
         {
             if (SelectedAccount == null) return;
-            if (IsLoading)
+            if (!await _operationGate.WaitAsync(0))
             {
                 StatusText = "账号操作正在进行，请稍候";
                 return;
             }
 
+            try
+            {
             var currentSteamId = _accountManager.CurrentAccount?.SteamId;
             var currentAccountName = _accountManager.CurrentAccount?.AccountName;
             var selectedSteamId = SelectedAccount.Account.SteamId;
@@ -2256,6 +1553,7 @@ namespace SteamSwitcher.ViewModels
 
             if (isCurrentAccount)
             {
+                ClearFailedAccountSwitch();
                 StatusText = $"{SelectedAccount.DisplayName} 已是当前账号";
                 NotificationRequested?.Invoke(this, $"{SelectedAccount.DisplayName} 已是当前账号");
                 if (launchSteam)
@@ -2277,6 +1575,7 @@ namespace SteamSwitcher.ViewModels
                 var success = await _accountManager.SwitchAccountAsync(SelectedAccount.Account, SilentCloseSteam);
                 if (success)
                 {
+                    ClearFailedAccountSwitch();
                     StatusText = $"已切换到 {SelectedAccount.Account.PersonaName}";
                     if (ShowSwitchNotification)
                     {
@@ -2298,6 +1597,7 @@ namespace SteamSwitcher.ViewModels
                 }
                 else
                 {
+                    RememberFailedAccountSwitch(SelectedAccount, launchSteam);
                     StatusText = "切换失败，请确保 Steam 已关闭";
                     if (ShowSwitchNotification)
                     {
@@ -2308,16 +1608,47 @@ namespace SteamSwitcher.ViewModels
             catch (Exception ex)
             {
                 AppLogger.Error("SwitchAccountAsync failed.", ex);
+                RememberFailedAccountSwitch(SelectedAccount, launchSteam);
                 StatusText = $"切换失败: {ex.Message}";
             }
 
             finally
             {
                 IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-                IsLoading = false;
                 if (MinimalMode)
                     Core.MemoryLimiter.CleanMemory();
             }
+            }
+            finally
+            {
+                IsLoading = false;
+                _operationGate.Release();
+            }
+        }
+
+        public async Task RetryLastAccountSwitchAsync()
+        {
+            var account = _lastFailedSwitchAccount;
+            if (account == null || IsLoading)
+                return;
+
+            SelectedAccount = account;
+            await SwitchAccountAsync(_lastFailedSwitchLaunchSteam);
+        }
+
+        private void RememberFailedAccountSwitch(AccountViewModel account, bool launchSteam)
+        {
+            _lastFailedSwitchAccount = account;
+            _lastFailedSwitchLaunchSteam = launchSteam;
+            OnPropertyChanged(nameof(HasFailedAccountSwitch));
+        }
+
+        private void ClearFailedAccountSwitch()
+        {
+            if (_lastFailedSwitchAccount == null)
+                return;
+            _lastFailedSwitchAccount = null;
+            OnPropertyChanged(nameof(HasFailedAccountSwitch));
         }
 
         [RelayCommand]
@@ -2329,7 +1660,8 @@ namespace SteamSwitcher.ViewModels
             try
             {
                 await _accountManager.LoadAccountsAsync();
-                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
+                // 进程枚举 + 读 MainModule 是重同步 IO，Steam 进程多时会卡顿 UI。
+                IsSteamRunning = await Task.Run(() => _accountManager.GetSteamService().IsSteamRunning());
                 UpdateAccountsList();
                 StatusText = $"已刷新，共 {_accountManager.Accounts.Count} 个账号";
             }
@@ -2365,6 +1697,8 @@ namespace SteamSwitcher.ViewModels
                 StatusText = closed && !IsSteamRunning
                     ? "Steam 已关闭"
                     : "Steam 未能完全退出，可启用强制关闭 Steam 后重试";
+                if (closed && !IsSteamRunning && GetSettings().ShowNotificationOnSteamClose)
+                    NotificationRequested?.Invoke(this, "Steam 已关闭");
             }
             catch (Exception ex)
             {
@@ -2378,308 +1712,16 @@ namespace SteamSwitcher.ViewModels
             }
         }
 
-        [RelayCommand]
-        private async Task StartInjectorAsync()
-        {
-            if (_disposed) return;
-            var cancellationToken = _lifetimeCts.Token;
-            if (_injector != null && _injector.IsConnected)
-            {
-                StatusText = $"注入器已连接，日志: {AppLogger.CurrentLogPath}";
-                return;
-            }
-
-            bool confirmed = false;
-            await Application.Current.Dispatcher.InvokeAsync(() =>
-            {
-                var warningResult = MessageBox.Show(
-                    Application.Current.MainWindow,
-                    "开启 Steam 库界面注入将启用 CEF 调试端口并向 Steam 客户端注入脚本。\n\n" +
-                    "风险提示：\n" +
-                    "1. 可能违反 Steam 服务条款，存在账号封禁风险\n" +
-                    "2. 不建议在 VAC、竞技或反作弊敏感游戏中使用\n" +
-                    "3. 可能导致 Steam 客户端不稳定\n\n" +
-                    "确定要继续吗？",
-                    "风险警告",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning);
-
-                confirmed = warningResult == MessageBoxResult.Yes;
-            });
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!confirmed)
-                return;
-
-            IsLoading = true;
-            StatusText = "正在启动注入器...";
-            AppLogger.Info("StartInjectorAsync requested.");
-
-            try
-            {
-                CleanupInjectorResources();
-                var webSocketPort = FindAvailablePort(8081);
-                var webSocketToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-                _wsServer = new WebSocketServer(webSocketPort, webSocketToken);
-                _wsServer.MessageReceived += OnWebSocketMessage;
-                _wsServer.ClientConnected += (s, id) => AppLogger.Info($"Library WebSocket client connected: {id}");
-                _wsServer.ClientDisconnected += (s, id) => AppLogger.Info($"Library WebSocket client disconnected: {id}");
-                await _wsServer.StartAsync();
-                cancellationToken.ThrowIfCancellationRequested();
-                AppLogger.Info($"Authenticated local WebSocket server started on port {webSocketPort}.");
-
-                var debugReady = await EnsureSteamDebuggingAsync(cancellationToken);
-                if (!debugReady.HasValue)
-                {
-                    CleanupInjectorResources();
-                    StatusText = $"无法打开 Steam 调试端口，日志: {AppLogger.CurrentLogPath}";
-                    return;
-                }
-
-                _injector = new SteamCEFInjector(
-                    _gameBinding,
-                    _accountManager,
-                    debugReady.Value,
-                    webSocketPort,
-                    webSocketToken);
-                _injector.StatusChanged += (s, msg) =>
-                {
-                    AppLogger.Info($"Injector status: {msg}");
-                    StatusText = msg;
-                };
-
-                var connected = await _injector.ConnectAsync();
-                cancellationToken.ThrowIfCancellationRequested();
-                IsInjectorConnected = connected;
-                if (!connected)
-                    CleanupInjectorResources();
-                StatusText = connected
-                    ? $"注入器已启动，日志: {AppLogger.CurrentLogPath}"
-                    : $"注入失败，日志: {AppLogger.CurrentLogPath}";
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                CleanupInjectorResources();
-                AppLogger.Info("Injector startup canceled during shutdown.");
-            }
-            catch (Exception ex)
-            {
-                CleanupInjectorResources();
-                IsInjectorConnected = false;
-                AppLogger.Error("StartInjectorAsync failed.", ex);
-                StatusText = $"注入启动失败: {ex.Message}，日志: {AppLogger.CurrentLogPath}";
-            }
-            finally
-            {
-                IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-                IsLoading = false;
-            }
-        }
-
-        private async Task<int?> EnsureSteamDebuggingAsync(CancellationToken cancellationToken)
-        {
-            if (await IsSteamDebugPortOpenAsync(SteamDebugPort, cancellationToken))
-            {
-                AppLogger.Info("Steam debug port is already open.");
-                return SteamDebugPort;
-            }
-
-            var steamService = _accountManager.GetSteamService();
-            if (steamService.IsSteamRunning())
-            {
-                StatusText = "Steam 已运行但未开启调试模式，正在重启 Steam...";
-                AppLogger.Info("Steam is running without debug port. Restarting with CEF debugging.");
-
-                var closed = await steamService.CloseSteamAsync();
-                if (!closed)
-                {
-                    AppLogger.Info("Failed to close Steam before starting debug mode.");
-                    return null;
-                }
-            }
-
-            var debugPort = FindAvailablePort(SteamDebugPort);
-            AppLogger.Info($"Using debug port: {debugPort}");
-
-            StatusText = "正在以调试模式启动 Steam...";
-            var started = steamService.StartSteamWithDebugging(debugPort: debugPort);
-            if (!started)
-            {
-                AppLogger.Info("StartSteamWithDebugging returned false.");
-                return null;
-            }
-
-            for (var i = 0; i < 30; i++)
-            {
-                await Task.Delay(1000, cancellationToken);
-                if (await IsSteamDebugPortOpenAsync(debugPort, cancellationToken))
-                {
-                    AppLogger.Info($"Steam debug port became ready after {i + 1} seconds.");
-                    await Task.Delay(1500, cancellationToken);
-                    return debugPort;
-                }
-            }
-
-            AppLogger.Info("Timed out waiting for Steam debug port.");
-            return null;
-        }
-
-        private static async Task<bool> IsSteamDebugPortOpenAsync(int port, CancellationToken cancellationToken)
-        {
-            try
-            {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-                using var response = await http.GetAsync($"http://127.0.0.1:{port}/json/version", cancellationToken);
-                var json = response.IsSuccessStatusCode
-                    ? await response.Content.ReadAsStringAsync(cancellationToken)
-                    : "";
-                var ok = response.IsSuccessStatusCode &&
-                         json.Contains("webSocketDebuggerUrl", StringComparison.OrdinalIgnoreCase);
-                AppLogger.Info($"Debug port check: status={(int)response.StatusCode}, ok={ok}");
-                return ok;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Info($"Debug port check failed: {ex.GetType().Name}: {ex.Message}");
-                return false;
-            }
-        }
-
-        private static bool IsPortAvailable(int port)
-        {
-            try
-            {
-                using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
-                listener.Start();
-                return true;
-            }
-            catch (System.Net.Sockets.SocketException)
-            {
-                return false;
-            }
-        }
-
-        private static int FindAvailablePort(int startPort)
-        {
-            for (var port = startPort; port < startPort + 100; port++)
-            {
-                if (IsPortAvailable(port))
-                    return port;
-            }
-            throw new InvalidOperationException($"未找到可用的本地端口（{startPort}-{startPort + 99}）。");
-        }
-
-        [RelayCommand]
-        private void StopInjector()
-        {
-            AppLogger.Info("StopInjector requested.");
-            CleanupInjectorResources();
-            IsInjectorConnected = false;
-            StatusText = "注入器已停止";
-        }
-
-        private void CleanupInjectorResources()
-        {
-            try
-            {
-                _injector?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Warn($"Failed to dispose Steam CEF injector: {ex.Message}");
-            }
-            _injector = null;
-
-            try
-            {
-                _wsServer?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Warn($"Failed to dispose library WebSocket server: {ex.Message}");
-            }
-            _wsServer = null;
-        }
-
-        private void OnWebSocketMessage(object? sender, (string action, System.Text.Json.JsonElement data) e)
-        {
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher == null || dispatcher.HasShutdownStarted)
-                return;
-
-            if (!dispatcher.CheckAccess())
-            {
-                _ = dispatcher.BeginInvoke(new Action(() => OnWebSocketMessage(sender, e)));
-                return;
-            }
-
-            _ = HandleWebSocketMessageAsync(e);
-        }
-
-        private async Task HandleWebSocketMessageAsync((string action, System.Text.Json.JsonElement data) e)
-        {
-            try
-            {
-                AppLogger.Info($"WebSocket action received: {e.action}");
-
-                switch (e.action)
-                {
-                    case "log":
-                        if (e.data.TryGetProperty("message", out var msg))
-                        {
-                            AppLogger.Info($"Library script: {msg.GetString()}");
-                        }
-                        break;
-
-                    case "switchAndLaunch":
-                        if (e.data.TryGetProperty("appId", out var appIdElement))
-                        {
-                            var appId = appIdElement.GetInt32();
-                            var gameName = e.data.TryGetProperty("gameName", out var nameEl)
-                                ? nameEl.GetString() ?? ""
-                                : "";
-                            var steamId = e.data.TryGetProperty("steamId", out var steamIdEl)
-                                ? steamIdEl.GetString()
-                                : null;
-
-                            await SwitchAccountAndLaunchGameAsync(appId, gameName, steamId);
-                        }
-                        break;
-
-                    case "setBinding":
-                        if (e.data.TryGetProperty("appId", out var bindAppId) &&
-                            e.data.TryGetProperty("gameName", out var bindGameName) &&
-                            e.data.TryGetProperty("steamId", out var bindSteamId) &&
-                            e.data.TryGetProperty("accountName", out var bindAccountName))
-                        {
-                            await _gameBinding.SetBindingAsync(
-                                bindAppId.GetInt32(),
-                                bindGameName.GetString() ?? "",
-                                bindSteamId.GetString() ?? "",
-                                bindAccountName.GetString() ?? "");
-                            AppLogger.Info($"Binding saved from library: appId={bindAppId.GetInt32()}, account={bindAccountName.GetString()}");
-                        }
-                        break;
-                }
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("WebSocket message handling failed.", ex);
-                System.Diagnostics.Debug.WriteLine($"WebSocket message error: {ex.Message}");
-            }
-        }
-
         private async Task SwitchAccountAndLaunchGameAsync(int appId, string gameName, string? steamId)
         {
-            if (IsLoading)
+            if (!await _operationGate.WaitAsync(0))
             {
                 StatusText = "已有账号或游戏操作正在进行，请稍候";
                 return;
             }
+
+            try
+            {
             IsLoading = true;
 
             var account = !string.IsNullOrEmpty(steamId)
@@ -2696,7 +1738,6 @@ namespace SteamSwitcher.ViewModels
             {
                 AppLogger.Info($"No account binding found for appId={appId}.");
                 StatusText = "请先为此游戏选择账号";
-                IsLoading = false;
                 return;
             }
 
@@ -2736,7 +1777,6 @@ namespace SteamSwitcher.ViewModels
                 finally
                 {
                     IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-                    IsLoading = false;
                 }
                 return;
             }
@@ -2787,11 +1827,16 @@ namespace SteamSwitcher.ViewModels
             finally
             {
                 IsSteamRunning = _accountManager.GetSteamService().IsSteamRunning();
-                IsLoading = false;
                 if (MinimalMode)
                 {
                     Core.MemoryLimiter.CleanMemory();
                 }
+            }
+            }
+            finally
+            {
+                IsLoading = false;
+                _operationGate.Release();
             }
         }
 
@@ -2812,37 +1857,47 @@ namespace SteamSwitcher.ViewModels
                 return;
 
             _disposed = true;
-            _lifetimeCts.Cancel();
-            _settingsSaveTimer.Stop();
-            _settingsSaveTimer.Tick -= OnSettingsSaveTimerTick;
-            _steamStatusTimer.Stop();
-            _steamStatusTimer.Tick -= OnSteamStatusTimerTick;
-            SavePendingSettings();
-            _launchWorkflowCts.Cancel();
-            _launchWorkflowCts.Dispose();
-
-            if (_minimalModeTimer != null)
-            {
-                _minimalModeTimer.Stop();
-                _minimalModeTimer.Tick -= OnMinimalModeTimerTick;
-            }
-
-            PropertyChanged -= OnPropertyChanged;
-            Accounts.CollectionChanged -= OnDashboardCollectionChanged;
-            GameList.CollectionChanged -= OnDashboardCollectionChanged;
-            GameBindings.CollectionChanged -= OnDashboardCollectionChanged;
-            _accountManager.AccountsChanged -= OnAccountsChanged;
-            _gameBinding.BindingsChanged -= OnGameBindingsChanged;
-            _quickLaunch.ItemsChanged -= OnQuickLaunchItemsChanged;
-            _accountManager.BeforeAccountSwitchAsync = null;
-            _gameSaveAutoBackupService.BackupCompleted -= OnGameSaveAutoBackupCompleted;
-            _gameSaveAutoBackupService.Dispose();
-            foreach (var account in Accounts)
-                account.PropertyChanged -= OnAccountPropertyChanged;
-
-            CleanupInjectorResources();
-            _quickLaunch.Dispose();
-            _accountManager.Dispose();
+            ExitCleanup.Run(
+                ("injection cancellation", () => _injectorAttemptCts?.Cancel()),
+                ("view-model cancellation", _lifetimeCts.Cancel),
+                ("view-model token", _lifetimeCts.Dispose),
+                ("settings timer", () =>
+                {
+                    _settingsSaveTimer.Stop();
+                    _settingsSaveTimer.Tick -= OnSettingsSaveTimerTick;
+                }),
+                ("Steam status timer", () =>
+                {
+                    _steamStatusTimer.Stop();
+                    _steamStatusTimer.Tick -= OnSteamStatusTimerTick;
+                }),
+                ("pending settings", () => SavePendingSettings()),
+                ("launch cancellation", _launchWorkflowCts.Cancel),
+                ("launch token", _launchWorkflowCts.Dispose),
+                ("memory timer", () =>
+                {
+                    if (_minimalModeTimer == null) return;
+                    _minimalModeTimer.Stop();
+                    _minimalModeTimer.Tick -= OnMinimalModeTimerTick;
+                }),
+                ("view-model subscriptions", () =>
+                {
+                    PropertyChanged -= OnPropertyChanged;
+                    Accounts.CollectionChanged -= OnDashboardCollectionChanged;
+                    GameList.CollectionChanged -= OnDashboardCollectionChanged;
+                    GameBindings.CollectionChanged -= OnDashboardCollectionChanged;
+                    _accountManager.AccountsChanged -= OnAccountsChanged;
+                    _gameBinding.BindingsChanged -= OnGameBindingsChanged;
+                    _quickLaunch.ItemsChanged -= OnQuickLaunchItemsChanged;
+                    _accountManager.BeforeAccountSwitchAsync = null;
+                    _gameSaveAutoBackupService.BackupCompleted -= OnGameSaveAutoBackupCompleted;
+                    foreach (var account in Accounts)
+                        account.PropertyChanged -= OnAccountPropertyChanged;
+                }),
+                ("automatic backup", _gameSaveAutoBackupService.Dispose),
+                ("injection resources", CleanupInjectorResources),
+                ("quick-launch service", _quickLaunch.Dispose),
+                ("account service", _accountManager.Dispose));
             GC.SuppressFinalize(this);
         }
 
@@ -2901,6 +1956,8 @@ namespace SteamSwitcher.ViewModels
         private string _gameName = "";
 
         public string Name => GameName;
+
+        partial void OnGameNameChanged(string value) => OnPropertyChanged(nameof(Name));
 
         [ObservableProperty]
         private string? _installDir;
@@ -2967,6 +2024,13 @@ namespace SteamSwitcher.ViewModels
 
         [ObservableProperty]
         private bool _isPinned;
+
+        /// <summary>
+        /// True when Steam has pruned this account from loginusers.vdf and the
+        /// app only knows it from the local account library. Switching restores
+        /// it into loginusers.vdf first.
+        /// </summary>
+        public bool IsArchived => Account.IsArchived;
 
         public AccountViewModel(SteamAccount account)
         {

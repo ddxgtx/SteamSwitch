@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using SteamSwitcher.Core;
 using SteamSwitcher.Models;
@@ -16,6 +18,8 @@ namespace SteamSwitcher.Services
         public bool StartWithWindows { get; set; }
         public bool PlaySoundOnSwitch { get; set; } = true;
         public bool ShowSwitchNotification { get; set; } = true;
+        public string BackupExportDirectory { get; set; } = "";
+        public bool AskBeforeBackupExport { get; set; }
         public bool TaskbarPinned { get; set; }
         public TaskbarPosition TaskbarPosition { get; set; } = TaskbarPosition.Right;
         public int TaskbarMonitorIndex { get; set; }
@@ -25,18 +29,6 @@ namespace SteamSwitcher.Services
         public int TaskbarAvatarSize { get; set; } = 38;
         public bool TaskbarGlassEnabled { get; set; } = true;
         public bool TaskbarRoundedMode { get; set; } = true;
-        public bool TaskbarAppearanceEnabled { get; set; }
-        public TaskbarAppearanceMode TaskbarAppearanceMode { get; set; } = TaskbarAppearanceMode.Clear;
-        public string TaskbarAppearanceColor { get; set; } = "#000000";
-        public int TaskbarAppearanceOpacity { get; set; } = 0;
-        public bool TaskbarDynamicMaximized { get; set; } = false;
-        public TaskbarAppearanceMode TaskbarMaximizedMode { get; set; } = TaskbarAppearanceMode.Opaque;
-        public bool TaskbarDynamicStartMenu { get; set; } = false;
-        public TaskbarAppearanceMode TaskbarStartMenuMode { get; set; } = TaskbarAppearanceMode.Normal;
-        public bool TaskbarDynamicSearch { get; set; } = false;
-        public TaskbarAppearanceMode TaskbarSearchMode { get; set; } = TaskbarAppearanceMode.Normal;
-        public bool TaskbarDynamicTaskView { get; set; } = false;
-        public TaskbarAppearanceMode TaskbarTaskViewMode { get; set; } = TaskbarAppearanceMode.Normal;
         public DesktopEnhanceSettings DesktopEnhance { get; set; } = new();
         public bool DesktopIconsHiddenByApp { get; set; }
         public bool TaskbarLyricsEnabled { get; set; }
@@ -51,7 +43,10 @@ namespace SteamSwitcher.Services
         public string TaskbarLyricsFontFamily { get; set; } = "Segoe UI Variable Text";
         public bool TaskbarLyricsTrackInfoOnly { get; set; }
         public bool TaskbarLyricsShowSecondaryLine { get; set; } = true;
-        public int TaskbarLyricsPollingIntervalMs { get; set; } = 120;
+        public bool TaskbarLyricsShowProgressBar { get; set; } = true;
+        public bool TaskbarLyricsHideWhenNoMedia { get; set; } = true;
+        public bool TaskbarLyricsMusicOnly { get; set; } = true;
+        public int TaskbarLyricsPollingIntervalMs { get; set; } = 250;
         public int TaskbarLyricsVerticalOffset { get; set; }
         public bool LyricSourceQQEnabled { get; set; } = true;
         public bool LyricSourceNeteaseEnabled { get; set; } = true;
@@ -77,6 +72,9 @@ namespace SteamSwitcher.Services
         public string DesktopFloatingGlassColor { get; set; } = "#4A90D9";
         public double? DesktopFloatingLeft { get; set; }
         public double? DesktopFloatingTop { get; set; }
+        public string? DesktopFloatingMonitorId { get; set; }
+        public double? DesktopFloatingRelativeLeft { get; set; }
+        public double? DesktopFloatingRelativeTop { get; set; }
         public bool EnableLibraryInjection { get; set; }
         public bool AutoScanGamesOnStartup { get; set; }
         public bool ConfirmBeforeGameLaunch { get; set; } = true;
@@ -85,6 +83,10 @@ namespace SteamSwitcher.Services
         public bool CheckUpdateOnStartup { get; set; } = true;
         public bool AutoInstallUpdates { get; set; }
         public bool ShowNotificationOnSteamClose { get; set; }
+        public string AccountFilterMode { get; set; } = "All";
+        public string AccountSortMode { get; set; } = "Recent";
+        public string GameFilterMode { get; set; } = "All";
+        public bool AccountGridMode { get; set; }
         public string Theme { get; set; } = "Dark";
         public bool MinimalMode { get; set; } = false;
         public bool DesktopFloatingDockEnabled { get; set; } = true;
@@ -93,6 +95,14 @@ namespace SteamSwitcher.Services
         public List<string> PinnedPanelItemOrder { get; set; } = new();
         public string CustomSteamPath { get; set; } = "";
         public string CustomLoginUsersPath { get; set; } = "";
+
+        // 主窗口布局持久化。null 表示从未保存过（首次运行走 XAML 默认的 CenterScreen）。
+        // 几何单位是 DIP；最大化时保存的是"还原后"的几何（RestoreBounds）。
+        public double? MainWindowLeft { get; set; }
+        public double? MainWindowTop { get; set; }
+        public double? MainWindowWidth { get; set; }
+        public double? MainWindowHeight { get; set; }
+        public bool MainWindowMaximized { get; set; }
     }
 
     public static class SettingsService
@@ -106,23 +116,125 @@ namespace SteamSwitcher.Services
         public static string SettingsPath => Path.Combine(SettingsDirectory, "settings.json");
         public static string BackupSettingsPath => SettingsPath + ".bak";
 
+        /// <summary>
+        /// settings.json 有两个写入方：正常保存走 <see cref="Save"/>，配置包导入走
+        /// AtomicJsonFile.WriteAsync。两者必须共用这一把锁，否则导入与去抖自动保存
+        /// 并发时 File.Replace 会失败，或后写的一方把另一方的内容覆盖掉。
+        /// </summary>
+        internal static void RunUnderSettingsFileLock(Action action)
+        {
+            lock (FileLock)
+            {
+                action();
+            }
+        }
+
         public static AppSettings Load()
         {
             lock (FileLock)
             {
-                if (TryLoad(SettingsPath, out var settings))
+                if (TryLoad(SettingsPath, out var settings, out var primaryTransient))
                     return Normalize(settings);
 
-                if (TryLoad(BackupSettingsPath, out settings))
+                // 主文件只是"暂时读不到"（被并发写入占用、杀软扫描、云同步），
+                // 此时绝不能走下面的 .bak 回写分支——那会用陈旧备份覆盖真实配置。
+                // 仅在内存里用备份或默认值顶上，等下一次启动再读。
+                if (primaryTransient)
+                {
+                    if (TryLoad(BackupSettingsPath, out settings, out _))
+                    {
+                        AppLogger.Warn("Primary settings file is temporarily unreadable; using the previous backup in memory only.");
+                        return Normalize(settings);
+                    }
+
+                    AppLogger.Warn("Primary settings file is temporarily unreadable; using in-memory defaults without writing.");
+                    return new AppSettings();
+                }
+
+                if (TryLoad(BackupSettingsPath, out settings, out _))
                 {
                     AppLogger.Warn("Primary settings file is unavailable; recovered the previous settings backup.");
-                    return Normalize(settings);
+                    var recovered = Normalize(settings);
+                    string? recoveryPath = null;
+                    try
+                    {
+                        var json = JsonSerializer.Serialize(recovered, new JsonSerializerOptions { WriteIndented = true });
+                        recoveryPath = SettingsPath + ".recovered.tmp";
+                        Directory.CreateDirectory(SettingsDirectory);
+                        File.WriteAllText(recoveryPath, json);
+                        File.Move(recoveryPath, SettingsPath, overwrite: true);
+                        recoveryPath = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Warn($"Recovered settings could not repair the primary file: {ex.Message}");
+                    }
+                    finally
+                    {
+                        if (recoveryPath != null)
+                        {
+                            try { File.Delete(recoveryPath); } catch { }
+                        }
+                    }
+                    return recovered;
                 }
+
+                // 重置为默认值之前先留一份损坏副本：settings.json 常常只是
+                // 某一个字段类型不对就被整体判死，用户需要能找回原文件。
+                TryPreserveCorruptSettings();
+
+                var defaults = new AppSettings();
+                if (Save(defaults))
+                    AppLogger.Warn("Primary and backup settings were unavailable; rebuilt default settings. A copy of the unreadable file was kept as settings.json.corrupt-*.");
+                else
+                    AppLogger.Warn("Primary and backup settings were unavailable; using in-memory defaults because the file could not be rebuilt.");
+                return defaults;
             }
-            return new AppSettings();
         }
 
-        public static void Save(AppSettings settings)
+        /// <summary>
+        /// 把读不出来的设置文件另存为 settings.json.corrupt-&lt;时间戳&gt;，
+        /// 保留最近若干份，避免用户的配置被默认值无声覆盖后无从找回。
+        /// </summary>
+        private static void TryPreserveCorruptSettings()
+        {
+            foreach (var source in new[] { SettingsPath, BackupSettingsPath })
+            {
+                try
+                {
+                    if (!File.Exists(source)) continue;
+                    Directory.CreateDirectory(SettingsDirectory);
+                    var target = Path.Combine(
+                        SettingsDirectory,
+                        $"settings.json.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}{Path.GetExtension(source).Replace(".json", string.Empty)}");
+                    File.Copy(source, target, overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Warn($"Could not preserve unreadable settings file {source}: {ex.Message}");
+                }
+            }
+
+            try
+            {
+                var directory = new DirectoryInfo(SettingsDirectory);
+                if (!directory.Exists) return;
+                var stale = directory.GetFiles("settings.json.corrupt-*")
+                    .OrderByDescending(file => file.LastWriteTimeUtc)
+                    .Skip(5)
+                    .ToList();
+                foreach (var file in stale)
+                {
+                    try { file.Delete(); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Could not prune old corrupt settings copies: {ex.Message}");
+            }
+        }
+
+        public static bool Save(AppSettings settings)
         {
             lock (FileLock)
             {
@@ -152,10 +264,12 @@ namespace SteamSwitcher.Services
 
                     ReplaceFileWithBackup(temporaryPath, SettingsPath, BackupSettingsPath);
                     temporaryPath = null;
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     AppLogger.Error("Failed to save settings.", ex);
+                    return false;
                 }
                 finally
                 {
@@ -170,41 +284,98 @@ namespace SteamSwitcher.Services
         public static AppSettings Normalize(AppSettings? settings)
         {
             settings ??= new AppSettings();
+            settings.DesktopFloatingRelativeLeft = NormalizeRelativePosition(settings.DesktopFloatingRelativeLeft);
+            settings.DesktopFloatingRelativeTop = NormalizeRelativePosition(settings.DesktopFloatingRelativeTop);
             settings.CustomGameSaveFolders ??= new List<CustomGameSaveDefinition>();
             settings.PinnedAccountIds ??= new List<string>();
             settings.PinnedGameIds ??= new List<int>();
             settings.PinnedPanelItemOrder ??= new List<string>();
             settings.CustomSteamPath ??= string.Empty;
             settings.CustomLoginUsersPath ??= string.Empty;
+            settings.BackupExportDirectory = (settings.BackupExportDirectory ?? string.Empty).Trim();
             settings.DesktopEnhance ??= new DesktopEnhanceSettings();
+            // 主窗口布局：NaN/Infinity（settings 被手改或磁盘损坏）一律按"未保存"处理，
+            // 恢复时会走默认居中而不是把窗口放到奇怪的位置。
+            settings.MainWindowLeft = NormalizeCoordinate(settings.MainWindowLeft);
+            settings.MainWindowTop = NormalizeCoordinate(settings.MainWindowTop);
+            settings.MainWindowWidth = NormalizeCoordinate(settings.MainWindowWidth);
+            settings.MainWindowHeight = NormalizeCoordinate(settings.MainWindowHeight);
             settings.DesktopEnhance.IdleSeconds = Math.Clamp(settings.DesktopEnhance.IdleSeconds, 5, 300);
             settings.DesktopEnhance.AnimationDuration = Math.Clamp(settings.DesktopEnhance.AnimationDuration, 200, 1000);
             settings.TaskbarMonitorIndex = Math.Clamp(settings.TaskbarMonitorIndex, 0, 8);
+            settings.TaskbarOffsetX = Math.Clamp(settings.TaskbarOffsetX, -100, 100);
+            settings.TaskbarOffsetY = Math.Clamp(settings.TaskbarOffsetY, -100, 100);
+            settings.TaskbarWindowSize = Math.Clamp(settings.TaskbarWindowSize, 2, 30);
+            settings.TaskbarAvatarSize = Math.Clamp(settings.TaskbarAvatarSize, 16, 96);
             settings.TaskbarLyricsWidth = Math.Clamp(settings.TaskbarLyricsWidth, 240, 720);
             settings.TaskbarLyricsPollingIntervalMs = Math.Clamp(settings.TaskbarLyricsPollingIntervalMs, 60, 1000);
             settings.TaskbarLyricsVerticalOffset = Math.Clamp(settings.TaskbarLyricsVerticalOffset, -12, 12);
-            settings.TaskbarLyricsFontSize = settings.TaskbarLyricsFontSize <= 12
-                ? 14
-                : Math.Clamp(settings.TaskbarLyricsFontSize, 12, 18);
+            settings.TaskbarLyricsFontSize = Math.Clamp(settings.TaskbarLyricsFontSize, 12, 18);
             settings.TaskbarLyricsFontFamily = string.IsNullOrWhiteSpace(settings.TaskbarLyricsFontFamily)
                 ? "Segoe UI Variable Text"
                 : settings.TaskbarLyricsFontFamily.Trim();
+            settings.DesktopFloatingOpacity = Math.Clamp(settings.DesktopFloatingOpacity, 20, 100);
+            settings.DesktopFloatingAvatarSize = Math.Clamp(settings.DesktopFloatingAvatarSize, 24, 96);
+            settings.DesktopFloatingGlassColor = NormalizeHexColor(settings.DesktopFloatingGlassColor, "#4A90D9");
+            settings.GameSaveManualRetention = Math.Clamp(settings.GameSaveManualRetention, 1, 100);
+            settings.GameSaveSafetyRetention = Math.Clamp(settings.GameSaveSafetyRetention, 1, 50);
+            settings.GameSavePeriodicIntervalMinutes = Math.Clamp(settings.GameSavePeriodicIntervalMinutes, 5, 1440);
+            settings.AccountFilterMode = settings.AccountFilterMode is "Current" or "Pinned"
+                ? settings.AccountFilterMode
+                : "All";
+            settings.AccountSortMode = settings.AccountSortMode is "Name" or "Pinned"
+                ? settings.AccountSortMode
+                : "Recent";
+            settings.GameFilterMode = settings.GameFilterMode is "Bound" or "Unbound"
+                ? settings.GameFilterMode
+                : "All";
+            if (settings.AutoInstallUpdates)
+                settings.CheckUpdateOnStartup = true;
             settings.Theme = string.Equals(settings.Theme, "Light", StringComparison.OrdinalIgnoreCase)
                 ? "Light"
                 : "Dark";
             return settings;
         }
 
-        private static bool TryLoad(string path, out AppSettings settings)
+        private static double? NormalizeCoordinate(double? value) =>
+            value is null || double.IsNaN(value.Value) || double.IsInfinity(value.Value) ? null : value;
+
+        private static string NormalizeHexColor(string? value, string fallback)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   Regex.IsMatch(value.Trim(), "^#[0-9A-Fa-f]{6}$")
+                ? value.Trim().ToUpperInvariant()
+                : fallback;
+        }
+
+        /// <summary>
+        /// 判断异常是否只是"暂时读不到"。这类失败必须如实上报，不能被当成
+        /// "文件损坏"去走 .bak 回退——那会把陈旧备份当成权威数据写回主文件。
+        /// </summary>
+        private static bool IsTransientIoError(Exception ex) =>
+            ex is IOException or UnauthorizedAccessException;
+
+        private static bool TryLoad(string path, out AppSettings settings, out bool transientFailure)
         {
             settings = null!;
+            transientFailure = false;
             if (!File.Exists(path)) return false;
             try
             {
                 var json = File.ReadAllText(path);
                 settings = JsonSerializer.Deserialize<AppSettings>(json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true,
+                        Converters = { new JsonStringEnumConverter() }
+                    })!;
                 return settings != null;
+            }
+            catch (Exception ex) when (IsTransientIoError(ex))
+            {
+                transientFailure = true;
+                AppLogger.Warn($"Settings file is temporarily unreadable {Path.GetFileName(path)}: {ex.Message}");
+                return false;
             }
             catch (Exception ex)
             {
@@ -222,23 +393,28 @@ namespace SteamSwitcher.Services
             }
 
             var transientBackup = $"{backupPath}.{Guid.NewGuid():N}.tmp";
+            File.Replace(temporaryPath, destinationPath, transientBackup, ignoreMetadataErrors: true);
+            var rotated = false;
             try
             {
-                File.Replace(temporaryPath, destinationPath, transientBackup, ignoreMetadataErrors: true);
-                try
-                {
-                    File.Move(transientBackup, backupPath, overwrite: true);
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Warn($"Settings were saved, but the previous-version backup could not be rotated: {ex.Message}");
-                }
+                File.Move(transientBackup, backupPath, overwrite: true);
+                rotated = true;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Settings were saved, but the previous-version backup could not be rotated; kept transient copy at {transientBackup}: {ex.Message}");
             }
             finally
             {
-                try { if (File.Exists(transientBackup)) File.Delete(transientBackup); } catch { }
+                if (rotated && File.Exists(transientBackup))
+                {
+                    try { File.Delete(transientBackup); } catch { }
+                }
             }
         }
+
+        private static double? NormalizeRelativePosition(double? value) =>
+            value.HasValue && double.IsFinite(value.Value) ? Math.Clamp(value.Value, 0, 1) : null;
 
         public static bool SetStartWithWindows(bool enabled)
         {
@@ -258,7 +434,7 @@ namespace SteamSwitcher.Services
                 else
                 {
                     using var key = Registry.CurrentUser.OpenSubKey(
-                        @"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                        @"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
                     if (key == null)
                         return true;
                     key.DeleteValue(valueName, false);
@@ -277,8 +453,10 @@ namespace SteamSwitcher.Services
         {
             try
             {
+                // 只读打开：受限制环境下申请可写句柄会失败并返回 null，
+                // 结果把用户已开启的开机自启误判成关闭并静默写回 false。
                 using var key = Registry.CurrentUser.OpenSubKey(
-                    @"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                    @"Software\Microsoft\Windows\CurrentVersion\Run", writable: false);
                 if (key?.GetValue("SteamSwitch") is not string value ||
                     string.IsNullOrWhiteSpace(value))
                 {
@@ -289,10 +467,19 @@ namespace SteamSwitcher.Services
                 if (!string.IsNullOrWhiteSpace(exePath) &&
                     string.Equals(value, $"\"{exePath}\"", StringComparison.OrdinalIgnoreCase))
                 {
-                    key.SetValue(
-                        "SteamSwitch",
-                        $"\"{exePath}\" --autorun",
-                        RegistryValueKind.String);
+                    try
+                    {
+                        using var writableKey = Registry.CurrentUser.OpenSubKey(
+                            @"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+                        writableKey?.SetValue(
+                            "SteamSwitch",
+                            $"\"{exePath}\" --autorun",
+                            RegistryValueKind.String);
+                    }
+                    catch (Exception migrationError)
+                    {
+                        AppLogger.Warn($"Unable to migrate legacy startup entry: {migrationError.Message}");
+                    }
                 }
 
                 return true;

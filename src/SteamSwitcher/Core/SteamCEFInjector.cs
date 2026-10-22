@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Linq;
 using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
@@ -19,7 +21,13 @@ namespace SteamSwitcher.Core
         private readonly AccountManager _accountManager;
         private CancellationTokenSource? _scanCts;
         private string? _script;
-        private bool _isConnected;
+        private volatile bool _isConnected;
+        private bool _disposed;
+        private bool _disconnecting;
+        private Task? _scanTask;
+        private readonly ConcurrentDictionary<string, byte> _knownTargets = new();
+        private readonly TaskCompletionSource<bool> _handshake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string SessionId { get; } = Guid.NewGuid().ToString("N");
 
         public bool IsConnected => _isConnected;
         public event EventHandler<string>? StatusChanged;
@@ -38,8 +46,26 @@ namespace SteamSwitcher.Core
             _webSocketToken = webSocketToken;
         }
 
-        public async Task<bool> ConnectAsync()
+        public bool ConfirmHandshake(string? sessionId)
         {
+            if (_disposed || _disconnecting || !string.Equals(sessionId, SessionId, StringComparison.Ordinal)) return false;
+            var wasConnected = _isConnected;
+            _isConnected = true;
+            _handshake.TrySetResult(true);
+            if (!wasConnected) StatusChanged?.Invoke(this, "已确认 Steam CEF 鉴权控制通道");
+            return true;
+        }
+
+        public void NotifyControlChannelDisconnected()
+        {
+            if (!_isConnected) return;
+            _isConnected = false;
+            if (!_disposed && !_disconnecting) StatusChanged?.Invoke(this, "Steam CEF 控制通道已断开，正在等待页面重新连接");
+        }
+
+        public async Task<bool> ConnectAsync(CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed || _disconnecting, this);
             try
             {
                 StatusChanged?.Invoke(this, "正在连接 Steam CEF 调试端口...");
@@ -49,7 +75,7 @@ namespace SteamSwitcher.Core
                 var versionUrl = $"http://127.0.0.1:{_debugPort}/json/version";
                 AppLogger.Info($"Checking DevTools version endpoint: {versionUrl}");
 
-                var response = await http.GetAsync(versionUrl);
+                using var response = await http.GetAsync(versionUrl, cancellationToken).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
                     AppLogger.Info($"DevTools version endpoint failed: {(int)response.StatusCode} {response.ReasonPhrase}");
@@ -57,20 +83,26 @@ namespace SteamSwitcher.Core
                     return false;
                 }
 
-                var versionJson = await response.Content.ReadAsStringAsync();
+                var versionJson = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 AppLogger.Info($"DevTools version response length: {versionJson.Length}");
 
+                if (_disposed || _disconnecting) return false;
                 _script = BuildInjectedScript();
-                var injectedCount = await InjectIntoTargetsAsync(http, _script);
-                _isConnected = injectedCount > 0;
+                var injectedCount = await InjectIntoTargetsAsync(http, _script, cancellationToken).ConfigureAwait(false);
                 StartTargetRescan();
 
+                // Runtime.evaluate succeeding only proves that JavaScript ran. The
+                // authenticated control channel must acknowledge this host session.
+                try { await _handshake.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false); }
+                catch (TimeoutException) { _isConnected = false; }
+
                 StatusChanged?.Invoke(this, _isConnected
-                    ? $"已注入 {injectedCount} 个 Steam CEF 页面"
-                    : "已连接调试端口，但没有找到可注入的 Steam CEF 页面");
+                    ? $"已注入 {injectedCount} 个 Steam CEF 页面并确认控制通道"
+                    : "页面脚本已尝试注入，但未收到已鉴权控制通道确认");
 
                 AppLogger.Info($"SteamCEFInjector.ConnectAsync result: injectedCount={injectedCount}");
-                return true;
+                // Only report success when at least one target accepted the script.
+                return _isConnected;
             }
             catch (Exception ex)
             {
@@ -82,10 +114,11 @@ namespace SteamSwitcher.Core
 
         private void StartTargetRescan()
         {
+            if (_disposed || _disconnecting) return;
             _scanCts?.Cancel();
             _scanCts?.Dispose();
             _scanCts = new CancellationTokenSource();
-            _ = RescanTargetsAsync(_scanCts.Token);
+            _scanTask = RescanTargetsAsync(_scanCts.Token);
         }
 
         private async Task RescanTargetsAsync(CancellationToken cancellationToken)
@@ -96,18 +129,14 @@ namespace SteamSwitcher.Core
             AppLogger.Info("Steam CEF target rescan loop started.");
 
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            for (var i = 0; i < 40 && !cancellationToken.IsCancellationRequested; i++)
+            for (var i = 0; !cancellationToken.IsCancellationRequested; i++)
             {
                 try
                 {
-                    var delay = i < 10 ? 500 : 2500;
-                    await Task.Delay(delay, cancellationToken);
-                    var injectedCount = await InjectIntoTargetsAsync(http, _script);
-                    if (injectedCount > 0)
-                    {
-                        _isConnected = true;
-                        StatusChanged?.Invoke(this, $"已刷新注入 {injectedCount} 个 Steam CEF 页面");
-                    }
+                    var delay = i < 10 ? 500 : 5000;
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    _script = BuildInjectedScript();
+                    await InjectIntoTargetsAsync(http, _script, cancellationToken).ConfigureAwait(false);
                 }
                 catch (TaskCanceledException)
                 {
@@ -338,25 +367,27 @@ namespace SteamSwitcher.Core
             var js = @"
 (function() {
     const injectedTargetAppId = '__TARGET_APP_ID__';
-    if (injectedTargetAppId) {
-        window.__steamswitch_target_app_id = injectedTargetAppId;
-    }
 
-    if (window.__steamswitch_injected_v13) {
-        if (typeof window.__steamswitch_forceInjectGameDetail === 'function') {
-            window.__steamswitch_forceInjectGameDetail();
-        }
+    const SESSION_ID = __SESSION_ID__;
+    if (window.__steamswitch_session_id === SESSION_ID && typeof window.__steamswitch_updateConfig === 'function') {
+        window.__steamswitch_target_app_id = injectedTargetAppId;
+        window.__steamswitch_updateConfig(__ACCOUNTS__, __BINDINGS__);
         return;
     }
-    if (window.__steamswitch_injected_v12 && typeof window.__steamswitch_cleanup === 'function') {
+    if (typeof window.__steamswitch_cleanup === 'function') {
         try { window.__steamswitch_cleanup(); } catch(e) {}
     }
+    document.getElementById('steamswitch-launch-wrap')?.remove();
+    document.getElementById('steamswitch-launch-menu')?.remove();
     window.__steamswitch_injected_v12 = false;
     window.__steamswitch_injected_v13 = true;
+    window.__steamswitch_session_id = SESSION_ID;
+    window.__steamswitch_target_app_id = injectedTargetAppId;
 
     const WS_URL = __WS_URL__;
+    const WS_TOKEN = __WS_TOKEN__;
     const WS_MAX_RETRIES = 10;
-    const ACCOUNTS = __ACCOUNTS__;
+    let ACCOUNTS = __ACCOUNTS__;
     const BINDINGS = __BINDINGS__;
     const STYLE_TEXT = __STYLE__;
     function getTargetAppId() {
@@ -371,6 +402,14 @@ namespace SteamSwitcher.Core
     let wsRetryCount = 0;
     let wsReconnectTimer = null;
     let injectIntervalTimer = null;
+    let fastTimer = null;
+    let observerTimer = null;
+    let domObserver = null;
+    const managedListeners = [];
+    function listen(target, name, callback, options) {
+        target.addEventListener(name, callback, options);
+        managedListeners.push([target, name, callback, options]);
+    }
 
     function log(message) {
         console.log('[SteamSwitch] ' + message);
@@ -390,10 +429,14 @@ namespace SteamSwitcher.Core
     function connectWS() {
         if (__steamswitch_cleanup) return;
         try {
-            ws = new WebSocket(WS_URL);
+            // Authenticate via subprotocol so the token never appears in the URL.
+            ws = WS_TOKEN
+                ? new WebSocket(WS_URL, [WS_TOKEN])
+                : new WebSocket(WS_URL);
             ws.onopen = function() {
                 console.log('[SteamSwitch] WebSocket connected');
                 wsRetryCount = 0;
+                sendToApp('hello', { sessionId: SESSION_ID });
                 const queued = pendingMessages;
                 pendingMessages = [];
                 sendToApp('log', { message: 'WebSocket connected' });
@@ -430,6 +473,7 @@ namespace SteamSwitcher.Core
             ws.send(JSON.stringify({ action, ...data }));
         } else {
             pendingMessages.push({ action: action, data: data });
+            if (pendingMessages.length > 128) pendingMessages.shift();
         }
     }
 
@@ -737,6 +781,7 @@ namespace SteamSwitcher.Core
     }
 
     function injectGameDetail() {
+        if (__steamswitch_cleanup) return;
         injectScheduled = false;
         const startBtn = getStartButton();
         const appId = getAppId(startBtn);
@@ -909,15 +954,15 @@ namespace SteamSwitcher.Core
                 }
             });
 
-            document.addEventListener('click', function(event) {
+            listen(document, 'click', function(event) {
                 if (!wrap.contains(event.target) && !menu.contains(event.target)) {
                     closeMenu(wrap, menu);
                 }
             });
-            document.addEventListener('scroll', function() {
+            listen(document, 'scroll', function() {
                 closeMenu(wrap, menu);
             }, true);
-            window.addEventListener('resize', function() {
+            listen(window, 'resize', function() {
                 closeMenu(wrap, menu);
             });
 
@@ -945,14 +990,14 @@ namespace SteamSwitcher.Core
     }
 
     function startFastDomWatch() {
-        const observer = new MutationObserver(scheduleInjectGameDetail);
-        observer.observe(document.documentElement || document.body, {
+        domObserver = new MutationObserver(scheduleInjectGameDetail);
+        domObserver.observe(document.documentElement || document.body, {
             childList: true,
             subtree: true
         });
 
         let ticks = 0;
-        const fastTimer = setInterval(function() {
+        fastTimer = setInterval(function() {
             ticks++;
             scheduleInjectGameDetail();
             if (document.getElementById('steamswitch-launch-wrap') || ticks >= 40) {
@@ -960,18 +1005,50 @@ namespace SteamSwitcher.Core
             }
         }, 250);
 
-        setTimeout(function() {
-            observer.disconnect();
+        observerTimer = setTimeout(function() {
+            domObserver?.disconnect();
         }, 15000);
     }
 
     window.__steamswitch_forceInjectGameDetail = injectGameDetail;
+    window.__steamswitch_updateConfig = function(accounts, bindings) {
+        if (JSON.stringify(ACCOUNTS) !== JSON.stringify(accounts)) {
+            ACCOUNTS = accounts;
+            for (const item of managedListeners) item[0].removeEventListener(item[1], item[2], item[3]);
+            managedListeners.length = 0;
+            document.getElementById('steamswitch-launch-wrap')?.remove();
+            document.getElementById('steamswitch-launch-menu')?.remove();
+        }
+        bindingMap = new Map(bindings.map(function(item) { return [String(item.appId), item]; }));
+        injectGameDetail();
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+            if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+            wsRetryCount = 0;
+            connectWS();
+        } else if (ws.readyState === WebSocket.OPEN) {
+            sendToApp('hello', { sessionId: SESSION_ID });
+        }
+    };
 
     window.__steamswitch_cleanup = function() {
         __steamswitch_cleanup = true;
         if (injectIntervalTimer) { clearInterval(injectIntervalTimer); injectIntervalTimer = null; }
+        if (fastTimer) clearInterval(fastTimer);
+        if (observerTimer) clearTimeout(observerTimer);
+        domObserver?.disconnect();
+        for (const item of managedListeners) item[0].removeEventListener(item[1], item[2], item[3]);
+        managedListeners.length = 0;
+        pendingMessages = [];
         if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
         if (ws) { try { ws.close(); } catch(e) {} ws = null; }
+        document.getElementById('steamswitch-launch-wrap')?.remove();
+        document.getElementById('steamswitch-launch-menu')?.remove();
+        document.getElementById('steamswitch-style')?.remove();
+        delete window.__steamswitch_session_id;
+        delete window.__steamswitch_target_app_id;
+        window.__steamswitch_injected_v13 = false;
+        delete window.__steamswitch_updateConfig;
+        delete window.__steamswitch_forceInjectGameDetail;
         console.log('[SteamSwitch] Cleanup completed');
     };
 
@@ -986,27 +1063,33 @@ namespace SteamSwitcher.Core
                 .Replace("__ACCOUNTS__", accountsJson)
                 .Replace("__BINDINGS__", bindingsJson)
                 .Replace("__STYLE__", cssJson)
+                .Replace("__SESSION_ID__", JsonSerializer.Serialize(SessionId))
+                // Token travels as a WebSocket subprotocol, not a URL query, so it
+                // is not present in access logs / page URLs. Never log WS_TOKEN.
                 .Replace(
                     "__WS_URL__",
-                    JsonSerializer.Serialize($"ws://localhost:{_webSocketPort}/?token={Uri.EscapeDataString(_webSocketToken)}"));
+                    JsonSerializer.Serialize($"ws://localhost:{_webSocketPort}/"))
+                .Replace(
+                    "__WS_TOKEN__",
+                    JsonSerializer.Serialize($"ss.auth.{_webSocketToken}"));
 
             AppLogger.Info($"Inject script built. Accounts={accountDtos.Count}, Bindings={bindingDtos.Count}");
             return js;
         }
 
-        private async Task<int> InjectIntoTargetsAsync(HttpClient http, string script)
+        private async Task<int> InjectIntoTargetsAsync(HttpClient http, string script, CancellationToken cancellationToken = default)
         {
             var targetsUrl = $"http://127.0.0.1:{_debugPort}/json/list";
             AppLogger.Info($"Loading DevTools targets: {targetsUrl}");
 
-            var response = await http.GetAsync(targetsUrl);
+            using var response = await http.GetAsync(targetsUrl, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 AppLogger.Info($"DevTools targets endpoint failed: {(int)response.StatusCode} {response.ReasonPhrase}");
                 return 0;
             }
 
-            var targetsJson = await response.Content.ReadAsStringAsync();
+            var targetsJson = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(targetsJson);
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
@@ -1015,8 +1098,7 @@ namespace SteamSwitcher.Core
             }
 
             var injectedCount = 0;
-            var targetAppId = FindTargetAppId(doc.RootElement);
-            AppLogger.Info($"Detected target appId from DevTools targets: {targetAppId ?? "(none)"}");
+            var activeTargets = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var target in doc.RootElement.EnumerateArray())
             {
@@ -1030,29 +1112,31 @@ namespace SteamSwitcher.Core
                 if (string.IsNullOrEmpty(wsUrl))
                     continue;
 
+                // Only talk to loopback DevTools endpoints. A compromised target
+                // list could otherwise redirect Runtime.evaluate to a remote host.
+                if (!IsLoopbackDebuggerUrl(wsUrl))
+                {
+                    AppLogger.Warn($"Skipped non-loopback webSocketDebuggerUrl for target type={type}.");
+                    continue;
+                }
+
                 if (!string.IsNullOrEmpty(type) && type != "page" && type != "webview")
                     continue;
 
+                // Do not copy another page's AppID into this page. A library
+                // renderer without its own ID must inspect its current DOM.
+                var targetAppId = ExtractAppId(url) ?? ExtractAppId(title);
                 var targetScript = script.Replace("__TARGET_APP_ID__", EscapeForJavaScriptString(targetAppId ?? ""));
-                if (await EvaluateScriptAsync(wsUrl, targetScript, url, title))
+                activeTargets.Add(wsUrl);
+                _knownTargets.TryAdd(wsUrl, 0);
+                if (await EvaluateScriptAsync(wsUrl, targetScript, url, title, cancellationToken).ConfigureAwait(false))
                     injectedCount++;
             }
 
+            foreach (var old in _knownTargets.Keys)
+                if (!activeTargets.Contains(old)) _knownTargets.TryRemove(old, out _);
+
             return injectedCount;
-        }
-
-        private static string? FindTargetAppId(JsonElement targets)
-        {
-            foreach (var target in targets.EnumerateArray())
-            {
-                var url = GetString(target, "url");
-                var title = GetString(target, "title");
-                var found = ExtractAppId(url) ?? ExtractAppId(title);
-                if (!string.IsNullOrEmpty(found))
-                    return found;
-            }
-
-            return null;
         }
 
         private static string? ExtractAppId(string value)
@@ -1070,13 +1154,28 @@ namespace SteamSwitcher.Core
             return value.Replace("\\", "\\\\").Replace("'", "\\'");
         }
 
-        private static async Task<bool> EvaluateScriptAsync(string webSocketUrl, string script, string url, string title)
+        private static bool IsLoopbackDebuggerUrl(string wsUrl)
+        {
+            if (!Uri.TryCreate(wsUrl, UriKind.Absolute, out var uri))
+                return false;
+            if (!string.Equals(uri.Scheme, "ws", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var host = uri.Host;
+            return string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(host, "::1", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static async Task<bool> EvaluateScriptAsync(string webSocketUrl, string script, string url, string title, CancellationToken cancellationToken = default)
         {
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(5));
                 using var ws = new ClientWebSocket();
-                await ws.ConnectAsync(new Uri(webSocketUrl), cts.Token);
+                await ws.ConnectAsync(new Uri(webSocketUrl), cts.Token).ConfigureAwait(false);
 
                 var payload = JsonSerializer.Serialize(new
                 {
@@ -1091,16 +1190,33 @@ namespace SteamSwitcher.Core
                 });
 
                 var bytes = Encoding.UTF8.GetBytes(payload);
-                await ws.SendAsync(bytes, WebSocketMessageType.Text, true, cts.Token);
+                await ws.SendAsync(bytes, WebSocketMessageType.Text, true, cts.Token).ConfigureAwait(false);
 
                 var buffer = new byte[8192];
-                var result = await ws.ReceiveAsync(buffer, cts.Token);
-                var response = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                var success = !response.Contains("\"error\"");
-
-                AppLogger.Info($"Runtime.evaluate result: success={BooleanText(success)}, title={title}, url={url}, response={TrimForLog(response)}");
-                return success;
+                // DevTools events may precede the command reply, and WebSocket
+                // messages may be fragmented. Inspect the matching JSON reply.
+                while (!cts.IsCancellationRequested)
+                {
+                    using var message = new System.IO.MemoryStream();
+                    WebSocketReceiveResult result;
+                    do
+                    {
+                        result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token).ConfigureAwait(false);
+                        if (result.MessageType == WebSocketMessageType.Close) return false;
+                        message.Write(buffer, 0, result.Count);
+                        if (message.Length > 1024 * 1024) return false;
+                    } while (!result.EndOfMessage);
+                    using var reply = JsonDocument.Parse(message.ToArray());
+                    var root = reply.RootElement;
+                    if (!root.TryGetProperty("id", out var id) || !id.TryGetInt32(out var number) || number != 1) continue;
+                    var success = !root.TryGetProperty("error", out _) &&
+                        root.TryGetProperty("result", out var evaluation) && !evaluation.TryGetProperty("exceptionDetails", out _);
+                    AppLogger.Info($"Runtime.evaluate result: success={BooleanText(success)}, title={title}, url={url}");
+                    return success;
+                }
+                return false;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return false; }
             catch (Exception ex)
             {
                 AppLogger.Error($"Runtime.evaluate failed. title={title}, url={url}", ex);
@@ -1120,17 +1236,36 @@ namespace SteamSwitcher.Core
             return value ? "true" : "false";
         }
 
-        private static string TrimForLog(string value)
+        public async Task DisconnectAsync()
         {
-            return value.Length <= 600 ? value : value.Substring(0, 600) + "...";
+            _disconnecting = true;
+            _scanCts?.Cancel();
+            _isConnected = false;
+            _handshake.TrySetResult(false);
+            if (_scanTask != null)
+            {
+                try { await _scanTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+                catch (Exception ex) when (ex is OperationCanceledException or TimeoutException) { }
+            }
+            var targets = _knownTargets.Keys.ToArray();
+            _knownTargets.Clear();
+            using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var cleanupScript = "if (window.__steamswitch_session_id === " + JsonSerializer.Serialize(SessionId) +
+                " && typeof window.__steamswitch_cleanup === 'function') window.__steamswitch_cleanup();";
+            await Task.WhenAll(targets.Select(target => EvaluateScriptAsync(target, cleanupScript, "", "cleanup", cleanupTimeout.Token))).ConfigureAwait(false);
         }
 
         public void Dispose()
         {
-            _scanCts?.Cancel();
+            if (_disposed) return;
+            _disposed = true;
+            // The UI also uses the synchronous IDisposable contract. Keep it
+            // bounded without waiting on any captured dispatcher continuation.
+            try { Task.Run(DisconnectAsync).Wait(TimeSpan.FromSeconds(5)); }
+            catch (AggregateException ex) { AppLogger.Warn($"CEF cleanup failed: {ex.GetBaseException().Message}"); }
             _scanCts?.Dispose();
             _scanCts = null;
-            _isConnected = false;
+            StatusChanged = null;
         }
     }
 }

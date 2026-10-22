@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using Microsoft.Win32;
+using SteamSwitcher.Core;
 using SteamSwitcher.Models;
 
 namespace SteamSwitcher.Views
@@ -51,9 +52,17 @@ namespace SteamSwitcher.Views
                 GameNameBox.Focus();
                 return;
             }
-            if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+            string normalizedPath;
+            try
             {
-                MessageBox.Show(this, "请选择存在的存档目录。", "自定义存档目录", MessageBoxButton.OK, MessageBoxImage.Information);
+                if (string.IsNullOrWhiteSpace(folderPath) || !Path.IsPathFullyQualified(folderPath))
+                    throw new ArgumentException();
+                normalizedPath = Path.GetFullPath(folderPath);
+                if (File.Exists(normalizedPath)) throw new ArgumentException();
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                MessageBox.Show(this, "请输入有效的完整目录路径；目录尚不存在时，可在导入并恢复备份后创建。", "自定义存档目录", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -61,7 +70,7 @@ namespace SteamSwitcher.Views
             {
                 Id = Guid.NewGuid().ToString("N"),
                 GameName = gameName,
-                FolderPath = Path.GetFullPath(folderPath),
+                FolderPath = normalizedPath,
                 AccountSteamId = (AccountCombo.SelectedItem as AccountOption)?.SteamId ?? string.Empty
             };
             DialogResult = true;
@@ -71,7 +80,16 @@ namespace SteamSwitcher.Views
 
         private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left) DragMove();
+            WindowDragHelper.TryDrag(this, e);
+        }
+
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                DialogResult = false;
+            }
         }
 
         private sealed record AccountOption(string SteamId, string DisplayName);

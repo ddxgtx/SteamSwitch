@@ -160,7 +160,18 @@ namespace SteamSwitcher.Views
 
         private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            DragMove();
+            // Sliders and other interactive controls own the gesture; only
+            // passive surfaces (title bar, empty space) drag the window.
+            WindowDragHelper.TryDrag(this, e);
+        }
+
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                Close();
+            }
         }
     }
 }

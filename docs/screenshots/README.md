@@ -9,7 +9,6 @@
 - `v3.1/accounts.png` - 账号管理
 - `v3.1/games.png` - 游戏绑定
 - `v3.1/saves.png` - 游戏存档中心
-- `v3.1/taskbar.png` - 透明任务栏
 - `v3.1/lyrics.png` - 任务栏歌词设置
 - `v3.1/taskbar-band.png` - 任务栏歌词实际组件
 - `v3.1/quick-populated.png` - 快速启动

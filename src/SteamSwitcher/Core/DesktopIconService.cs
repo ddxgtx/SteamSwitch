@@ -25,7 +25,17 @@ namespace SteamSwitcher.Core
         private bool _hasDesktopActivityCursor;
         private IntPtr _mouseHook;
         private readonly HookProc _mouseProc;
-        private bool _disposed;
+        private readonly Action _requestExitRecovery;
+        private volatile bool _disposed;
+        private int _applicationExitRequested;
+        // 低级鼠标钩子只能在"自带消息循环"的线程上安装。原先挂在 UI 线程，
+        // 界面一旦阻塞超过 LowLevelHooksTimeout，Windows 会静默摘钩且不再恢复。
+        private Thread? _mouseHookThread;
+        private System.Windows.Threading.Dispatcher? _mouseHookDispatcher;
+        private readonly ManualResetEventSlim _mouseHookReady = new(false);
+        private volatile bool _hookRequested;
+        private volatile bool _hookInstalled;
+        private int _lastRaisedCountdown = int.MinValue;
         private static string RecoveryMarkerPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SteamSwitch",
@@ -36,9 +46,34 @@ namespace SteamSwitcher.Core
 
         public bool IconsHidden => _iconsHidden;
 
-        public DesktopIconService()
+        /// <summary>
+        /// Raises CountdownChanged only when the value actually changes so
+        /// listeners are not flooded every 250ms with an identical countdown.
+        /// </summary>
+        private void RaiseCountdownChanged(int value)
+        {
+            if (_lastRaisedCountdown == value) return;
+            _lastRaisedCountdown = value;
+            CountdownChanged?.Invoke(this, value);
+        }
+
+        public bool CanControlDesktopIcons
+        {
+            get
+            {
+                lock (_sync)
+                    return !_disposed && FindDesktopIconList() != IntPtr.Zero;
+            }
+        }
+
+        public DesktopIconService() : this(null)
+        {
+        }
+
+        internal DesktopIconService(Action? requestExitRecovery)
         {
             _mouseProc = MouseHookCallback;
+            _requestExitRecovery = requestExitRecovery ?? RequestIconRecoveryForApplicationExit;
         }
 
         public void Configure(DesktopEnhanceSettings settings)
@@ -59,7 +94,8 @@ namespace SteamSwitcher.Core
                 UpdateDesktopClickHook();
                 if (!_settings.EnableAutoHideIcons && (_iconsHidden || _desktopListHiddenByApp))
                     ShowIconsCore();
-                CountdownChanged?.Invoke(this,
+                _lastRaisedCountdown = int.MinValue;
+                RaiseCountdownChanged(
                     _settings.EnableAutoHideIcons && _settings.HideMode != DesktopIconHideMode.Manual
                         ? _settings.IdleSeconds : 0);
             }
@@ -86,7 +122,7 @@ namespace SteamSwitcher.Core
                 if (!_iconsHidden) DeleteRecoveryMarker();
                 if (_iconsHidden)
                     IconVisibilityChanged?.Invoke(this, false);
-                CountdownChanged?.Invoke(this, 0);
+                RaiseCountdownChanged(0);
                 return _iconsHidden;
             }
         }
@@ -139,7 +175,7 @@ namespace SteamSwitcher.Core
                 _timerStartedAt = Environment.TickCount64;
                 _lastDesktopActivityAt = _timerStartedAt;
                 IconVisibilityChanged?.Invoke(this, true);
-                CountdownChanged?.Invoke(this,
+                RaiseCountdownChanged(
                     _settings.EnableAutoHideIcons && _settings.HideMode != DesktopIconHideMode.Manual
                         ? _settings.IdleSeconds : 0);
             }
@@ -153,9 +189,17 @@ namespace SteamSwitcher.Core
                 if (File.Exists(RecoveryMarkerPath) && !_iconsHidden && !_desktopListHiddenByApp)
                 {
                     RecoverIconsAfterUnexpectedShutdown();
-                    if (!_settings.EnableAutoHideIcons) return;
+                    if (!_settings.EnableAutoHideIcons)
+                    {
+                        RelaxedTick();
+                        return;
+                    }
                 }
-                if (!_settings.EnableAutoHideIcons) return;
+                if (!_settings.EnableAutoHideIcons)
+                {
+                    RelaxedTick();
+                    return;
+                }
                 if (_iconsHidden)
                 {
                     // Explorer can restart and recreate the desktop host. Reacquire it on every
@@ -166,6 +210,9 @@ namespace SteamSwitcher.Core
                         _iconsHidden = false;
                         _desktopListHiddenByApp = false;
                         _timerStartedAt = Environment.TickCount64;
+                        // 不删恢复标记的话，Configure 会以为还有一次未完成的隐藏，
+                        // 在自动隐藏已关闭的情况下继续以 250ms 轮询。
+                        DeleteRecoveryMarker();
                         IconVisibilityChanged?.Invoke(this, true);
                         return;
                     }
@@ -174,16 +221,26 @@ namespace SteamSwitcher.Core
                 }
                 if (_settings.HideMode == DesktopIconHideMode.Manual)
                 {
-                    CountdownChanged?.Invoke(this, 0);
+                    RaiseCountdownChanged(0);
+                    RelaxedTick();
                     return;
                 }
                 var elapsedSeconds = _settings.HideMode == DesktopIconHideMode.Timed
                     ? (int)((Environment.TickCount64 - _timerStartedAt) / 1000)
                     : GetDesktopMouseIdleSeconds();
                 var remaining = Math.Max(0, _settings.IdleSeconds - elapsedSeconds);
-                CountdownChanged?.Invoke(this, remaining);
+                RaiseCountdownChanged(remaining);
                 if (elapsedSeconds >= _settings.IdleSeconds) HideIcons();
             }
+        }
+
+        /// <summary>
+        /// When auto-hide is off or manual (no countdown to service), slow the
+        /// 250ms poll down to 1s so the timer is not a background storm.
+        /// </summary>
+        private void RelaxedTick()
+        {
+            _timer?.Change(1000, 1000);
         }
 
         // Smart mode deliberately ignores keyboard activity and pointer movement over apps.
@@ -216,16 +273,94 @@ namespace SteamSwitcher.Core
         {
             var needsHook = _settings.EnableAutoHideIcons &&
                             (_settings.ToggleIconsOnDesktopClick || _settings.RestoreByTaskbarClick);
-            if (needsHook && _mouseHook == IntPtr.Zero)
+            _hookRequested = needsHook;
+            if (!needsHook && !_hookInstalled && _mouseHookThread == null)
+                return;
+
+            // 钩子只在专用线程上装/卸：UI 线程只负责通知。
+            EnsureMouseHookThread();
+            _mouseHookDispatcher?.BeginInvoke(new Action(SyncMouseHook));
+        }
+
+        private void EnsureMouseHookThread()
+        {
+            if (_mouseHookThread != null) return;
+            _mouseHookThread = new Thread(MouseHookThreadProc)
+            {
+                IsBackground = true,
+                Name = "SteamSwitch.DesktopMouseHook"
+            };
+            _mouseHookThread.SetApartmentState(ApartmentState.STA);
+            _mouseHookThread.Start();
+            _mouseHookReady.Wait(TimeSpan.FromSeconds(5));
+        }
+
+        private void MouseHookThreadProc()
+        {
+            // Dispatcher.Run 在这个线程上起一个消息循环，满足 WH_MOUSE_LL 的要求。
+            // 界面再忙也不会影响它，Windows 不会因为超时把钩子摘掉。
+            _mouseHookDispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            _mouseHookReady.Set();
+            System.Windows.Threading.Dispatcher.Run();
+        }
+
+        /// <summary>只在钩子线程执行：_mouseHook 的读写权归这个线程。</summary>
+        private void SyncMouseHook()
+        {
+            if (_disposed)
+            {
+                UninstallMouseHookCore();
+                return;
+            }
+
+            if (_hookRequested && !_hookInstalled)
             {
                 _mouseHook = SetWindowsHookEx(14, _mouseProc, GetModuleHandle(null), 0);
                 if (_mouseHook == IntPtr.Zero)
                     AppLogger.Warn($"Unable to install desktop mouse hook. Win32Error={Marshal.GetLastWin32Error()}");
+                else
+                    _hookInstalled = true;
             }
-            else if (!needsHook && _mouseHook != IntPtr.Zero)
+            else if (!_hookRequested && _hookInstalled)
+            {
+                UninstallMouseHookCore();
+            }
+        }
+
+        private void UninstallMouseHookCore()
+        {
+            if (_mouseHook != IntPtr.Zero)
             {
                 UnhookWindowsHookEx(_mouseHook);
                 _mouseHook = IntPtr.Zero;
+            }
+            _hookInstalled = false;
+        }
+
+        private void StopMouseHookThread()
+        {
+            _hookRequested = false;
+            var dispatcher = _mouseHookDispatcher;
+            if (dispatcher == null) return;
+            if (dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
+            try
+            {
+                dispatcher.Invoke(
+                    new Action(() =>
+                    {
+                        UninstallMouseHookCore();
+                        dispatcher.InvokeShutdown();
+                    }),
+                    System.Windows.Threading.DispatcherPriority.Send,
+                    CancellationToken.None,
+                    TimeSpan.FromSeconds(2));
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to stop the desktop mouse hook thread cleanly: {ex.Message}");
+                var leftover = Interlocked.Exchange(ref _mouseHook, IntPtr.Zero);
+                if (leftover != IntPtr.Zero) UnhookWindowsHookEx(leftover);
+                _hookInstalled = false;
             }
         }
 
@@ -385,13 +520,45 @@ namespace SteamSwitcher.Core
                 _disposed = true;
                 _timer?.Dispose();
                 _timer = null;
-                if (_mouseHook != IntPtr.Zero)
-                {
-                    UnhookWindowsHookEx(_mouseHook);
-                    _mouseHook = IntPtr.Zero;
-                }
+                StopMouseHookThread();
                 ShowIconsCore();
             }
+        }
+
+        /// <summary>
+        /// Shutdown must not wait for a timer callback holding _sync while Explorer
+        /// is unresponsive. Stop future work and queue recovery without waiting for
+        /// Explorer to process it; normal interactive show/hide semantics are unchanged.
+        /// </summary>
+        public void DisposeForApplicationExit()
+        {
+            if (Interlocked.Exchange(ref _applicationExitRequested, 1) != 0) return;
+            _disposed = true;
+            var timer = Interlocked.Exchange(ref _timer, null);
+            _hookRequested = false;
+            ExitCleanup.Run(
+                ("desktop monitoring timer", () => timer?.Dispose()),
+                ("desktop mouse hook", () =>
+                {
+                    // 退出路径不等待：直接摘钩，再异步关掉消息循环。
+                    var mouseHook = Interlocked.Exchange(ref _mouseHook, IntPtr.Zero);
+                    if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook);
+                    _hookInstalled = false;
+                    var dispatcher = _mouseHookDispatcher;
+                    if (dispatcher != null && !dispatcher.HasShutdownStarted && !dispatcher.HasShutdownFinished)
+                        dispatcher.BeginInvokeShutdown(System.Windows.Threading.DispatcherPriority.Send);
+                }),
+                ("asynchronous desktop icon recovery", _requestExitRecovery));
+            GC.SuppressFinalize(this);
+        }
+
+        private void RequestIconRecoveryForApplicationExit()
+        {
+            if (!_iconsHidden && !_desktopListHiddenByApp && !File.Exists(RecoveryMarkerPath)) return;
+            var iconList = FindDesktopIconList();
+            if (iconList != IntPtr.Zero) ShowWindowAsync(iconList, SwShow);
+            // A queued request is not proof of visibility. Preserve the marker;
+            // normal startup recovery removes it only after confirming visibility.
         }
 
         [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X; public int Y; }
@@ -409,6 +576,7 @@ namespace SteamSwitcher.Core
         [DllImport("user32.dll")] private static extern int GetClassName(IntPtr hWnd, [Out] char[] className, int maxCount);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc callback, IntPtr module, uint threadId);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool UnhookWindowsHookEx(IntPtr hook);
         [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);

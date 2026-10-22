@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -16,6 +18,14 @@ namespace SteamSwitcher.Core
     public sealed class GameSaveBackupService
     {
         private const string ManifestName = "steamswitch-backup.json";
+        /// <summary>
+        /// Default backup folder under Documents. Exposed as a constant so the
+        /// UI never hardcodes the same string again.
+        /// </summary>
+        public const string DefaultBackupFolderName = "SteamSwitch Backups";
+        public static string GetDefaultBackupRoot() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            DefaultBackupFolderName);
         private const int MaxBackupFileCount = 100_000;
         private const long MaxExpandedBackupSize = 100L * 1024 * 1024 * 1024;
         private const int MaxManifestBytes = 8 * 1024 * 1024;
@@ -27,6 +37,10 @@ namespace SteamSwitcher.Core
             IgnoreInaccessible = false,
             AttributesToSkip = FileAttributes.ReparsePoint
         };
+        // Serializes Backup/Restore/Prune/Import/Export per EntryId across all
+        // service instances (UI and auto-backup each construct their own).
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> IoGates =
+            new(StringComparer.Ordinal);
         private readonly string _steamPath;
         private readonly string _backupRoot;
         private readonly int _manualRetention;
@@ -39,14 +53,29 @@ namespace SteamSwitcher.Core
             int safetyRetention = 5)
         {
             _steamPath = Path.GetFullPath(steamPath);
-            _backupRoot = Path.GetFullPath(backupRoot ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "SteamSwitch Backups"));
+            _backupRoot = Path.GetFullPath(backupRoot ?? GetDefaultBackupRoot());
             _manualRetention = Math.Clamp(manualRetention, 1, 100);
             _safetyRetention = Math.Clamp(safetyRetention, 1, 50);
         }
 
         public string BackupRoot => _backupRoot;
+
+        public int PruneBackupsForEntry(GameSaveEntry entry)
+        {
+            var gate = GetIoGate(entry.EntryId);
+            gate.Wait();
+            try
+            {
+                var before = GetBackups(entry).Count;
+                PruneBackups(entry);
+                var after = GetBackups(entry).Count;
+                return Math.Max(0, before - after);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
 
         public Task<List<GameSaveEntry>> DiscoverAsync(
             IEnumerable<SteamAccount> accounts,
@@ -154,10 +183,100 @@ namespace SteamSwitcher.Core
                 }
             }
 
+            DiscoverBackupOnlyEntries(result, accountList, gameList, includeSmartDetected, cancellationToken);
+
             return result
                 .OrderBy(entry => entry.AccountDisplayName, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(entry => entry.GameName, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
+        }
+
+        private void DiscoverBackupOnlyEntries(
+            List<GameSaveEntry> entries,
+            IReadOnlyCollection<SteamAccount> accounts,
+            IReadOnlyCollection<SteamLibraryGame> games,
+            bool includeSmartDetected,
+            CancellationToken cancellationToken)
+        {
+            if (!Directory.Exists(_backupRoot)) return;
+            var existing = entries.Select(entry => entry.EntryId).ToHashSet(StringComparer.Ordinal);
+            foreach (var ownerDirectory in SafeEnumerateDirectories(_backupRoot))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsRegularDirectory(ownerDirectory)) continue;
+                var owner = Path.GetFileName(ownerDirectory);
+                var custom = string.Equals(owner, "custom", StringComparison.Ordinal);
+                if (custom && !includeSmartDetected) continue;
+                if (!custom && (!ulong.TryParse(owner, out var steamId) || steamId.ToString() != owner)) continue;
+                foreach (var backupDirectory in SafeEnumerateDirectories(ownerDirectory))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!IsRegularDirectory(backupDirectory)) continue;
+                    var key = Path.GetFileName(backupDirectory);
+                    if (custom ? !Guid.TryParseExact(key, "N", out _) : !int.TryParse(key, out var app) || app <= 0 || app.ToString() != key)
+                        continue;
+                    foreach (var archive in SafeEnumerateTopLevelFiles(backupDirectory)
+                                 .Where(path => string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase))
+                                 .OrderByDescending(path => Path.GetFileName(path), StringComparer.Ordinal))
+                    {
+                        try
+                        {
+                            var manifest = ReadManifest(archive);
+                            GameSaveEntry entry;
+                            if (custom)
+                            {
+                                if (!manifest.IsCustom || (!manifest.IsDetected && manifest.SteamId != "detected") ||
+                                    manifest.EntryId != $"custom:{key}") continue;
+                                var game = games.FirstOrDefault(item => item.AppId == manifest.AppId);
+                                if (game == null) continue;
+                                var source = GameSavePathDetector.ResolveBackupPath(game, key, manifest.SourceSavePath);
+                                if (source == null) continue;
+                                entry = new GameSaveEntry
+                                {
+                                    EntryId = $"custom:{key}", CustomId = key, IsCustom = true, IsDetected = true,
+                                    SteamId = "detected", UserDataId = key, AccountName = "本机通用存档",
+                                    AppId = game.AppId, GameName = game.Name, IconPath = game.IconPath,
+                                    SavePath = source, DetectionRule = "备份索引"
+                                };
+                            }
+                            else
+                            {
+                                var appId = int.Parse(key);
+                                var userDataId = ConvertSteamIdToUserDataId(owner);
+                                var account = accounts.FirstOrDefault(item => item.SteamId == owner);
+                                var game = games.FirstOrDefault(item => item.AppId == appId);
+                                entry = new GameSaveEntry
+                                {
+                                    EntryId = $"steam:{owner}:{appId}", SteamId = owner, UserDataId = userDataId,
+                                    AccountName = account?.AccountName ?? (string.IsNullOrWhiteSpace(manifest.AccountName) ? owner : manifest.AccountName),
+                                    PersonaName = account?.PersonaName ?? string.Empty, AppId = appId,
+                                    GameName = game?.Name ?? (string.IsNullOrWhiteSpace(manifest.GameName) ? $"Steam App {appId}" : manifest.GameName), IconPath = game?.IconPath,
+                                    SavePath = Path.Combine(_steamPath, "userdata", userDataId, appId.ToString())
+                                };
+                                if (manifest.IsCustom || manifest.AppId != appId || manifest.SteamId != owner) continue;
+                            }
+                            if (existing.Contains(entry.EntryId)) break;
+                            ValidateBackupIdentity(entry, manifest);
+                            ValidateEntryPath(entry);
+                            var files = Directory.Exists(entry.SavePath) ? SafeEnumerateFiles(entry.SavePath).ToList() : new List<string>();
+                            // An empty or vanished source must not become an automatic empty
+                            // snapshot that can eventually prune all useful recovery versions.
+                            entry.IsAvailable = files.Count > 0;
+                            entry.FileCount = files.Count;
+                            entry.TotalSize = files.Sum(GetFileSize);
+                            entry.LastWriteTime = files.Select(GetLastWriteTime).DefaultIfEmpty(DateTime.MinValue).Max();
+                            ApplyBackupState(entry);
+                            entries.Add(entry);
+                            existing.Add(entry.EntryId);
+                            break;
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or JsonException)
+                        {
+                            AppLogger.Warn($"Unable to index game save archive {archive}: {ex.Message}");
+                        }
+                    }
+                }
+            }
         }
 
         private GameSaveEntry? CreateCustomEntry(
@@ -207,11 +326,31 @@ namespace SteamSwitcher.Core
         public async Task<GameSaveBackupInfo> BackupAsync(
             GameSaveEntry entry,
             bool isSafetyBackup = false,
-            bool requireExclusiveAccess = false,
+            bool requireExclusiveAccess = true,
             bool useDifferential = true,
             CancellationToken cancellationToken = default)
         {
             ValidateEntryPath(entry);
+            var gate = GetIoGate(entry.EntryId);
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await BackupCoreAsync(entry, isSafetyBackup, requireExclusiveAccess, useDifferential, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
+        private async Task<GameSaveBackupInfo> BackupCoreAsync(
+            GameSaveEntry entry,
+            bool isSafetyBackup,
+            bool requireExclusiveAccess,
+            bool useDifferential,
+            CancellationToken cancellationToken)
+        {
             if (!Directory.Exists(entry.SavePath))
                 throw new DirectoryNotFoundException($"存档目录不存在：{entry.SavePath}");
             if (requireExclusiveAccess)
@@ -220,17 +359,22 @@ namespace SteamSwitcher.Core
             var destinationDirectory = GetBackupDirectory(entry);
             Directory.CreateDirectory(destinationDirectory);
             var timestamp = DateTime.Now;
-            var baseBackup = !isSafetyBackup && useDifferential ? FindDifferentialBase(entry) : null;
+            var baseBackup = !isSafetyBackup && useDifferential && _manualRetention > 1 ? FindDifferentialBase(entry) : null;
+            if (baseBackup != null && !await IsBackupValidAsync(entry, baseBackup.FilePath, cancellationToken))
+                baseBackup = null;
             var suffix = isSafetyBackup ? "-before-restore" : baseBackup != null ? "-diff" : string.Empty;
             var destination = GetUniqueBackupPath(destinationDirectory, $"{timestamp:yyyyMMdd-HHmmssfff}{suffix}.zip");
             var temporary = destination + ".tmp";
+
+            EnsureFreeSpaceForBackup(destinationDirectory, entry.SavePath);
 
             try
             {
                 var manifest = await Task.Run(
                     () => CreateArchive(entry, temporary, timestamp, isSafetyBackup, baseBackup, cancellationToken),
                     cancellationToken);
-                if (!isSafetyBackup && TryFindEquivalentManualBackup(entry, manifest, out var equivalent))
+                if (!isSafetyBackup && TryFindEquivalentManualBackup(entry, manifest, out var equivalent) &&
+                    await IsBackupValidAsync(entry, equivalent.FilePath, cancellationToken))
                 {
                     TryDeleteFile(temporary);
                     equivalent.WasSkipped = true;
@@ -273,14 +417,43 @@ namespace SteamSwitcher.Core
         {
             ValidateEntryPath(entry);
             var fullBackupPath = ValidateBackupPath(entry, backupPath);
+            var gate = GetIoGate(entry.EntryId);
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await RestoreCoreAsync(entry, fullBackupPath, cancellationToken, beforeCommit).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
 
+        private async Task RestoreCoreAsync(
+            GameSaveEntry entry,
+            string fullBackupPath,
+            CancellationToken cancellationToken,
+            Func<CancellationToken, Task>? beforeCommit)
+        {
             var manifest = ReadManifest(fullBackupPath);
             ValidateBackupIdentity(entry, manifest);
 
             var parent = Directory.GetParent(entry.SavePath)?.FullName
                 ?? throw new InvalidOperationException("无法确定存档目录的父目录。");
-            var stagingPath = Path.Combine(parent, $".{entry.AppId}.steamswitch-restore-{Guid.NewGuid():N}");
-            var oldPath = Path.Combine(parent, $".{entry.AppId}.steamswitch-old-{Guid.NewGuid():N}");
+            var identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(entry.EntryId)))[..16];
+            var transaction = Guid.NewGuid().ToString("N");
+            var stagingPath = Path.Combine(parent, $".steamswitch-{identity}-restore-{transaction}");
+            var oldPath = Path.Combine(parent, $".steamswitch-{identity}-old-{transaction}");
+
+            // 上一次失败的恢复可能留下同前缀的残留目录，体积等同整份存档。
+            // 不清理的话失败几次就能撑满磁盘。
+            RemoveStaleRestoreDirectories(parent, identity, stagingPath);
+
+            // 恢复需要约 2 份存档的空间：staging 解压一份，旧目录在同卷移动再占一份。
+            var restoreBytes = manifest.Files
+                .Where(file => file.IsStoredInArchive)
+                .Sum(file => Math.Max(0L, file.Size)) * 22 / 10;
+            EnsureFreeSpaceForRestore(entry.SavePath, restoreBytes);
 
             try
             {
@@ -294,8 +467,9 @@ namespace SteamSwitcher.Core
                 // Only create the rollback point after the selected archive has passed
                 // manifest, path, size and SHA-256 validation.
                 if (Directory.Exists(entry.SavePath) && SafeEnumerateFiles(entry.SavePath).Any())
-                    await BackupAsync(entry, isSafetyBackup: true, cancellationToken: cancellationToken);
+                    await BackupCoreAsync(entry, isSafetyBackup: true, requireExclusiveAccess: true, useDifferential: false, cancellationToken);
 
+                cancellationToken.ThrowIfCancellationRequested();
                 if (Directory.Exists(entry.SavePath))
                     Directory.Move(entry.SavePath, oldPath);
 
@@ -303,11 +477,29 @@ namespace SteamSwitcher.Core
                 TryDeleteDirectory(oldPath);
                 AppLogger.Info($"Game save restored: {fullBackupPath} -> {entry.SavePath}");
             }
-            catch
+            catch (Exception restoreEx)
             {
                 TryDeleteDirectory(stagingPath);
                 if (!Directory.Exists(entry.SavePath) && Directory.Exists(oldPath))
-                    Directory.Move(oldPath, entry.SavePath);
+                {
+                    // 回滚本身也可能失败（杀软/索引器仍占用目录）。此时数据只剩
+                    // oldPath 里的那一份：必须原样保留，并把路径写进日志与异常，
+                    // 否则用户的存档目录会凭空消失且无从找回。
+                    try
+                    {
+                        Directory.Move(oldPath, entry.SavePath);
+                    }
+                    catch (Exception rollbackEx)
+                    {
+                        AppLogger.Error(
+                            $"Game save restore failed and the rollback also failed. " +
+                            $"The pre-restore data is preserved at {oldPath}; " +
+                            $"move it back to {entry.SavePath} manually.", rollbackEx);
+                        throw new IOException(
+                            $"存档恢复失败，且自动回滚也失败。恢复前的存档仍保留在 {oldPath}，请手动改回 {entry.SavePath}。",
+                            restoreEx);
+                    }
+                }
                 throw;
             }
         }
@@ -328,14 +520,17 @@ namespace SteamSwitcher.Core
             if (!Directory.Exists(directory))
                 return new List<GameSaveBackupInfo>();
 
-            return Directory.EnumerateFiles(directory, "*.zip", SearchOption.TopDirectoryOnly)
+            // Use the guarded enumerator so one inaccessible/corrupt entry in
+            // the backup directory cannot take down the entire save center.
+            return SafeEnumerateTopLevelFiles(directory)
+                .Where(path => string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase))
                 .Select(path =>
                 {
                     var info = new FileInfo(path);
                     return new GameSaveBackupInfo
                     {
                         FilePath = path,
-                        CreatedAt = info.CreationTime,
+                        CreatedAt = ParseBackupCreatedAt(path, info),
                         Size = info.Length,
                         IsSafetyBackup = Path.GetFileNameWithoutExtension(path).Contains("-before-restore", StringComparison.OrdinalIgnoreCase),
                         IsDifferential = Path.GetFileNameWithoutExtension(path).Contains("-diff", StringComparison.OrdinalIgnoreCase)
@@ -343,6 +538,25 @@ namespace SteamSwitcher.Core
                 })
                 .OrderByDescending(backup => backup.CreatedAt)
                 .ToList();
+        }
+
+        private static DateTime ParseBackupCreatedAt(string path, FileInfo info)
+        {
+            // Prefer the timestamp embedded in the backup file name. CreationTime
+            // can be wrong after copies, restores, or volume-level timestamp changes.
+            var name = Path.GetFileNameWithoutExtension(path);
+            if (name.Length >= 18 &&
+                DateTime.TryParseExact(name[..18], "yyyyMMdd-HHmmssfff",
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out var precise))
+                return precise;
+            // 导入的备份命名为 yyyyMMdd-HHmmss-import-<guid>（"yyyyMMdd-HHmmss" 是 15 字符）。
+            // 取 14 个字符永远匹配不上，会全部回退到 LastWriteTime，与其余按文件名排序的
+            // 备份混用时序，进而影响 FindDifferentialBase 与 PruneBackups 的保留集合。
+            if (name.Length >= 15 &&
+                DateTime.TryParseExact(name[..15], "yyyyMMdd-HHmmss",
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out var coarse))
+                return coarse;
+            return info.LastWriteTime;
         }
 
         public Task VerifyBackupAsync(
@@ -375,66 +589,224 @@ namespace SteamSwitcher.Core
             string destinationPath,
             CancellationToken cancellationToken = default)
         {
-            await VerifyBackupAsync(entry, backupPath, cancellationToken);
-            var source = ValidateBackupPath(entry, backupPath);
-            var destination = Path.GetFullPath(destinationPath);
-            if (string.Equals(source, destination, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("导出位置不能与原备份相同。");
-
-            await Task.Run(() =>
+            var gate = GetIoGate(entry.EntryId);
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? throw new InvalidOperationException("导出目录无效。"));
-                File.Copy(source, destination, overwrite: true);
-            }, cancellationToken);
+                ValidateEntryPath(entry);
+                var source = ValidateBackupPath(entry, backupPath);
+                var destination = Path.GetFullPath(destinationPath);
+                if (string.Equals(source, destination, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("导出位置不能与原备份相同。");
+                var destinationParent = Path.GetDirectoryName(destination) ?? throw new InvalidOperationException("导出目录无效。");
+                var physicalDestination = Path.Combine(ResolvePhysicalDirectoryPath(destinationParent), Path.GetFileName(destination));
+                if (physicalDestination.StartsWith(ResolvePhysicalDirectoryPath(_backupRoot) + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("请导出到备份仓库以外的目录，避免覆盖其他恢复版本。");
+
+                await Task.Run(() =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var manifest = ReadManifest(source);
+                    ValidateBackupIdentity(entry, manifest);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? throw new InvalidOperationException("导出目录无效。"));
+                    var snapshot = Path.Combine(GetBackupDirectory(entry), $".export-{Guid.NewGuid():N}");
+                    var temporary = destination + $".{Guid.NewGuid():N}.tmp";
+                    try
+                    {
+                        Directory.CreateDirectory(snapshot);
+                        ExtractArchiveSafely(source, snapshot, manifest, cancellationToken);
+                        // Export the selected snapshot, including differential changes
+                        // and deletions, as a self-contained full archive.
+                        ApplyManifestIdentity(manifest, entry);
+                        WriteFullSnapshotArchive(snapshot, temporary, manifest, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        File.Move(temporary, destination, overwrite: true);
+                    }
+                    finally
+                    {
+                        TryDeleteFile(temporary);
+                        TryDeleteDirectory(snapshot);
+                    }
+                }, cancellationToken);
+            }
+            finally
+            {
+                gate.Release();
+            }
         }
 
         public Task<string> ImportBackupAsync(
             GameSaveEntry entry,
             string sourcePath,
+            CancellationToken cancellationToken = default) =>
+            ImportBackupCoreAsync(entry, sourcePath, expectedArchiveSha256: null, cancellationToken);
+
+        /// <summary>
+        /// Explicit migration only. The caller must show the source/target identity
+        /// and obtain confirmation using GetImportPreviewAsync first. Normal imports
+        /// and restores retain strict identity checks.
+        /// </summary>
+        public Task<string> ImportReassociatedCustomBackupAsync(
+            GameSaveEntry entry,
+            string sourcePath,
+            string expectedArchiveSha256,
             CancellationToken cancellationToken = default)
         {
-            ValidateEntryPath(entry);
+            if (!entry.IsCustom || entry.IsDetected || string.IsNullOrWhiteSpace(expectedArchiveSha256) ||
+                expectedArchiveSha256.Length != 64)
+                throw new InvalidOperationException("重新关联仅适用于手动添加的自定义目录，并且需要已确认的备份指纹。");
+            return ImportBackupCoreAsync(entry, sourcePath, expectedArchiveSha256, cancellationToken);
+        }
+
+        public Task<GameSaveImportPreview> GetImportPreviewAsync(
+            GameSaveEntry target,
+            string sourcePath,
+            CancellationToken cancellationToken = default)
+        {
+            ValidateEntryPath(target);
             return Task.Run(() =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var source = Path.GetFullPath(sourcePath);
-                if (!File.Exists(source) || !string.Equals(Path.GetExtension(source), ".zip", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("请选择有效的 ZIP 存档备份。");
+                using var sourceLock = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var manifest = ReadManifest(source);
+                if (!string.Equals(manifest.BackupMode, "full", StringComparison.OrdinalIgnoreCase) ||
+                    !string.IsNullOrWhiteSpace(manifest.BaseBackupFile))
+                    throw new InvalidDataException("请选择自包含的完整备份；请先在原存档中心导出所需版本。");
+                var matches = true;
+                try { ValidateBackupIdentity(target, manifest); }
+                catch (InvalidDataException) { matches = false; }
+                return new GameSaveImportPreview(manifest.GameName ?? string.Empty, manifest.AccountName ?? string.Empty,
+                    manifest.SourceSavePath ?? string.Empty,
+                    manifest.EntryId, ComputeSha256(source), matches,
+                    target.IsCustom && !target.IsDetected && manifest.IsCustom && manifest.FormatVersion >= 2);
+            }, cancellationToken);
+        }
 
-                var directory = GetBackupDirectory(entry);
-                Directory.CreateDirectory(directory);
-                var temporary = Path.Combine(directory, $".import-{Guid.NewGuid():N}.zip");
-                try
+        private async Task<string> ImportBackupCoreAsync(
+            GameSaveEntry entry,
+            string sourcePath,
+            string? expectedArchiveSha256,
+            CancellationToken cancellationToken)
+        {
+            ValidateEntryPath(entry);
+            var gate = GetIoGate(entry.EntryId);
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await Task.Run(() =>
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    File.Copy(source, temporary, overwrite: false);
-                    var manifest = ReadManifest(temporary);
-                    ValidateBackupIdentity(entry, manifest);
-                    if (!string.IsNullOrWhiteSpace(manifest.BaseBackupFile))
-                        throw new InvalidDataException("增量备份依赖原始完整备份，不能单独导入。请导出并导入完整备份。");
+                    var source = Path.GetFullPath(sourcePath);
+                    if (!File.Exists(source) || !string.Equals(Path.GetExtension(source), ".zip", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("请选择有效的 ZIP 存档备份。");
 
-                    var verifyDirectory = Path.Combine(directory, $".verify-{Guid.NewGuid():N}");
+                    var directory = GetBackupDirectory(entry);
+                    Directory.CreateDirectory(directory);
+                    var temporary = Path.Combine(directory, $".import-{Guid.NewGuid():N}.zip");
                     try
                     {
-                        Directory.CreateDirectory(verifyDirectory);
-                        ExtractArchiveSafely(temporary, verifyDirectory, manifest, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        File.Copy(source, temporary, overwrite: false);
+                        if (expectedArchiveSha256 != null &&
+                            !string.Equals(ComputeSha256(temporary), expectedArchiveSha256, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException("备份文件在确认后发生变化，请重新选择并确认。");
+                        var manifest = ReadManifest(temporary);
+                        var originalEntryId = manifest.EntryId;
+                        if (expectedArchiveSha256 == null) ValidateBackupIdentity(entry, manifest);
+                        else if (!entry.IsCustom || entry.IsDetected || !manifest.IsCustom || manifest.FormatVersion < 2)
+                            throw new InvalidDataException("只能将自定义存档备份显式重新关联到手动添加的目录。");
+                        if (!string.Equals(manifest.BackupMode, "full", StringComparison.OrdinalIgnoreCase) ||
+                            !string.IsNullOrWhiteSpace(manifest.BaseBackupFile))
+                            throw new InvalidDataException("增量备份依赖原始完整备份，不能单独导入。请导出并导入完整备份。");
+
+                        var verifyDirectory = Path.Combine(directory, $".verify-{Guid.NewGuid():N}");
+                        try
+                        {
+                            Directory.CreateDirectory(verifyDirectory);
+                            ExtractArchiveSafely(temporary, verifyDirectory, manifest, cancellationToken);
+                            if (expectedArchiveSha256 != null)
+                            {
+                                ApplyManifestIdentity(manifest, entry);
+                                manifest.IsSafetyBackup = false;
+                                var rewritten = temporary + ".reassociated";
+                                try
+                                {
+                                    WriteFullSnapshotArchive(verifyDirectory, rewritten, manifest, cancellationToken);
+                                    File.Move(rewritten, temporary, overwrite: true);
+                                }
+                                finally { TryDeleteFile(rewritten); }
+                            }
+                        }
+                        finally
+                        {
+                            TryDeleteDirectory(verifyDirectory);
+                        }
+
+                        var safeName = $"{DateTime.Now:yyyyMMdd-HHmmss}-import-{Guid.NewGuid():N}.zip";
+                        var destination = Path.Combine(directory, safeName);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        File.Move(temporary, destination);
+                        AppLogger.Info($"Game save backup imported: {destination}");
+                        if (expectedArchiveSha256 != null)
+                            AppLogger.Info($"Custom game save backup explicitly reassociated: {originalEntryId} -> {entry.EntryId}");
+                        return destination;
                     }
                     finally
                     {
-                        TryDeleteDirectory(verifyDirectory);
+                        if (File.Exists(temporary)) File.Delete(temporary);
                     }
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
 
-                    var safeName = $"{DateTime.Now:yyyyMMdd-HHmmss}-import-{Guid.NewGuid():N}.zip";
-                    var destination = Path.Combine(directory, safeName);
-                    File.Move(temporary, destination);
-                    AppLogger.Info($"Game save backup imported: {destination}");
-                    return destination;
-                }
-                finally
+        private static void WriteFullSnapshotArchive(
+            string snapshot,
+            string archivePath,
+            GameSaveBackupManifest manifest,
+            CancellationToken cancellationToken)
+        {
+            manifest.FormatVersion = 3;
+            manifest.BackupMode = "full";
+            manifest.BaseBackupFile = string.Empty;
+            using var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create);
+            var buffer = new byte[128 * 1024];
+            foreach (var file in manifest.Files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                file.StoredInArchive = true;
+                var path = Path.GetFullPath(Path.Combine(snapshot, file.Path.Replace('/', Path.DirectorySeparatorChar)));
+                EnsurePathIsInside(path, snapshot);
+                var zipEntry = archive.CreateEntry($"data/{file.Path}", CompressionLevel.Optimal);
+                using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var target = zipEntry.Open();
+                int read;
+                while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
                 {
-                    if (File.Exists(temporary)) File.Delete(temporary);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    target.Write(buffer, 0, read);
                 }
-            }, cancellationToken);
+            }
+            var manifestEntry = archive.CreateEntry(ManifestName, CompressionLevel.Optimal);
+            using var writer = new StreamWriter(manifestEntry.Open());
+            writer.Write(JsonSerializer.Serialize(manifest, ManifestJsonOptions));
+        }
+
+        private static void ApplyManifestIdentity(GameSaveBackupManifest manifest, GameSaveEntry entry)
+        {
+            manifest.EntryId = entry.EntryId;
+            manifest.IsCustom = entry.IsCustom;
+            manifest.SteamId = entry.SteamId;
+            manifest.UserDataId = entry.UserDataId;
+            manifest.AccountName = entry.AccountName;
+            manifest.AppId = entry.AppId;
+            manifest.GameName = entry.GameName;
+            manifest.SourceSavePath = Path.GetFullPath(entry.SavePath);
+            manifest.IsDetected = entry.IsDetected;
         }
 
         public Task<GameSaveChangeSummary> AnalyzeChangesAsync(
@@ -449,21 +821,30 @@ namespace SteamSwitcher.Core
         {
             ValidateEntryPath(entry);
             var fullBackupPath = ValidateBackupPath(entry, backupPath);
-            var fileName = Path.GetFileName(fullBackupPath);
-            var dependent = GetBackups(entry).FirstOrDefault(backup =>
+            var gate = GetIoGate(entry.EntryId);
+            gate.Wait();
+            try
             {
-                if (string.Equals(backup.FilePath, fullBackupPath, StringComparison.OrdinalIgnoreCase)) return false;
-                try
+                var fileName = Path.GetFileName(fullBackupPath);
+                var dependent = GetBackups(entry).FirstOrDefault(backup =>
                 {
-                    var candidate = ReadManifest(backup.FilePath);
-                    return string.Equals(candidate.BaseBackupFile, fileName, StringComparison.OrdinalIgnoreCase);
-                }
-                catch { return false; }
-            });
-            if (dependent != null)
-                throw new InvalidOperationException("该完整备份仍被增量备份引用，请先删除依赖它的增量备份。");
-            File.Delete(fullBackupPath);
-            AppLogger.Info($"Game save backup deleted: {fullBackupPath}");
+                    if (string.Equals(backup.FilePath, fullBackupPath, StringComparison.OrdinalIgnoreCase)) return false;
+                    try
+                    {
+                        var candidate = ReadManifest(backup.FilePath);
+                        return string.Equals(candidate.BaseBackupFile, fileName, StringComparison.OrdinalIgnoreCase);
+                    }
+                    catch { return false; }
+                });
+                if (dependent != null)
+                    throw new InvalidOperationException("该完整备份仍被增量备份引用，请先删除依赖它的增量备份。");
+                File.Delete(fullBackupPath);
+                AppLogger.Info($"Game save backup deleted: {fullBackupPath}");
+            }
+            finally
+            {
+                gate.Release();
+            }
         }
 
         public static string ConvertSteamIdToUserDataId(string steamId)
@@ -509,6 +890,8 @@ namespace SteamSwitcher.Core
                 AccountName = entry.AccountName,
                 AppId = entry.AppId,
                 GameName = entry.GameName,
+                SourceSavePath = Path.GetFullPath(entry.SavePath),
+                IsDetected = entry.IsDetected,
                 CreatedAtUtc = createdAt.ToUniversalTime(),
                 IsSafetyBackup = isSafetyBackup,
                 BackupMode = baseBackup == null ? "full" : "differential",
@@ -553,6 +936,22 @@ namespace SteamSwitcher.Core
                 var actualHash = Convert.ToHexString(hash.GetHashAndReset());
                 if (size != file.Size || !string.Equals(actualHash, file.Sha256, StringComparison.OrdinalIgnoreCase))
                     throw new IOException($"存档文件在备份期间发生变化：{relativePath}");
+            }
+
+            // Differential TOCTOU guard: files marked as unchanged (not stored in
+            // this archive) were fingerprinted before packing. Re-read them now and
+            // fail the backup if any drifted after that snapshot, otherwise the
+            // archive would silently omit the newer content.
+            foreach (var file in manifest.Files.Where(item => !item.IsStoredInArchive))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var filePath = Path.Combine(entry.SavePath, file.Path.Replace('/', Path.DirectorySeparatorChar));
+                var fullPath = Path.GetFullPath(filePath);
+                EnsurePathIsInside(fullPath, sourceRoot);
+                if (!File.Exists(fullPath) ||
+                    new FileInfo(fullPath).Length != file.Size ||
+                    !string.Equals(ComputeSha256(fullPath), file.Sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"存档文件在备份期间发生变化（未写入增量包）：{file.Path}");
             }
 
             var manifestEntry = archive.CreateEntry(ManifestName, CompressionLevel.Optimal);
@@ -608,6 +1007,21 @@ namespace SteamSwitcher.Core
                 };
             }
             return result;
+        }
+
+        private async Task<bool> IsBackupValidAsync(GameSaveEntry entry, string path, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await VerifyBackupAsync(entry, path, cancellationToken);
+                return true;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Backup cannot be reused: {path}: {ex.Message}");
+                return false;
+            }
         }
 
         private bool TryFindEquivalentManualBackup(
@@ -734,13 +1148,114 @@ namespace SteamSwitcher.Core
                 var relativePath = normalizedRelativePath.Replace('/', Path.DirectorySeparatorChar);
                 var destinationPath = Path.GetFullPath(Path.Combine(destination, relativePath));
                 EnsurePathIsInside(destinationPath, destinationRoot);
+                // 顺序很重要：EnsureNoReparsePointBelow 遇到"还不存在的路径段"会直接
+                // 返回，放在 CreateDirectory 之前等于本次新建的目录链完全没被检查。
                 Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+                EnsureNoReparsePointBelow(destinationPath, destinationRoot);
                 archiveEntry.ExtractToFile(destinationPath, overwrite);
                 if (!string.Equals(ComputeSha256(destinationPath), expected.Sha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException($"备份文件哈希校验失败：{normalizedRelativePath}");
             }
             if (seenFiles.Count != storedFiles.Count)
                 throw new InvalidDataException("备份缺少清单中记录的文件。");
+        }
+
+        /// <summary>
+        /// 清理上一次失败恢复留下的残留目录（体积等同整份存档）。删除失败只记日志，
+        /// 绝不阻断本次恢复；留到下一次启动/恢复时再试。
+        /// </summary>
+        private static void RemoveStaleRestoreDirectories(string parent, string identity, string currentStaging)
+        {
+            try
+            {
+                if (!Directory.Exists(parent)) return;
+                var prefixes = new[]
+                {
+                    $".steamswitch-{identity}-restore-",
+                    $".steamswitch-{identity}-old-"
+                };
+                foreach (var directory in Directory.GetDirectories(parent))
+                {
+                    var name = Path.GetFileName(directory);
+                    if (!prefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+                    if (string.Equals(directory, currentStaging, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    try { Directory.Delete(directory, recursive: true); }
+                    catch (Exception ex) { AppLogger.Warn($"Unable to remove stale restore directory {name}: {ex.Message}"); }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to scan for stale restore directories: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 恢复前的空间预检：staging 解压约 1 份，旧目录同卷移动再占 1 份。
+        /// 不预检的话大存档会在解压中途或 Directory.Move 处才失败。
+        /// </summary>
+        private static void EnsureFreeSpaceForRestore(string savePath, long requiredBytes)
+        {
+            if (requiredBytes <= 0) return;
+
+            var target = Directory.Exists(savePath) ? savePath : Path.GetDirectoryName(savePath);
+            if (string.IsNullOrWhiteSpace(target)) return;
+
+            var root = Path.GetPathRoot(Path.GetFullPath(target));
+            if (string.IsNullOrEmpty(root)) return;
+
+            var drive = new DriveInfo(root);
+            if (!drive.IsReady) return;
+
+            if (drive.AvailableFreeSpace < requiredBytes)
+                throw new IOException(
+                    $"磁盘空间不足：恢复需要约 {requiredBytes / 1024 / 1024} MB，{root} 仅剩 {drive.AvailableFreeSpace / 1024 / 1024} MB。");
+        }
+
+        /// <summary>
+        /// 备份前预估源目录体积并核对可用空间：写满系统盘会影响 Steam、
+        /// 资源管理器和页面文件，必须在动手之前拦下。
+        /// </summary>
+        private static void EnsureFreeSpaceForBackup(string destinationDirectory, string savePath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(savePath) || !Directory.Exists(savePath))
+                    return;
+
+                var root = Path.GetPathRoot(Path.GetFullPath(destinationDirectory));
+                if (string.IsNullOrEmpty(root)) return;
+
+                var drive = new DriveInfo(root);
+                if (!drive.IsReady) return;
+
+                var required = EstimateDirectorySize(savePath) * 12 / 10; // 预留 20% 余量
+                if (required <= 0) return;
+
+                if (drive.AvailableFreeSpace < required)
+                    throw new IOException(
+                        $"磁盘空间不足：备份需要约 {required / 1024 / 1024} MB，{root} 仅剩 {drive.AvailableFreeSpace / 1024 / 1024} MB。");
+            }
+            catch (IOException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Could not evaluate free space before backup: {ex.Message}");
+            }
+        }
+
+        private static long EstimateDirectorySize(string directory)
+        {
+            long total = 0;
+            foreach (var path in EnumerateSaveFiles(directory))
+            {
+                try { total += new FileInfo(path).Length; }
+                catch { }
+            }
+            return total;
         }
 
         private static void RemoveFilesNotInManifest(string destination, GameSaveBackupManifest manifest)
@@ -750,7 +1265,12 @@ namespace SteamSwitcher.Core
             {
                 var relative = Path.GetRelativePath(destination, path).Replace('\\', '/');
                 if (!expected.Contains(relative))
-                    File.Delete(path);
+                {
+                    // 单个只读/被占用的文件不应让整次还原失败：后面还有
+                    // VerifyExtractedSnapshot 做最终一致性校验兜底。
+                    try { File.Delete(path); }
+                    catch (Exception ex) { AppLogger.Warn($"Could not remove stale file during restore: {path} ({ex.Message})"); }
+                }
             }
         }
 
@@ -874,7 +1394,10 @@ namespace SteamSwitcher.Core
                 return;
             }
 
-            if (entry.AppId <= 0 || string.IsNullOrWhiteSpace(entry.UserDataId))
+            if (entry.AppId <= 0 || string.IsNullOrWhiteSpace(entry.UserDataId) ||
+                !ulong.TryParse(entry.SteamId, out _) ||
+                entry.UserDataId != ConvertSteamIdToUserDataId(entry.SteamId) ||
+                entry.EntryId != $"steam:{entry.SteamId}:{entry.AppId}")
                 throw new InvalidDataException("存档项缺少账号或游戏信息。");
             var expected = Path.Combine(_steamPath, "userdata", entry.UserDataId, entry.AppId.ToString());
             if (!string.Equals(
@@ -884,6 +1407,7 @@ namespace SteamSwitcher.Core
             {
                 throw new InvalidDataException("存档路径不在预期的 Steam userdata 目录中。");
             }
+            EnsureNoReparsePointBelow(entry.SavePath, _steamPath);
         }
 
         private string ValidateBackupPath(GameSaveEntry entry, string backupPath)
@@ -922,49 +1446,6 @@ namespace SteamSwitcher.Core
             return left.AppId == right.AppId && string.Equals(left.SteamId, right.SteamId, StringComparison.Ordinal);
         }
 
-        private static void VerifyArchiveContents(
-            string archivePath,
-            GameSaveBackupManifest manifest,
-            CancellationToken cancellationToken)
-        {
-            using var archive = ZipFile.OpenRead(archivePath);
-            if (manifest.Files.Count > MaxBackupFileCount ||
-                ExceedsExpandedSizeLimit(manifest.Files.Select(file => file.Size)))
-                throw new InvalidDataException("备份文件数量或展开大小超过安全限制。");
-
-            var expectedFiles = manifest.Files.ToDictionary(file => file.Path.Replace('\\', '/'), StringComparer.OrdinalIgnoreCase);
-            var dataEntries = archive.Entries
-                .Where(entry => entry.FullName.StartsWith("data/", StringComparison.Ordinal) && !string.IsNullOrEmpty(entry.Name))
-                .ToList();
-            if (dataEntries.Count != expectedFiles.Count)
-                throw new InvalidDataException("备份文件清单与压缩包内容不一致。");
-
-            var buffer = new byte[128 * 1024];
-            var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var archiveEntry in dataEntries)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var relativePath = archiveEntry.FullName["data/".Length..].Replace('\\', '/');
-                if (!seenFiles.Add(relativePath) ||
-                    !expectedFiles.TryGetValue(relativePath, out var expected) ||
-                    archiveEntry.Length != expected.Size)
-                    throw new InvalidDataException($"备份文件校验失败：{relativePath}");
-
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                using var stream = archiveEntry.Open();
-                int bytesRead;
-                while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    hash.AppendData(buffer, 0, bytesRead);
-                }
-                if (!string.Equals(Convert.ToHexString(hash.GetHashAndReset()), expected.Sha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException($"备份文件哈希校验失败：{relativePath}");
-            }
-            if (seenFiles.Count != expectedFiles.Count)
-                throw new InvalidDataException("备份缺少清单中记录的文件。");
-        }
-
         private void PruneBackups(GameSaveEntry entry)
         {
             var backups = GetBackups(entry);
@@ -985,13 +1466,19 @@ namespace SteamSwitcher.Core
                 }
                 catch (Exception ex)
                 {
-                    AppLogger.Warn($"Unable to read retained differential backup: {ex.Message}");
+                    // Cannot tell which full baseline this differential depends on.
+                    // Abort pruning entirely so a required base is never deleted.
+                    AppLogger.Warn($"Unable to read retained differential backup; pruning aborted to protect its base: {ex.Message}");
+                    return;
                 }
             }
-            while (retainedPaths.Count > _manualRetention)
+            // Dependencies may exceed the configured snapshot count. Never remove
+            // the newest snapshot just to keep its older full baseline.
+            while (retainedPaths.Count > Math.Max(_manualRetention, requiredBasePaths.Count + 1))
             {
                 var removable = backups.LastOrDefault(backup =>
-                    !backup.IsSafetyBackup && retainedPaths.Contains(backup.FilePath) && !requiredBasePaths.Contains(backup.FilePath));
+                    !backup.IsSafetyBackup && retainedPaths.Contains(backup.FilePath) && !requiredBasePaths.Contains(backup.FilePath) &&
+                    !string.Equals(backup.FilePath, retainedManual.FirstOrDefault()?.FilePath, StringComparison.OrdinalIgnoreCase));
                 if (removable == null) break;
                 retainedPaths.Remove(removable.FilePath);
             }
@@ -1036,10 +1523,22 @@ namespace SteamSwitcher.Core
             catch (Exception ex) { AppLogger.Warn($"Unable to enumerate save directories: {path}. {ex.Message}"); return Array.Empty<string>(); }
         }
 
+        private static bool IsRegularDirectory(string path)
+        {
+            try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        }
+
         private static IEnumerable<string> SafeEnumerateFiles(string path)
         {
             try { return EnumerateSaveFiles(path).ToList(); }
             catch (Exception ex) { AppLogger.Warn($"Unable to enumerate save files: {path}. {ex.Message}"); return Array.Empty<string>(); }
+        }
+
+        private static IEnumerable<string> SafeEnumerateTopLevelFiles(string path)
+        {
+            try { return Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly).ToList(); }
+            catch (Exception ex) { AppLogger.Warn($"Unable to enumerate backup files: {path}. {ex.Message}"); return Array.Empty<string>(); }
         }
 
         private static IEnumerable<string> EnumerateSaveFiles(string path) =>
@@ -1126,6 +1625,48 @@ namespace SteamSwitcher.Core
                 throw new InvalidDataException("检测到不安全的文件路径，操作已取消。");
         }
 
+        private static SemaphoreSlim GetIoGate(string entryId) =>
+            IoGates.GetOrAdd(entryId, _ => new SemaphoreSlim(1, 1));
+
+        /// <summary>
+        /// Rejects restoring through a symlink or junction. EnsurePathIsInside
+        /// only checks the resulting string, so a link anywhere below the
+        /// destination root could still redirect the write outside it.
+        /// </summary>
+        private static void EnsureNoReparsePointBelow(string candidate, string root)
+        {
+            var normalizedRoot = Path.GetFullPath(root);
+            var relative = Path.GetRelativePath(normalizedRoot, Path.GetFullPath(candidate));
+            var current = normalizedRoot;
+
+            foreach (var segment in relative.Split(
+                         Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            {
+                if (segment.Length == 0 || segment == ".")
+                    continue;
+
+                current = Path.Combine(current, segment);
+                FileAttributes attributes;
+                try
+                {
+                    attributes = File.GetAttributes(current);
+                }
+                catch (FileNotFoundException)
+                {
+                    // This segment does not exist yet, so neither can any
+                    // deeper one; everything below is created freshly.
+                    return;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    return;
+                }
+
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidDataException("检测到符号链接，备份恢复已取消。");
+            }
+        }
+
         private static void TryDeleteFile(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
@@ -1133,7 +1674,17 @@ namespace SteamSwitcher.Core
 
         private static void TryDeleteDirectory(string path)
         {
-            try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { }
+            try
+            {
+                if (Directory.Exists(path))
+                    Directory.Delete(path, recursive: true);
+            }
+            catch (Exception ex)
+            {
+                // Do not swallow silently: a failed delete of a rollback/staging
+                // directory is a leftover the operator may need to clean up.
+                AppLogger.Warn($"Unable to delete temporary directory {path}: {ex.Message}");
+            }
         }
     }
 }

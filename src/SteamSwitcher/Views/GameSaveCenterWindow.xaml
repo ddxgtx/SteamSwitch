@@ -1,4 +1,4 @@
-<UserControl x:Class="SteamSwitcher.Views.GameSaveCenterWindow"
+<UserControl FontSize="13" x:Class="SteamSwitcher.Views.GameSaveCenterWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Background="Transparent" UseLayoutRounding="True"
@@ -19,14 +19,14 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Border" CornerRadius="12" Background="{TemplateBinding Background}"
+                        <Border x:Name="Border" CornerRadius="10" Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Border" Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Border" Property="Opacity" Value="0.9"/></Trigger>
                             <Trigger Property="IsPressed" Value="True"><Setter TargetName="Border" Property="Opacity" Value="0.76"/></Trigger>
-                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Border" Property="Opacity" Value="0.45"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -36,7 +36,7 @@
         <Style x:Key="PrimarySaveButton" TargetType="Button" BasedOn="{StaticResource SaveActionButton}">
             <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentForegroundBrush}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
 
@@ -44,7 +44,7 @@
         <Style x:Key="SavePathActionButton" TargetType="Button">
             <Setter Property="Width" Value="44"/>
             <Setter Property="Height" Value="28"/>
-            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderBrush" Value="Transparent"/>
@@ -56,17 +56,17 @@
 
         <Style TargetType="ListBoxItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-            <Setter Property="MinHeight" Value="110"/>
-            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="MinHeight" Value="92"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Card" Padding="16" CornerRadius="16" Background="{DynamicResource CardBgBrush}"
+                        <Border x:Name="Card" Padding="14" CornerRadius="16" Background="{DynamicResource CardBgBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                            <Border.Effect><DropShadowEffect Color="#16243A" BlurRadius="14" ShadowDepth="2" Opacity="0.055"/></Border.Effect>
+                            <Border.Effect><DropShadowEffect Color="#101828" BlurRadius="8" ShadowDepth="1" Opacity="0.025"/></Border.Effect>
                             <ContentPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -81,45 +81,8 @@
             </Setter>
         </Style>
 
-        <Style x:Key="SaveComboBoxItem" TargetType="ComboBoxItem">
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Padding" Value="10,8"/>
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-            <Style.Triggers>
-                <Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="{DynamicResource HoverBgBrush}"/></Trigger>
-                <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{DynamicResource AccentBgBrush}"/></Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="SaveComboBox" TargetType="ComboBox">
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
-            <!-- 移除 Windows 默认虚线焦点框，保持与存档工作台一致的圆角边框反馈。 -->
-            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-            <Setter Property="Background" Value="{DynamicResource InputBgBrush}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="10,0"/>
-            <Setter Property="ItemContainerStyle" Value="{StaticResource SaveComboBoxItem}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ComboBox">
-                        <Grid>
-                            <ToggleButton Width="{TemplateBinding Width}" Height="{TemplateBinding Height}" MinWidth="{TemplateBinding MinWidth}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" FocusVisualStyle="{x:Null}"
-                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" Focusable="False" Cursor="Hand">
-                                <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9"><Grid><ContentPresenter Margin="12,0,34,0" VerticalAlignment="Center"/><TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"/></Grid></Border></ControlTemplate></ToggleButton.Template>
-                                <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" VerticalAlignment="Center"/>
-                            </ToggleButton>
-                            <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
-                                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="300" Margin="0,4,0,0" Padding="4" CornerRadius="10" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                                    <ScrollViewer><ItemsPresenter/></ScrollViewer>
-                                </Border>
-                            </Popup>
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <!-- SaveComboBox / SaveComboBoxItem 已上移至 Resources/Styles.xaml（应用级），
+             供 MainWindow 的游戏筛选下拉框与本窗口共用。 -->
 
         <Style TargetType="ScrollBar">
             <Setter Property="Background" Value="Transparent"/>
@@ -181,7 +144,7 @@
         </Style>
     </UserControl.Resources>
 
-    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Background="{DynamicResource SurfaceTintBrush}">
+    <Border BorderThickness="0" CornerRadius="16" Background="Transparent">
         <Grid>
             <Grid.RowDefinitions><RowDefinition Height="0"/><RowDefinition Height="*"/><RowDefinition Height="0"/></Grid.RowDefinitions>
 
@@ -194,7 +157,7 @@
                         </Border>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="游戏存档中心" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                            <TextBlock Text="按 Steam 账号检查、备份与恢复 userdata 存档" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,3,0,0"/>
+                            <TextBlock Text="按 Steam 账号检查、备份与恢复 userdata 存档" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,3,0,0"/>
                         </StackPanel>
                     </StackPanel>
                     <Button Grid.Column="1" Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="12"
@@ -203,8 +166,8 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="1" Margin="18,16,18,0">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="440"/></Grid.ColumnDefinitions>
+            <Grid Grid.Row="1" Margin="0,0,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="400"/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 
                 <Grid Grid.Row="0" Grid.ColumnSpan="2" Margin="0,0,0,16">
@@ -214,7 +177,7 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Border Height="48" CornerRadius="12" Background="{DynamicResource InputBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,10,0">
+                    <Border Height="40" CornerRadius="10" Background="{DynamicResource InputBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,10,0">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="40"/>
@@ -228,14 +191,14 @@
                             </TextBlock>
                         </Grid>
                     </Border>
-                    <ComboBox x:Name="AccountFilter" Grid.Column="1" Width="190" Height="48" Margin="0,0,10,0" Style="{StaticResource SaveComboBox}" DisplayMemberPath="DisplayName" SelectionChanged="Filter_Changed"/>
-                    <Button Grid.Column="2" Style="{StaticResource SaveActionButton}" Height="44" MinWidth="104" Padding="14,0" Margin="0,0,10,0" Click="Refresh_Click">
+                    <ComboBox x:Name="AccountFilter" Grid.Column="1" Width="160" Height="40" Margin="0,0,10,0" Style="{StaticResource SaveComboBox}" DisplayMemberPath="DisplayName" SelectionChanged="Filter_Changed"/>
+                    <Button Grid.Column="2" Style="{StaticResource SaveActionButton}" Height="40" MinWidth="104" Padding="14,0" Margin="0,0,10,0" Click="Refresh_Click">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center"/>
                             <TextBlock Text="重新扫描" FontSize="13" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
-                    <Button Grid.Column="3" Style="{StaticResource SaveActionButton}" Height="44" MinWidth="152" Padding="14,0" Margin="0" Click="AddCustomFolder_Click">
+                    <Button Grid.Column="3" Style="{StaticResource SaveActionButton}" Height="40" MinWidth="152" Padding="14,0" Margin="0" Click="AddCustomFolder_Click">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="＋" FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="14" Margin="0,0,6,0" VerticalAlignment="Center"/>
                             <TextBlock Text="添加自定义目录" FontSize="13" VerticalAlignment="Center"/>
@@ -249,11 +212,11 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Border Width="4" Height="17" CornerRadius="2" Background="{DynamicResource AccentBrush}" Margin="0,0,10,0"/>
-                            <StackPanel><TextBlock Text="存档列表" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold"/><TextBlock Text="智能识别 · Steam Cloud · 本地存档" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11.5" Margin="0,2,0,0"/></StackPanel>
+                            <StackPanel><TextBlock Text="存档列表" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold"/><TextBlock Text="智能识别 · Steam Cloud · 本地存档" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,2,0,0"/></StackPanel>
                         </StackPanel>
-                        <Border Grid.Column="1" Background="{DynamicResource AccentBgBrush}" BorderBrush="#200A84FF" BorderThickness="1" CornerRadius="8" Padding="9,4" VerticalAlignment="Center"><TextBlock Text="选择后可备份或恢复" Foreground="{DynamicResource AccentBrush}" FontSize="11.5" FontWeight="SemiBold"/></Border>
+                        <Border Grid.Column="1" Background="{DynamicResource AccentBgBrush}" BorderBrush="{DynamicResource AccentBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="9,4" VerticalAlignment="Center"><TextBlock Text="选择后可备份或恢复" Foreground="{DynamicResource AccentBrush}" FontSize="12" FontWeight="SemiBold"/></Border>
                     </Grid>
-                    <Border Grid.Row="1" CornerRadius="18" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                    <Border Grid.Row="1" CornerRadius="16" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                     <Grid>
                         <ListBox x:Name="SaveList" Margin="0,0,18,0" Padding="8" Background="Transparent" BorderThickness="0" SelectionChanged="SaveList_SelectionChanged"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
@@ -265,7 +228,7 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <Border Width="56" Height="56" CornerRadius="12" Background="{DynamicResource AccentBgBrush}" BorderBrush="#250A84FF" BorderThickness="1.5" ClipToBounds="True">
+                                        <Border Width="56" Height="56" CornerRadius="12" Background="{DynamicResource AccentBgBrush}" BorderBrush="{DynamicResource AccentBorderBrush}" BorderThickness="1.5" ClipToBounds="True">
                                             <Grid>
                                                 <TextBlock x:Name="SaveFallbackIcon" Text="&#xE7FC;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                 <Image x:Name="SaveGameIcon" Source="{Binding IconPath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"/>
@@ -274,13 +237,13 @@
                                         <StackPanel Grid.Column="1" Margin="12,0,10,0" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding GameName}" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" ToolTip="{Binding GameName}"/>
                                             <WrapPanel Margin="0,6,0,0" VerticalAlignment="Center">
-                                                <Border Background="{DynamicResource AccentBgBrush}" CornerRadius="6" Padding="6,2" Margin="0,0,6,0">
+                                                <Border Background="{DynamicResource AccentBgBrush}" CornerRadius="8" Padding="6,2" Margin="0,0,6,0">
                                                     <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="10" Foreground="{DynamicResource AccentBrush}" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                                                        <TextBlock Text="{Binding AccountDisplayName}" Foreground="{DynamicResource AccentBrush}" FontSize="11.5" FontWeight="Medium"/>
+                                                        <TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource AccentBrush}" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                                        <TextBlock Text="{Binding AccountDisplayName}" Foreground="{DynamicResource AccentBrush}" FontSize="12" FontWeight="Medium"/>
                                                     </StackPanel>
                                                 </Border>
-                                                <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="6,2">
+                                                <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="6,2">
                                                     <TextBlock Text="{Binding SourceDisplay}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
                                                 </Border>
                                             </WrapPanel>
@@ -290,7 +253,7 @@
                                                 <TextBlock Text="{Binding SizeDisplay}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/>
                                             </Border>
                                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0" HorizontalAlignment="Right">
-                                                <TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                                <TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0" VerticalAlignment="Center"/>
                                                 <TextBlock Text="{Binding BackupCount, StringFormat={}{0} 份备份}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" ToolTip="{Binding BackupDisplay}"/>
                                             </StackPanel>
                                         </StackPanel>
@@ -305,7 +268,7 @@
                         <StackPanel x:Name="EmptyHint" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <TextBlock Text="&#xE74E;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="30" HorizontalAlignment="Center"/>
                             <TextBlock Text="未发现账号存档" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="SemiBold" Margin="0,12,0,0"/>
-                            <TextBlock Text="仅显示 Steam userdata 中实际存在文件的游戏" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" Margin="0,6,0,0"/>
+                            <TextBlock Text="支持 Steam、本地与已备份的存档目录" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,6,0,0"/>
                         </StackPanel>
                     </Grid>
                     </Border>
@@ -321,13 +284,15 @@
                     </Border>
                 </Grid>
 
-                <ScrollViewer Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
+                <Grid Grid.Row="1" Grid.Column="1">
+                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Margin="0,0,4,0">
-                    <Border MinHeight="420" CornerRadius="14" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="20,18">
+                    <Border CornerRadius="16" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="16">
                         <StackPanel>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="68"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="56" Height="56" HorizontalAlignment="Left" CornerRadius="12" Background="{DynamicResource AccentBgBrush}" BorderBrush="#250A84FF" BorderThickness="1.5" ClipToBounds="True">
+                                <Border Width="56" Height="56" HorizontalAlignment="Left" CornerRadius="12" Background="{DynamicResource AccentBgBrush}" BorderBrush="{DynamicResource AccentBorderBrush}" BorderThickness="1.5" ClipToBounds="True">
                                     <Grid>
                                         <TextBlock x:Name="SelectedGameFallbackIcon" Text="&#xE7FC;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         <Image x:Name="SelectedGameIcon" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"/>
@@ -335,12 +300,19 @@
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock x:Name="SelectedGameText" Text="请选择一个存档" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                    <Border Background="{DynamicResource AccentBgBrush}" CornerRadius="6" Padding="6,2" Margin="0,6,0,0" HorizontalAlignment="Left">
+                                    <Border Background="{DynamicResource AccentBgBrush}" CornerRadius="8" Padding="6,2" Margin="0,6,0,0" HorizontalAlignment="Left">
                                         <TextBlock x:Name="SelectedAccountText" Text="—" Foreground="{DynamicResource AccentBrush}" FontSize="12" FontWeight="Medium"/>
                                     </Border>
                                 </StackPanel>
                             </Grid>
 
+                            <!-- 空态引导：未选存档时不再渲染一排「—」占位格 -->
+                            <StackPanel x:Name="DetailEmptyHint" Margin="0,22,0,0" HorizontalAlignment="Center">
+                                <TextBlock Text="&#xE81E;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="26" HorizontalAlignment="Center"/>
+                                <TextBlock Text="选择一个存档查看详情" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+                                <TextBlock Text="左侧列表会列出本机已发现的账号存档；选中后可在此备份、分析变化或恢复历史版本。" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="11.5" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="280" Margin="0,6,0,0"/>
+                            </StackPanel>
+                            <StackPanel x:Name="DetailContent" Visibility="Collapsed">
                             <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,14,0,12"/>
 
                             <!-- 4 核心属性卡片：将文件数量和体积分开，便于快速判断备份价值。 -->
@@ -350,45 +322,45 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                <Border Grid.Column="0" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="0,0,5,0">
+                                <Border Grid.Column="0" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="9,8" Margin="0,0,5,0">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0"/>
-                                            <TextBlock Text="存档文件" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5"/>
+                                            <TextBlock Text="存档文件" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
                                         </StackPanel>
                                         <TextBlock x:Name="FileCountText" Text="—" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                     </StackPanel>
                                 </Border>
-                                <Border Grid.Column="1" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="2,0,3,0">
+                                <Border Grid.Column="1" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="9,8" Margin="2,0,3,0">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="&#xE8A1;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0"/>
-                                            <TextBlock Text="总大小" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5"/>
+                                            <TextBlock Text="总大小" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
                                         </StackPanel>
                                         <TextBlock x:Name="TotalSizeText" Text="—" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
                                     </StackPanel>
                                 </Border>
-                                <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="0,6,5,0">
+                                <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="9,8" Margin="0,6,5,0">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0"/>
-                                            <TextBlock Text="最后修改" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5"/>
+                                            <TextBlock Text="最后修改" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
                                         </StackPanel>
                                         <TextBlock x:Name="LastWriteText" Text="—" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
                                     </StackPanel>
                                 </Border>
-                                <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="2,6,0,0">
+                                <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource CardBgAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="9,8" Margin="2,6,0,0">
                                     <StackPanel>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="12" Margin="0,0,4,0"/>
-                                            <TextBlock Text="本地备份" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5"/>
+                                            <TextBlock Text="本地备份" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
                                         </StackPanel>
                                         <TextBlock x:Name="BackupCountText" Text="—" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>
 
-                            <Border Background="{DynamicResource AccentBgBrush}" BorderBrush="#200A84FF" BorderThickness="1" CornerRadius="10" Padding="12,8" Margin="0,0,0,12">
+                            <Border Background="{DynamicResource AccentBgBrush}" BorderBrush="{DynamicResource AccentBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12,8" Margin="0,0,0,12">
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="&#xE9D2;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="13" Margin="0,0,8,0" VerticalAlignment="Center"/>
@@ -408,15 +380,16 @@
                             <Border x:Name="SavePathBox" Background="{DynamicResource InputBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,6">
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock x:Name="SavePathText" Text="—" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5" TextWrapping="Wrap" MaxHeight="48" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="SavePathText" Text="—" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap" MaxHeight="48" VerticalAlignment="Center"/>
                                     <Button Grid.Column="1" Content="复制" Style="{StaticResource SavePathActionButton}" Margin="6,0,2,0" Click="CopySavePath_Click" ToolTip="复制存档路径"/>
                                     <Button Grid.Column="2" Content="打开" Style="{StaticResource SavePathActionButton}" Click="OpenSaveFolder_Click" ToolTip="在文件资源管理器中打开此存档目录"/>
                                 </Grid>
                             </Border>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
-                    <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="14" Padding="14,12" Margin="0,10,0,0">
+                    <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="16" Padding="14,12" Margin="0,10,0,0">
                         <StackPanel>
                             <Grid Margin="0,0,0,10">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -425,19 +398,19 @@
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock Text="自动备份策略" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
-                                    <TextBlock Text="{Binding GameSaveAutoBackupStatusText}" Foreground="{DynamicResource AccentBrush}" FontSize="9.5" Margin="0,3,0,0"/>
+                                    <TextBlock Text="{Binding GameSaveAutoBackupStatusText}" Foreground="{DynamicResource AccentBrush}" FontSize="12" Margin="0,3,0,0"/>
                                 </StackPanel>
                             </Grid>
                             <Border Height="1" Background="{DynamicResource SeparatorBrush}" Margin="0,0,0,10"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <StackPanel><TextBlock Text="Steam 退出后自动备份" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="仅在存档停止写入且内容变化时备份" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9.5" Margin="0,3,0,0"/></StackPanel>
+                                <StackPanel><TextBlock Text="Steam 退出后自动备份" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="仅在存档停止写入且内容变化时备份" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,3,0,0"/></StackPanel>
                                 <CheckBox Grid.Column="1" IsChecked="{Binding GameSaveAutoBackupEnabled}" Checked="AutoBackup_Changed" Unchecked="AutoBackup_Changed" Style="{StaticResource SwitchToggle}" VerticalAlignment="Center"/>
                             </Grid>
                             <Border Height="1" Background="{DynamicResource SeparatorBrush}" Margin="0,10"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="118"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center"><TextBlock Text="定时自动备份" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="后台增量备份有改动的存档" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9.5" Margin="0,3,0,0"/></StackPanel>
+                                <StackPanel VerticalAlignment="Center"><TextBlock Text="定时自动备份" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="后台增量备份有改动的存档" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,3,0,0"/></StackPanel>
                                 <ComboBox Grid.Column="1" x:Name="AutoBackupIntervalCombo" Height="32" Margin="8,0,10,0" Style="{StaticResource SaveComboBox}" SelectionChanged="AutoBackupInterval_SelectionChanged">
                                     <ComboBoxItem Content="每 15 分钟" Tag="15"/><ComboBoxItem Content="每 30 分钟" Tag="30"/><ComboBoxItem Content="每 1 小时" Tag="60"/><ComboBoxItem Content="每 2 小时" Tag="120"/><ComboBoxItem Content="每 4 小时" Tag="240"/>
                                 </ComboBox>
@@ -445,24 +418,24 @@
                             </Grid>
                         </StackPanel>
                     </Border>
-                    <Border MinHeight="104" CornerRadius="14" Background="#0CFF9500" BorderBrush="#60FFB340" BorderThickness="1" Padding="16,14" Margin="0,10,0,0">
+                    <Border CornerRadius="16" Background="{DynamicResource WarningBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="16,14" Margin="0,10,0,0">
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <Border Width="36" Height="36" CornerRadius="11" Background="#18FF9500" Margin="0,0,12,0" VerticalAlignment="Top">
-                                <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" Foreground="#FFFF9500" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border Width="36" Height="36" CornerRadius="10" Background="{DynamicResource WarningBgBrush}" Margin="0,0,12,0" VerticalAlignment="Top">
+                                <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource WarningFgBrush}" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                             <StackPanel Grid.Column="1">
-                                <TextBlock Text="恢复保护" Foreground="#FFFF9500" FontWeight="SemiBold" FontSize="13.5"/>
-                                <TextBlock Text="恢复前会自动关闭 Steam，并为现有存档创建保护备份。恢复后 Steam Cloud 可能提示云端冲突，请选择刚恢复的本地文件。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11.5" TextWrapping="Wrap" LineHeight="17" Margin="0,6,0,0"/>
+                                <TextBlock Text="恢复保护" Foreground="{DynamicResource WarningFgBrush}" FontWeight="SemiBold" FontSize="13.5"/>
+                                <TextBlock Text="恢复前会自动关闭 Steam，并为现有存档创建保护备份。恢复后 Steam Cloud 可能提示云端冲突，请选择刚恢复的本地文件。" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap" LineHeight="17" Margin="0,6,0,0"/>
                             </StackPanel>
                         </Grid>
                     </Border>
 
-                    <Button x:Name="BackupSelectedButton" Style="{StaticResource PrimarySaveButton}" Height="48" Margin="0,12,0,8" Click="BackupSelected_Click" IsEnabled="False"><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBlock Text="&#xE74E;" FontFamily="Segoe MDL2 Assets" FontSize="15" Margin="0,0,8,0"/><TextBlock Text="备份当前存档" FontSize="13" FontWeight="SemiBold"/></StackPanel></Button>
-                    <Button x:Name="BackupAllButton" Style="{StaticResource SaveActionButton}" Height="46" Margin="0,0,0,8" Click="BackupAll_Click"><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="14" Margin="0,0,8,0"/><TextBlock Text="一键备份全部存档" FontSize="12.5"/></StackPanel></Button>
+
+
                     <Expander Header="更多备份操作" Style="{StaticResource CompactExpanderStyle}" FontSize="12" Margin="0,0,0,8">
                     <StackPanel Margin="0,8,0,0">
-                    <Button x:Name="RestoreButton" Style="{StaticResource SaveActionButton}" Height="42" Margin="0,0,0,8" Click="RestoreLatest_Click" IsEnabled="False"><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="13" Margin="0,0,7,0"/><TextBlock Text="恢复所选备份" FontSize="12"/></StackPanel></Button>
+
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Button x:Name="VerifyBackupButton" Content="校验所选备份" Style="{StaticResource SaveActionButton}" Margin="0,0,4,0" Click="VerifyBackup_Click" IsEnabled="False"/>
@@ -471,22 +444,33 @@
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Button x:Name="ExportBackupButton" Content="导出所选备份" Style="{StaticResource SaveActionButton}" Margin="0,0,4,0" Click="ExportBackup_Click" IsEnabled="False"/>
-                        <Button x:Name="ImportBackupButton" Grid.Column="1" Content="导入完整备份" Style="{StaticResource SaveActionButton}" Margin="4,0,0,0" Click="ImportBackup_Click" IsEnabled="False"/>
+                        <Button x:Name="ImportBackupButton" Grid.Column="1" Content="导入完整备份" Style="{StaticResource SaveActionButton}" Margin="4,0,0,0" Click="ImportBackup_Click" IsEnabled="False" ToolTip="迁移自定义存档时，会显示原来源和恢复目标，确认后重新关联"/>
                     </Grid>
                     <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="10" Margin="0,0,0,8">
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="72"/><ColumnDefinition Width="72"/></Grid.ColumnDefinitions>
-                            <StackPanel><TextBlock Text="自动保留" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="10" FontWeight="SemiBold"/><TextBlock Text="超出后删除最旧版本" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" Margin="0,3,0,0"/></StackPanel>
-                            <StackPanel Grid.Column="1" Margin="6,0"><TextBlock Text="手动" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" HorizontalAlignment="Center"/><ComboBox x:Name="ManualRetentionCombo" Height="26" Style="{StaticResource SaveComboBox}" SelectionChanged="RetentionCombo_SelectionChanged"/></StackPanel>
-                            <StackPanel Grid.Column="2" Margin="6,0,0,0"><TextBlock Text="保护" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" HorizontalAlignment="Center"/><ComboBox x:Name="SafetyRetentionCombo" Height="26" Style="{StaticResource SaveComboBox}" SelectionChanged="RetentionCombo_SelectionChanged"/></StackPanel>
+                            <StackPanel><TextBlock Text="自动保留" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="超出后删除最旧版本" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,3,0,0"/></StackPanel>
+                            <StackPanel Grid.Column="1" Margin="6,0"><TextBlock Text="手动" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" HorizontalAlignment="Center"/><ComboBox x:Name="ManualRetentionCombo" Height="26" Style="{StaticResource SaveComboBox}" SelectionChanged="RetentionCombo_SelectionChanged"/></StackPanel>
+                            <StackPanel Grid.Column="2" Margin="6,0,0,0"><TextBlock Text="保护" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" HorizontalAlignment="Center"/><ComboBox x:Name="SafetyRetentionCombo" Height="26" Style="{StaticResource SaveComboBox}" SelectionChanged="RetentionCombo_SelectionChanged"/></StackPanel>
                         </Grid>
                     </Border>
                     <Button x:Name="RemoveCustomFolderButton" Content="移除自定义目录" Style="{StaticResource SaveActionButton}" Margin="0,0,0,8" Click="RemoveCustomFolder_Click" IsEnabled="False"/>
+                    <Button Content="按策略清理旧备份" Style="{StaticResource SaveActionButton}" Margin="0,0,0,8" Click="PruneBackups_Click"/>
                     <Button Content="打开备份目录" Style="{StaticResource SaveActionButton}" Margin="0" Click="OpenBackupFolder_Click"/>
                     </StackPanel>
                     </Expander>
-                </StackPanel>
+                    </StackPanel>
                 </ScrollViewer>
+                    <Border Grid.Row="1" Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,12,4,0" Margin="0,8,0,0">
+                        <StackPanel>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Button x:Name="BackupSelectedButton" Style="{StaticResource PrimarySaveButton}" Grid.Column="0" Height="42" Margin="0,0,4,0" Click="BackupSelected_Click" IsEnabled="False"><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBlock Text="&#xE74E;" FontFamily="Segoe MDL2 Assets" FontSize="15" Margin="0,0,8,0"/><TextBlock Text="备份当前存档" FontSize="13" FontWeight="SemiBold"/></StackPanel></Button>
+                                <Button x:Name="RestoreButton" Style="{StaticResource SaveActionButton}" Grid.Column="1" Height="42" Margin="4,0,0,0" Click="RestoreLatest_Click" IsEnabled="False"><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="13" Margin="0,0,7,0"/><TextBlock Text="恢复所选备份" FontSize="12"/></StackPanel></Button>
+                            </Grid>
+                            <Button x:Name="BackupAllButton" Style="{StaticResource SaveActionButton}" Height="36" Margin="0,8,0,0" Click="BackupAll_Click"><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource AccentBrush}" FontSize="14" Margin="0,0,8,0"/><TextBlock Text="一键备份全部存档" FontSize="12.5"/></StackPanel></Button>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Grid>
 
         </Grid>

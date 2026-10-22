@@ -2,10 +2,15 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Steam Switch"
-#define MyAppVersion "3.1.2"
+#define MyAppVersion "3.3.0"
 #define MyAppPublisher "ddxgtx"
 #define MyAppURL "https://github.com/ddxgtx/SteamSwitch"
 #define MyAppExeName "SteamSwitch.exe"
+; Publish input can be overridden with ISCC.exe installer.iss /DPublishDir=...
+; so a locked or stale publish_zip folder never forces a broken installer.
+#ifndef PublishDir
+  #define PublishDir "publish_zip"
+#endif
 #define MyAppAssocName MyAppName + " File"
 #define MyAppAssocExt ".steamswitch"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
@@ -40,7 +45,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
-VersionInfoCopyright=Copyright (c) 2024 {#MyAppPublisher}
+VersionInfoCopyright=Copyright (c) 2026 {#MyAppPublisher}
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 
@@ -53,7 +58,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startwithwindows"; Description: "{cm:AutoStartProgram,{#MyAppName}}"; GroupDescription: "{cm:AutoStartProgramGroupDescription}"
 
 [Files]
-Source: "publish_zip\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -65,7 +70,11 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--register-autostart"; Tasks: startwithwindows; Flags: runasoriginaluser runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-autostart"; Tasks: not startwithwindows; Flags: runasoriginaluser runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--updated"; Flags: nowait skipifnotsilent shellexec runasoriginaluser
+; Always notify the freshly installed process, including silent in-app updates.
+; The application clears its pending-update checkpoint only after the main
+; window has initialized successfully; skipping this in silent mode would make
+; every background update look unfinished forever.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--updated"; Flags: nowait shellexec runasoriginaluser
 
 [UninstallRun]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-autostart"; RunOnceId: "SteamSwitchRemoveAutoStart"; Flags: runhidden waituntilterminated skipifdoesntexist
@@ -79,6 +88,14 @@ begin
   { Exact filename only: account shortcuts use "Steam - ..." and games use their titles. }
   DeleteFile(ExpandConstant('{userdesktop}\{#MyAppName}.lnk'));
   DeleteFile(ExpandConstant('{commondesktop}\{#MyAppName}.lnk'));
+  { Legacy releases used these two names; remove them during upgrade so the
+    installer never leaves duplicate application icons behind. }
+  DeleteFile(ExpandConstant('{userdesktop}\SteamSwitch.lnk'));
+  DeleteFile(ExpandConstant('{commondesktop}\SteamSwitch.lnk'));
+  DeleteFile(ExpandConstant('{userdesktop}\Steam Switch 3.0.lnk'));
+  DeleteFile(ExpandConstant('{commondesktop}\Steam Switch 3.0.lnk'));
+  DeleteFile(ExpandConstant('{userdesktop}\Steam Switch 3.1.lnk'));
+  DeleteFile(ExpandConstant('{commondesktop}\Steam Switch 3.1.lnk'));
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

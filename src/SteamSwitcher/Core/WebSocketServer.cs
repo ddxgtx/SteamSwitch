@@ -125,7 +125,26 @@ namespace SteamSwitcher.Core
 
             try
             {
-                var wsContext = await context.AcceptWebSocketAsync(null);
+                // Echo the auth subprotocol when present so browsers that require
+                // protocol negotiation complete the handshake cleanly.
+                string? selectedProtocol = null;
+                if (context.Request.IsWebSocketRequest)
+                {
+                    var header = context.Request.Headers[SecWebSocketProtocolHeader];
+                    if (!string.IsNullOrEmpty(header))
+                    {
+                        foreach (var raw in header.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        {
+                            if (raw.StartsWith(AuthProtocolPrefix, StringComparison.Ordinal))
+                            {
+                                selectedProtocol = raw;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                var wsContext = await context.AcceptWebSocketAsync(selectedProtocol);
                 ws = wsContext.WebSocket;
                 if (!_clients.TryAdd(clientId, ws))
                     throw new InvalidOperationException("Unable to register WebSocket client.");
@@ -139,6 +158,7 @@ namespace SteamSwitcher.Core
                 {
                     using var ms = new System.IO.MemoryStream();
                     WebSocketReceiveResult result;
+                    var tooBig = false;
                     do
                     {
                         result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
@@ -149,6 +169,7 @@ namespace SteamSwitcher.Core
                         ms.Write(buffer, 0, result.Count);
                         if (ms.Length > MaxMessageBytes)
                         {
+                            tooBig = true;
                             await ws.CloseAsync(
                                 WebSocketCloseStatus.MessageTooBig,
                                 "Message exceeds 1 MB limit.",
@@ -157,6 +178,11 @@ namespace SteamSwitcher.Core
                         }
                     }
                     while (!result.EndOfMessage);
+
+                    // Oversized payloads must never reach ProcessMessage; leave the
+                    // receive loop entirely so the finally block releases the slot.
+                    if (tooBig)
+                        break;
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
@@ -255,7 +281,10 @@ namespace SteamSwitcher.Core
 
         private bool IsAuthorized(HttpListenerRequest request)
         {
-            var suppliedToken = request.QueryString["token"];
+            // Prefer the WebSocket subprotocol so the token never appears in the
+            // URL (keeps it out of CEF/network access logs). Query string remains
+            // as a fallback for older injected scripts.
+            var suppliedToken = ExtractSubProtocolToken(request) ?? request.QueryString["token"];
             if (string.IsNullOrEmpty(suppliedToken))
                 return false;
 
@@ -263,6 +292,33 @@ namespace SteamSwitcher.Core
             var suppliedBytes = Encoding.UTF8.GetBytes(suppliedToken);
             return expectedBytes.Length == suppliedBytes.Length &&
                    CryptographicOperations.FixedTimeEquals(expectedBytes, suppliedBytes);
+        }
+
+        private const string AuthProtocolPrefix = "ss.auth.";
+        private const string SecWebSocketProtocolHeader = "Sec-WebSocket-Protocol";
+
+        private static string? ExtractSubProtocolToken(HttpListenerRequest request)
+        {
+            try
+            {
+                if (!request.IsWebSocketRequest)
+                    return null;
+
+                var header = request.Headers[SecWebSocketProtocolHeader];
+                if (string.IsNullOrEmpty(header))
+                    return null;
+
+                foreach (var raw in header.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (raw.StartsWith(AuthProtocolPrefix, StringComparison.Ordinal))
+                        return raw[AuthProtocolPrefix.Length..];
+                }
+            }
+            catch
+            {
+                // Header may be absent or malformed; fall through to query fallback.
+            }
+            return null;
         }
 
         public void Stop()

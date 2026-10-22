@@ -1,0 +1,26 @@
+<Project>
+  <PropertyGroup>
+    <!-- Central package version management: csproj files reference packages
+         without a Version so all projects stay on the same versions. -->
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Build quality">
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
+    <!-- Treat the highest-value analyzer rules as errors on new code. -->
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
+    <PackageVersion Include="WPF-UI" Version="4.3.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageVersion Include="MSTest" Version="4.5.1" />
+  </ItemGroup>
+</Project>

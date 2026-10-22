@@ -22,18 +22,17 @@ namespace SteamSwitcher.Services
         private ObservableCollection<AccountViewModel>? _accounts;
         private AccountViewModel? _currentAccount;
         private bool _taskbarLyricsEnabled;
-        private bool _taskbarAppearanceEnabled;
 
         public event EventHandler<string>? AccountSelected;
         public event EventHandler? LaunchSteamRequested;
         public event EventHandler? ExitRequested;
         public event EventHandler<bool>? ToggleTaskbarLyricsRequested;
-        public event EventHandler<bool>? ToggleTaskbarAppearanceRequested;
+        public event EventHandler? EmergencyRestoreRequested;
 
-        public TrayIconService(Window ownerWindow)
+        public TrayIconService(Window ownerWindow, bool createNativeIcon = true)
         {
             _ownerWindow = ownerWindow;
-            InitializeTrayIcon();
+            if (createNativeIcon) InitializeTrayIcon();
         }
 
         private void InitializeTrayIcon()
@@ -158,17 +157,23 @@ namespace SteamSwitcher.Services
             _contextMenu.Items.Add(exitItem);
         }
 
-        public void UpdateFeatureStates(bool taskbarLyricsEnabled, bool taskbarAppearanceEnabled)
+        public void UpdateFeatureStates(bool taskbarLyricsEnabled)
         {
             _taskbarLyricsEnabled = taskbarLyricsEnabled;
-            _taskbarAppearanceEnabled = taskbarAppearanceEnabled;
         }
 
         private void ShowContextMenu()
         {
-            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+                return;
+            try
             {
-                var menu = SharedContextMenuBuilder.Build(
+                _ = dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+                        return;
+                    var menu = SharedContextMenuBuilder.Build(
                     _accounts,
                     _currentAccount,
                     showMainWindow: ShowOwnerWindow,
@@ -178,13 +183,14 @@ namespace SteamSwitcher.Services
                     detach: null,
                     showDetach: false,
                     isTaskbarLyricsEnabled: _taskbarLyricsEnabled,
-                    isTaskbarAppearanceEnabled: _taskbarAppearanceEnabled,
                     toggleTaskbarLyrics: enabled => ToggleTaskbarLyricsRequested?.Invoke(this, enabled),
-                    toggleTaskbarAppearance: enabled => ToggleTaskbarAppearanceRequested?.Invoke(this, enabled),
+                    emergencyRestore: () => EmergencyRestoreRequested?.Invoke(this, EventArgs.Empty),
                     exit: () => ExitRequested?.Invoke(this, EventArgs.Empty));
 
-                menu.IsOpen = true;
-            });
+                    menu.IsOpen = true;
+                }));
+            }
+            catch (InvalidOperationException) { }
         }
 
         private ToolStripMenuItem CreateHeaderItem(string title, string detail)
@@ -351,29 +357,24 @@ namespace SteamSwitcher.Services
             var windowBrush = GetBrush(resources, "WindowBgBrush", MediaColor.FromRgb(25, 25, 28));
             var isLight = GetLuminance(windowBrush) > 0.55;
 
-            return isLight
-                ? new TrayMenuPalette
-                {
-                    Background = Color.FromArgb(248, 248, 250),
-                    Hover = Color.FromArgb(232, 232, 237),
-                    Border = Color.FromArgb(210, 210, 216),
-                    Text = Color.FromArgb(28, 28, 30),
-                    SecondaryText = Color.FromArgb(99, 99, 102),
-                    Accent = Color.FromArgb(0, 122, 255),
-                    Danger = Color.FromArgb(255, 59, 48),
-                    Separator = Color.FromArgb(218, 218, 224)
-                }
-                : new TrayMenuPalette
-                {
-                    Background = Color.FromArgb(34, 34, 36),
-                    Hover = Color.FromArgb(50, 50, 53),
-                    Border = Color.FromArgb(68, 68, 72),
-                    Text = Color.FromArgb(245, 245, 247),
-                    SecondaryText = Color.FromArgb(174, 174, 178),
-                    Accent = Color.FromArgb(10, 132, 255),
-                    Danger = Color.FromArgb(255, 69, 58),
-                    Separator = Color.FromArgb(62, 62, 66)
-                };
+            return new TrayMenuPalette
+            {
+                Background = TokenColor(resources, "CardBgBrush"),
+                Hover = TokenColor(resources, "HoverBgBrush"),
+                Border = TokenColor(resources, "BorderBrush"),
+                Text = TokenColor(resources, "TextPrimaryBrush"),
+                SecondaryText = TokenColor(resources, "TextSecondaryBrush"),
+                Accent = TokenColor(resources, "AccentBrush"),
+                Danger = TokenColor(resources, "DangerFgBrush"),
+                Separator = TokenColor(resources, "SeparatorBrush")
+            };
+        }
+
+        private static Color TokenColor(ResourceDictionary resources, string key)
+        {
+            var brush = GetBrush(resources, key, MediaColor.FromRgb(24, 36, 56));
+            var color = brush is System.Windows.Media.SolidColorBrush solid ? solid.Color : MediaColor.FromRgb(24, 36, 56);
+            return Color.FromArgb(color.A, color.R, color.G, color.B);
         }
 
         private static MediaBrush GetBrush(ResourceDictionary resources, string key, MediaColor fallback)

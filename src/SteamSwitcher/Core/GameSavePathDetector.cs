@@ -81,6 +81,13 @@ namespace SteamSwitcher.Core
             }
         }
 
+        private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+        };
+
         private static void TryAddCandidate(
             List<GameSaveEntry> result,
             ISet<string> existingPaths,
@@ -93,6 +100,11 @@ namespace SteamSwitcher.Core
                 if (!Directory.Exists(candidate))
                     return;
                 var fullPath = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar);
+                if (!IsAcceptableDetectedPath(fullPath, game))
+                {
+                    AppLogger.Debug($"Smart save candidate rejected by path containment check: {fullPath}");
+                    return;
+                }
                 if (!existingPaths.Add(fullPath))
                     return;
 
@@ -152,10 +164,90 @@ namespace SteamSwitcher.Core
             return new Guid(bytes).ToString("N");
         }
 
+        internal static string? ResolveBackupPath(SteamLibraryGame game, string customId, string? recordedPath)
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var localLow = Path.Combine(Directory.GetParent(local)?.FullName ?? profile, "LocalLow");
+            var companies = SafeDirectories(localLow).Take(200).ToList();
+            // A removed Unity company directory no longer appears in enumeration.
+            // Only admit exactly one company segment below LocalLow, then run the
+            // normal candidate rules and stable-ID check below.
+            if (!string.IsNullOrWhiteSpace(recordedPath))
+            {
+                try
+                {
+                    var parent = Directory.GetParent(Path.GetFullPath(recordedPath))?.FullName;
+                    if (parent != null && string.Equals(Directory.GetParent(parent)?.FullName,
+                            Path.GetFullPath(localLow), StringComparison.OrdinalIgnoreCase))
+                        companies.Add(parent);
+                }
+                catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException) { }
+            }
+            foreach (var candidate in BuildCandidates(game, companies.Distinct(StringComparer.OrdinalIgnoreCase).ToList()))
+            {
+                var fullPath = Path.GetFullPath(candidate.Path).TrimEnd(Path.DirectorySeparatorChar);
+                if (IsAcceptableDetectedPath(fullPath, game) &&
+                    string.Equals(CreateStableId(game.AppId, fullPath), customId, StringComparison.Ordinal))
+                    return fullPath;
+            }
+            return null;
+        }
+
         private static string SanitizeDirectoryName(string value)
         {
             var invalid = Path.GetInvalidFileNameChars();
-            return string.Concat(value.Trim().Select(character => invalid.Contains(character) ? '_' : character));
+            var sanitized = string.Concat(value.Trim().Select(character => invalid.Contains(character) ? '_' : character)).Trim();
+            // Empty, "." and ".." must never become path segments.
+            if (sanitized.Length == 0 || sanitized is "." or "..")
+                return string.Empty;
+            var stem = sanitized.Split('.')[0];
+            if (ReservedDeviceNames.Contains(stem))
+                return "_" + sanitized;
+            return sanitized;
+        }
+
+        private static bool IsAcceptableDetectedPath(string fullPath, SteamLibraryGame game)
+        {
+            try
+            {
+                var profile = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+                    .TrimEnd(Path.DirectorySeparatorChar);
+                var driveRoot = Path.GetPathRoot(fullPath)?.TrimEnd(Path.DirectorySeparatorChar);
+                // Reject the profile itself, any ancestor of the profile, and disk roots.
+                if (string.IsNullOrWhiteSpace(driveRoot) ||
+                    string.Equals(fullPath, driveRoot, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(fullPath, profile, StringComparison.OrdinalIgnoreCase) ||
+                    profile.StartsWith(fullPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                var documents = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments))
+                    .TrimEnd(Path.DirectorySeparatorChar);
+                var local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))
+                    .TrimEnd(Path.DirectorySeparatorChar);
+                var roaming = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData))
+                    .TrimEnd(Path.DirectorySeparatorChar);
+                var localLow = Path.GetFullPath(Path.Combine(Directory.GetParent(local)?.FullName ?? profile, "LocalLow"))
+                    .TrimEnd(Path.DirectorySeparatorChar);
+
+                var roots = new List<string> { documents, profile, local, roaming, localLow };
+                if (!string.IsNullOrWhiteSpace(game.LibraryPath))
+                {
+                    try
+                    {
+                        roots.Add(Path.GetFullPath(game.LibraryPath).TrimEnd(Path.DirectorySeparatorChar));
+                    }
+                    catch { /* ignore unparsable library paths */ }
+                }
+
+                return roots.Any(root =>
+                    string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase) ||
+                    fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static IEnumerable<string> SafeDirectories(string path)

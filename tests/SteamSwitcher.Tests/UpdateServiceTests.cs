@@ -8,6 +8,76 @@ namespace SteamSwitcher.Tests;
 public sealed class UpdateServiceTests
 {
     [TestMethod]
+    public async Task NewDownload_CommitsClosedVerifiedFile_AndCanBeReused()
+    {
+        using var temp = new TemporaryDirectory();
+        var bytes = Encoding.UTF8.GetBytes("new installer download");
+        var requests = 0;
+        using var service = new UpdateService(new StubHandler(request =>
+        {
+            requests++;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new ByteArrayContent(bytes)
+            };
+        }), temp.Combine("rate-limit.json"), temp.Path);
+        var update = NewDownloadInfo(bytes);
+        var path = await service.DownloadUpdateToFileAsync(update);
+        CollectionAssert.AreEqual(bytes, await File.ReadAllBytesAsync(path));
+        // File must no longer be held by the writer, including Windows delete sharing.
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        Assert.AreEqual(path, await service.DownloadUpdateToFileAsync(update));
+        Assert.AreEqual(1, requests);
+        Assert.AreEqual(0, Directory.GetFiles(temp.Path, "*.download").Length);
+    }
+
+    [TestMethod]
+    public async Task InvalidNewDownload_DoesNotReplaceExistingFile_AndRemovesTemporaryData()
+    {
+        using var temp = new TemporaryDirectory();
+        var expected = Encoding.UTF8.GetBytes("valid data");
+        using var service = new UpdateService(new StubHandler(request => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new ByteArrayContent(Encoding.UTF8.GetBytes("wrong data"))
+        }), temp.Combine("rate-limit.json"), temp.Path);
+        var update = NewDownloadInfo(expected);
+        var path = temp.Combine(update.FileName);
+        await File.WriteAllTextAsync(path, "old package");
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => service.DownloadUpdateToFileAsync(update));
+        Assert.AreEqual("old package", await File.ReadAllTextAsync(path));
+        Assert.AreEqual(0, Directory.GetFiles(temp.Path, "*.download").Length);
+    }
+
+    [TestMethod]
+    public async Task CancellationAfterBodyWrite_DoesNotCommitOrLeavePartialFile()
+    {
+        using var temp = new TemporaryDirectory();
+        var bytes = Encoding.UTF8.GetBytes("cancel this download");
+        using var cts = new CancellationTokenSource();
+        using var service = new UpdateService(new StubHandler(request => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new ByteArrayContent(bytes)
+        }), temp.Combine("rate-limit.json"), temp.Path);
+        service.DownloadProgress += (_, _) => cts.Cancel();
+        var update = NewDownloadInfo(bytes);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => service.DownloadUpdateToFileAsync(update, cts.Token));
+        Assert.IsFalse(File.Exists(temp.Combine(update.FileName)));
+        Assert.AreEqual(0, Directory.GetFiles(temp.Path, "*.download").Length);
+    }
+
+    private static UpdateInfo NewDownloadInfo(byte[] bytes) => new()
+    {
+        Version = "99.0.0",
+        DownloadUrl = "https://github.com/ddxgtx/SteamSwitch/releases/download/v99.0.0/setup.exe",
+        FileName = "SteamSwitch-audit-setup.exe",
+        FileSize = bytes.Length,
+        ExpectedSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))
+    };
+
+    [TestMethod]
     public void CurrentVersion_IsStableAndDoesNotExposeBuildMetadata()
     {
         var version = UpdateService.GetCurrentVersion();
@@ -42,6 +112,35 @@ public sealed class UpdateServiceTests
         Assert.IsNotNull(update);
         Assert.AreEqual("99.0.0", update.Version);
         Assert.AreEqual(expectedDigest, update.ExpectedSha256);
+    }
+
+    [TestMethod]
+    public async Task CheckForUpdate_DoesNotOfferPortableZipAsAutoInstaller()
+    {
+        using var temp = new TemporaryDirectory();
+        var json = """
+        {
+          "tag_name": "v99.0.0",
+          "body": "notes",
+          "html_url": "https://github.com/ddxgtx/SteamSwitch/releases/tag/v99.0.0",
+          "assets": [{
+            "name": "SteamSwitch-v99.0.0-win-x64-portable.zip",
+            "browser_download_url": "https://github.com/ddxgtx/SteamSwitch/releases/download/v99.0.0/portable.zip",
+            "size": 1024,
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }]
+        }
+        """;
+        using var service = new UpdateService(
+            new StubHandler(_ => JsonResponse(HttpStatusCode.OK, json)),
+            temp.Combine("rate-limit.json"));
+
+        var update = await service.CheckForUpdateAsync();
+
+        Assert.IsNotNull(update);
+        Assert.AreEqual("", update.DownloadUrl);
+        Assert.AreEqual("", update.FileName);
+        Assert.IsFalse(update.CanVerifyIntegrity);
     }
 
     [TestMethod]

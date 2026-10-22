@@ -1,0 +1,88 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Shared by native MenuItem trees, including account-management submenus. -->
+    <Style x:Key="ModernMenuSeparator" TargetType="Separator">
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Separator">
+            <Border Height="1" Background="{DynamicResource SeparatorBrush}" Margin="10,5"/>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="Separator" BasedOn="{StaticResource ModernMenuSeparator}"/>
+
+    <Style x:Key="ModernMenuItem" TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI"/>
+        <Setter Property="Padding" Value="10,8"/>
+        <Setter Property="MinHeight" Value="36"/>
+        <Setter Property="MinWidth" Value="200"/>
+        <Setter Property="MaxWidth" Value="328"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+            <Grid>
+                <Border x:Name="Row" CornerRadius="8" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" Margin="0,1">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="16"/></Grid.ColumnDefinitions>
+                        <ContentPresenter x:Name="IconPresenter" ContentSource="Icon" Width="16" Height="16" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                        <TextBlock x:Name="CheckMark" Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource AccentBrush}" Visibility="Collapsed" VerticalAlignment="Center"/>
+                        <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" HorizontalAlignment="Stretch"/>
+                        <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}" Foreground="{DynamicResource TextTertiaryBrush}" Margin="16,0,0,0" FontSize="11" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="Arrow" Grid.Column="3" Text="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="9" Foreground="{DynamicResource TextTertiaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed"/>
+                    </Grid>
+                </Border>
+                <Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False" IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}" Placement="Right" HorizontalOffset="-8" VerticalOffset="-12" PopupAnimation="None">
+                    <Border Padding="10" Background="Transparent">
+                        <Border Background="{DynamicResource MenuSurfaceBrush}" BorderBrush="{DynamicResource MenuBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="5" SnapsToDevicePixels="True">
+                            <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.16"/></Border.Effect>
+                            <ScrollViewer CanContentScroll="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="{DynamicResource MenuMaxHeight}" Focusable="False">
+                                <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Cycle" Grid.IsSharedSizeScope="True"/>
+                            </ScrollViewer>
+                        </Border>
+                    </Border>
+                </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="HasItems" Value="True"><Setter TargetName="Arrow" Property="Visibility" Value="Visible"/></Trigger>
+                <Trigger Property="IsChecked" Value="True"><Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/><Setter TargetName="IconPresenter" Property="Visibility" Value="Collapsed"/></Trigger>
+                <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource MenuHoverBrush}"/></Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource MenuHoverBrush}"/></Trigger>
+                <Trigger Property="IsSubmenuOpen" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource AccentBgBrush}"/></Trigger>
+                <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Row" Property="Opacity" Value="0.42"/></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="MenuItem" BasedOn="{StaticResource ModernMenuItem}"/>
+
+    <Style x:Key="MenuSectionItem" TargetType="MenuItem">
+        <Setter Property="IsEnabled" Value="False"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+            <ContentPresenter ContentSource="Header" Margin="10,6,10,7"/>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+
+    <Style x:Key="ModernContextMenu" TargetType="ContextMenu">
+        <Setter Property="Background" Value="{DynamicResource MenuSurfaceBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource MenuBorderBrush}"/>
+        <Setter Property="Padding" Value="5"/>
+        <Setter Property="MinWidth" Value="216"/>
+        <Setter Property="MaxWidth" Value="352"/>
+        <Setter Property="HasDropShadow" Value="False"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="UseLayoutRounding" Value="True"/>
+        <Setter Property="ScrollViewer.CanContentScroll" Value="False"/>
+        <Setter Property="KeyboardNavigation.DirectionalNavigation" Value="Cycle"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu">
+            <Border Padding="10" Background="Transparent">
+                <Border x:Name="MenuSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="14" Padding="{TemplateBinding Padding}">
+                    <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.16"/></Border.Effect>
+                    <ScrollViewer CanContentScroll="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="{DynamicResource MenuMaxHeight}" Focusable="False">
+                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Cycle" Grid.IsSharedSizeScope="True"/>
+                    </ScrollViewer>
+                </Border>
+            </Border>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="ContextMenu" BasedOn="{StaticResource ModernContextMenu}"/>
+</ResourceDictionary>
