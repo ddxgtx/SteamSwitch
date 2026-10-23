@@ -136,7 +136,7 @@ namespace SteamSwitcher.Services
             }
         }
 
-        public static float AdjustVolume(float delta)
+        public static float? AdjustVolume(float delta)
         {
             var endpoint = GetVolumeEndpoint();
             if (endpoint != null)
@@ -174,7 +174,9 @@ namespace SteamSwitcher.Services
                 keybd_event(VK_VOLUME_DOWN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             }
 
-            return GetVolume();
+            // COM 不可用时改用键盘调节，但无法得知真实结果，返回 null 而非默认音量，
+            // 避免调用方把"没调成功"误认为"当前音量是 0.5"。
+            return null;
         }
     }
 }

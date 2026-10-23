@@ -75,12 +75,18 @@ public sealed class ConfigurationBundleService
             throw new InvalidDataException("快速启动项目缺少目标或含重复 ID。");
 
         var settings = SettingsSession.Copy(input.Settings);
+        var gameBindings = JsonSerializer.Deserialize<Dictionary<int, GameBinding>>(JsonSerializer.Serialize(input.GameBindings));
+        if (gameBindings == null)
+            throw new InvalidDataException("游戏绑定数据反序列化失败。");
+        var quickLaunch = JsonSerializer.Deserialize<List<QuickLaunchItem>>(JsonSerializer.Serialize(input.QuickLaunch));
+        if (quickLaunch == null)
+            throw new InvalidDataException("快速启动项数据反序列化失败。");
         return new ConfigurationBundle
         {
             Settings = settings,
             Accounts = accounts,
-            GameBindings = JsonSerializer.Deserialize<Dictionary<int, GameBinding>>(JsonSerializer.Serialize(input.GameBindings))!,
-            QuickLaunch = JsonSerializer.Deserialize<List<QuickLaunchItem>>(JsonSerializer.Serialize(input.QuickLaunch))!
+            GameBindings = gameBindings,
+            QuickLaunch = quickLaunch
         };
     }
 

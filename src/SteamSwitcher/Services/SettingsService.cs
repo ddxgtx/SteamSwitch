@@ -381,8 +381,13 @@ namespace SteamSwitcher.Services
         }
 
         /// <summary>
-        /// 判断异常是否只是"暂时读不到"。这类失败必须如实上报，不能被当成
-        /// "文件损坏"去走 .bak 回退——那会把陈旧备份当成权威数据写回主文件。
+        /// 判断主设置文件读取失败是否只是"暂时读不到"（被并发写入占用/无权限）。
+        /// 这类失败标记 transientFailure，由 Save 逻辑在写入前重读主文件决定是否跳过覆盖，
+        /// 避免把内存中的当前设置写回、覆盖掉磁盘上其实完好但此刻被锁的文件。
+        /// 刻意不含 FileNotFoundException/DirectoryNotFoundException：主文件缺失是首次运行的
+        /// 正常状态，不应被当成"瞬时错误"触发回退保护（否则会与 803ed06 修复的数据丢失防护矛盾）。
+        /// 注意：AtomicJsonFile.IsTransientIoError 用途不同（决定读候选文件失败时是否如实抛出），
+        /// 两者不要盲目统一。
         /// </summary>
         private static bool IsTransientIoError(Exception ex) =>
             ex is IOException or UnauthorizedAccessException;

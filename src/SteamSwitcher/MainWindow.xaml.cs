@@ -739,29 +739,47 @@ namespace SteamSwitcher
 
         private async Task ProcessExternalRequestCoreAsync(string[] arguments)
         {
-
             var switchIndex = Array.FindIndex(arguments, argument =>
                 string.Equals(argument, "--switch-account", StringComparison.OrdinalIgnoreCase));
             var gameIndex = Array.FindIndex(arguments, argument =>
                 string.Equals(argument, "--launch-game", StringComparison.OrdinalIgnoreCase));
-            if (gameIndex >= 0 && gameIndex + 1 < arguments.Length &&
-                int.TryParse(arguments[gameIndex + 1], out var appId) && appId > 0)
-            {
-                await _viewModel.LaunchBoundGameAsync(appId);
-                return;
-            }
+
+            // 切换与游戏启动可以独立发生：同时传入两个参数时，先切换再启动，而不是忽略其中一个。
             if (switchIndex >= 0 && switchIndex + 1 < arguments.Length)
             {
                 var steamId = arguments[switchIndex + 1];
                 var launchSteam = arguments.Any(argument =>
                     string.Equals(argument, "--launch-steam", StringComparison.OrdinalIgnoreCase));
-                await _viewModel.SwitchAccountBySteamIdAsync(steamId, launchSteam);
-                _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
-                SyncTrayFeatureStates();
-                return;
+                // 与外部实例的切换、界面点击的切换共用同一把编排锁，避免并发重启 Steam。
+                if (!await _accountInteractionGate.WaitAsync(0))
+                {
+                    AppLogger.Warn("外部切换请求被忽略：已有账号操作正在进行。");
+                }
+                else
+                {
+                    try
+                    {
+                        await _viewModel.SwitchAccountBySteamIdAsync(steamId, launchSteam);
+                        _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
+                        SyncTrayFeatureStates();
+                    }
+                    finally
+                    {
+                        try { _accountInteractionGate.Release(); } catch (ObjectDisposedException) { }
+                    }
+                }
             }
 
-            ActivateFromExternalRequest();
+            if (gameIndex >= 0 && gameIndex + 1 < arguments.Length &&
+                int.TryParse(arguments[gameIndex + 1], out var appId) && appId > 0)
+            {
+                await _viewModel.LaunchBoundGameAsync(appId);
+            }
+
+            if (switchIndex < 0 && gameIndex < 0)
+            {
+                ActivateFromExternalRequest();
+            }
         }
 
         private void OnTrayAccountSelected(object? sender, string steamId)
@@ -903,6 +921,9 @@ namespace SteamSwitcher
                 ("desktop recovery setting", () => _viewModel.DesktopIconsHiddenByApp = false),
                 ("tray icon", () => _trayIcon.Dispose()),
                 ("view model", () => _viewModel.Dispose()));
+            // 对称释放两把信号量（它们持有异步等待句柄，应在退出时显式释放，而非依赖终结器）。
+            try { _externalRequestGate.Dispose(); } catch { }
+            try { _accountInteractionGate.Dispose(); } catch { }
             AppLogger.Info($"Application resource cleanup completed. Failures={failures}");
         }
 

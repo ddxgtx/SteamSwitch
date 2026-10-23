@@ -1,15 +1,10 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows;
 using System.Windows.Forms;
 using SteamSwitcher.Core;
 using SteamSwitcher.ViewModels;
-using FontStyle = System.Drawing.FontStyle;
-using MediaBrush = System.Windows.Media.Brush;
-using MediaColor = System.Windows.Media.Color;
-using SolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace SteamSwitcher.Services
 {
@@ -17,9 +12,7 @@ namespace SteamSwitcher.Services
     {
         private NotifyIcon? _notifyIcon;
         private readonly Window _ownerWindow;
-        private ContextMenuStrip? _contextMenu;
         private System.Windows.Controls.ContextMenu? _popupMenu;
-        private TrayMenuPalette _palette = TrayMenuPalette.FromApplication();
         private ObservableCollection<AccountViewModel>? _accounts;
         private AccountViewModel? _currentAccount;
         private bool _taskbarLyricsEnabled;
@@ -39,7 +32,6 @@ namespace SteamSwitcher.Services
         private void InitializeTrayIcon()
         {
             _notifyIcon = new NotifyIcon();
-
             try
             {
                 var iconUri = new Uri("pack://application:,,,/Resources/steam.ico", UriKind.Absolute);
@@ -63,24 +55,6 @@ namespace SteamSwitcher.Services
             _notifyIcon.Visible = true;
             _notifyIcon.MouseClick += NotifyIcon_MouseClick;
             _notifyIcon.DoubleClick += NotifyIcon_DoubleClick;
-
-            _contextMenu = new ContextMenuStrip
-            {
-                Padding = new Padding(8, 7, 8, 7),
-                ShowImageMargin = false
-            };
-            ApplyPalette();
-            _notifyIcon.ContextMenuStrip = null;
-        }
-
-        private void ApplyPalette()
-        {
-            if (_contextMenu == null) return;
-
-            _palette = TrayMenuPalette.FromApplication();
-            _contextMenu.BackColor = _palette.Background;
-            _contextMenu.ForeColor = _palette.Text;
-            _contextMenu.Renderer = new AppleMenuRenderer(_palette);
         }
 
         private void NotifyIcon_MouseClick(object? sender, MouseEventArgs e)
@@ -117,55 +91,13 @@ namespace SteamSwitcher.Services
             }
         }
 
+        // 仅缓存当前账号状态，供右键菜单按需构建。真正的菜单由 SharedContextMenuBuilder
+        // 在 ShowContextMenu 时构建为 WPF ContextMenu；这里不再维护第二套 WinForms 菜单
+        // （那套菜单从未被显示，却每次刷新都重建并分配 GDI 字体，造成句柄抖动）。
         public void UpdateMenu(ObservableCollection<AccountViewModel> accounts, AccountViewModel? currentAccount)
         {
             _accounts = accounts;
             _currentAccount = currentAccount;
-
-            if (_contextMenu == null) return;
-
-            ApplyPalette();
-            _contextMenu.Items.Clear();
-            _contextMenu.Items.Add(CreateHeaderItem("Steam Switch", "本地快捷控制"));
-            _contextMenu.Items.Add(CreateSeparator());
-
-            var showItem = CreateMenuItem("显示主窗口", "恢复应用窗口");
-            showItem.Click += (s, e) => ShowOwnerWindow();
-            _contextMenu.Items.Add(showItem);
-
-            var launchItem = CreateMenuItem("启动 Steam", "正常启动 Steam");
-            launchItem.Click += (s, e) => LaunchSteamRequested?.Invoke(this, EventArgs.Empty);
-            _contextMenu.Items.Add(launchItem);
-
-            if (accounts.Count > 0)
-            {
-                _contextMenu.Items.Add(CreateSeparator());
-                _contextMenu.Items.Add(CreateSectionItem("账号"));
-
-                foreach (var account in accounts)
-                {
-                    var isCurrent = AccountManager.AreSameAccount(
-                        account.Account,
-                        currentAccount?.Account);
-                    var item = CreateMenuItem(
-                        account.DisplayName,
-                        string.IsNullOrWhiteSpace(account.Username) ? "" : account.Username,
-                        isCurrent ? _palette.Accent : _palette.Text,
-                        isCurrent ? "当前" : "");
-                    item.Tag = account.SteamId;
-                    item.Click += (s, e) =>
-                    {
-                        if (s is ToolStripMenuItem menuItem && menuItem.Tag is string steamId)
-                            AccountSelected?.Invoke(this, steamId);
-                    };
-                    _contextMenu.Items.Add(item);
-                }
-            }
-
-            _contextMenu.Items.Add(CreateSeparator());
-            var exitItem = CreateMenuItem("退出", "关闭 Steam Switch", _palette.Danger);
-            exitItem.Click += (s, e) => ExitRequested?.Invoke(this, EventArgs.Empty);
-            _contextMenu.Items.Add(exitItem);
         }
 
         public void UpdateFeatureStates(bool taskbarLyricsEnabled)
@@ -215,58 +147,6 @@ namespace SteamSwitcher.Services
             catch (InvalidOperationException) { }
         }
 
-        private ToolStripMenuItem CreateHeaderItem(string title, string detail)
-        {
-            return new ToolStripMenuItem($"  {title}\n  {detail}")
-            {
-                Enabled = false,
-                ForeColor = _palette.Text,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                AutoSize = false,
-                Height = 44,
-                Width = 260,
-                Padding = new Padding(0)
-            };
-        }
-
-        private ToolStripMenuItem CreateSectionItem(string text)
-        {
-            return new ToolStripMenuItem($"  {text}")
-            {
-                Enabled = false,
-                ForeColor = _palette.SecondaryText,
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                AutoSize = false,
-                Height = 24,
-                Width = 260,
-                Padding = new Padding(0)
-            };
-        }
-
-        private ToolStripMenuItem CreateMenuItem(string title, string detail, Color? color = null, string badge = "")
-        {
-            var suffix = string.IsNullOrWhiteSpace(badge) ? "" : $"    {badge}";
-            var secondLine = string.IsNullOrWhiteSpace(detail) ? "" : $"\n  {detail}";
-            return new ToolStripMenuItem($"  {title}{suffix}{secondLine}")
-            {
-                ForeColor = color ?? _palette.Text,
-                Font = new Font("Segoe UI", 9, FontStyle.Regular),
-                AutoSize = false,
-                Height = string.IsNullOrWhiteSpace(detail) ? 34 : 44,
-                Width = 260,
-                Padding = new Padding(0)
-            };
-        }
-
-        private ToolStripSeparator CreateSeparator()
-        {
-            return new ToolStripSeparator
-            {
-                BackColor = _palette.Separator,
-                ForeColor = _palette.Separator
-            };
-        }
-
         public void ShowNotification(string title, string message, int timeout = 3000)
         {
             _notifyIcon?.ShowBalloonTip(timeout, title, message, ToolTipIcon.Info);
@@ -281,143 +161,9 @@ namespace SteamSwitcher.Services
                 _notifyIcon.Dispose();
                 _notifyIcon = null;
             }
-            _contextMenu?.Dispose();
-            _contextMenu = null;
             // WPF ContextMenu is not IDisposable; drop the reference so its items
             // (which hold account data) can be reclaimed. It was already closed above.
             _popupMenu = null;
-        }
-    }
-
-    public class AppleMenuRenderer : ToolStripProfessionalRenderer
-    {
-        private readonly TrayMenuPalette _palette;
-
-        public AppleMenuRenderer(TrayMenuPalette palette) : base(new AppleColorTable(palette))
-        {
-            _palette = palette;
-        }
-
-        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
-        {
-            var rect = new Rectangle(4, 2, e.Item.Width - 8, e.Item.Height - 4);
-
-            if (e.Item.Selected && e.Item.Enabled)
-            {
-                using var brush = new SolidBrush(_palette.Hover);
-                using var path = RoundedRect(rect, 8);
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                e.Graphics.FillPath(brush, path);
-                return;
-            }
-
-            using var baseBrush = new SolidBrush(_palette.Background);
-            e.Graphics.FillRectangle(baseBrush, rect);
-        }
-
-        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
-        {
-            var y = e.Item.Height / 2;
-            using var pen = new Pen(_palette.Separator);
-            e.Graphics.DrawLine(pen, 18, y, e.Item.Width - 18, y);
-        }
-
-        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
-        {
-            e.TextColor = e.Item.ForeColor;
-            base.OnRenderItemText(e);
-        }
-
-        private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
-        {
-            var diameter = radius * 2;
-            var path = new GraphicsPath();
-            path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
-            path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
-            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-            path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-            path.CloseFigure();
-            return path;
-        }
-    }
-
-    public class AppleColorTable : ProfessionalColorTable
-    {
-        private readonly TrayMenuPalette _palette;
-
-        public AppleColorTable(TrayMenuPalette palette)
-        {
-            _palette = palette;
-        }
-
-        public override Color ToolStripDropDownBackground => _palette.Background;
-        public override Color ImageMarginGradientBegin => _palette.Background;
-        public override Color ImageMarginGradientMiddle => _palette.Background;
-        public override Color ImageMarginGradientEnd => _palette.Background;
-        public override Color MenuBorder => _palette.Border;
-        public override Color MenuItemBorder => _palette.Border;
-        public override Color MenuItemSelected => _palette.Hover;
-        public override Color MenuStripGradientBegin => _palette.Background;
-        public override Color MenuStripGradientEnd => _palette.Background;
-        public override Color MenuItemSelectedGradientBegin => _palette.Hover;
-        public override Color MenuItemSelectedGradientEnd => _palette.Hover;
-        public override Color MenuItemPressedGradientBegin => _palette.Hover;
-        public override Color MenuItemPressedGradientEnd => _palette.Hover;
-        public override Color SeparatorDark => _palette.Separator;
-        public override Color SeparatorLight => _palette.Separator;
-    }
-
-    public sealed class TrayMenuPalette
-    {
-        public Color Background { get; private init; }
-        public Color Hover { get; private init; }
-        public Color Border { get; private init; }
-        public Color Text { get; private init; }
-        public Color SecondaryText { get; private init; }
-        public Color Accent { get; private init; }
-        public Color Danger { get; private init; }
-        public Color Separator { get; private init; }
-
-        public static TrayMenuPalette FromApplication()
-        {
-            var resources = System.Windows.Application.Current.Resources;
-            var windowBrush = GetBrush(resources, "WindowBgBrush", MediaColor.FromRgb(25, 25, 28));
-            var isLight = GetLuminance(windowBrush) > 0.55;
-
-            return new TrayMenuPalette
-            {
-                Background = TokenColor(resources, "CardBgBrush"),
-                Hover = TokenColor(resources, "HoverBgBrush"),
-                Border = TokenColor(resources, "BorderBrush"),
-                Text = TokenColor(resources, "TextPrimaryBrush"),
-                SecondaryText = TokenColor(resources, "TextSecondaryBrush"),
-                Accent = TokenColor(resources, "AccentBrush"),
-                Danger = TokenColor(resources, "DangerFgBrush"),
-                Separator = TokenColor(resources, "SeparatorBrush")
-            };
-        }
-
-        private static Color TokenColor(ResourceDictionary resources, string key)
-        {
-            var brush = GetBrush(resources, key, MediaColor.FromRgb(24, 36, 56));
-            var color = brush is System.Windows.Media.SolidColorBrush solid ? solid.Color : MediaColor.FromRgb(24, 36, 56);
-            return Color.FromArgb(color.A, color.R, color.G, color.B);
-        }
-
-        private static MediaBrush GetBrush(ResourceDictionary resources, string key, MediaColor fallback)
-        {
-            if (resources.Contains(key) && resources[key] is MediaBrush brush)
-                return brush;
-            return new SolidColorBrush(fallback);
-        }
-
-        private static double GetLuminance(MediaBrush brush)
-        {
-            if (brush is not SolidColorBrush solid)
-                return 0;
-
-            var c = solid.Color;
-            return (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255.0;
         }
     }
 }

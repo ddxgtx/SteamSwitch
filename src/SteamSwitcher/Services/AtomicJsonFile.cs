@@ -16,8 +16,13 @@ namespace SteamSwitcher.Services
             PathLocks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
 
         /// <summary>
-        /// 判断异常是否只是"暂时读不到"（被并发写入占用/文件消失），
-        /// 这类情况必须如实上报为 IO 错误，不能被当成"文件损坏"去走 .bak 回退。
+        /// 判断读取候选文件（主文件或其 .bak）失败是否只是"暂时读不到"
+        /// （被并发写入占用/无权限/文件消失）。
+        /// 这类情况必须如实抛出，不能被当成"文件损坏"去回退到另一个候选——
+        /// 那会让陈旧备份被当成权威数据。
+        /// 注意：此判定刻意包含 FileNotFoundException/DirectoryNotFoundException（防御竞态删除），
+        /// 与 SettingsService.IsTransientIoError 用途不同（后者用于写入保护且刻意不含这两项），
+        /// 两者不要盲目统一。
         /// </summary>
         private static bool IsTransientIoError(Exception ex) =>
             ex is IOException or UnauthorizedAccessException or FileNotFoundException or DirectoryNotFoundException;

@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace SteamSwitcher.Core
 {
@@ -9,9 +8,6 @@ namespace SteamSwitcher.Core
         private const long MinimumPrivateBytes = 160L * 1024 * 1024;
         private static readonly TimeSpan MinimumCleanupInterval = TimeSpan.FromMinutes(5);
         private static DateTime _lastCleanupUtc = DateTime.MinValue;
-
-        [DllImport("psapi.dll")]
-        private static extern int EmptyWorkingSet(IntPtr hwProc);
 
         public static void CleanMemory()
         {
@@ -26,9 +22,9 @@ namespace SteamSwitcher.Core
                     return;
 
                 _lastCleanupUtc = now;
-                GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, true, true);
-                GC.WaitForPendingFinalizers();
-                EmptyWorkingSet(process.Handle);
+                // 仅做一次受运行时控制的回收；不再强制全代 GC，也不再调用 EmptyWorkingSet：
+                // 把工作集换出会造成后续硬缺页与明显卡顿，对常驻托盘程序弊大于利。
+                GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized);
             }
             catch
             {

@@ -1724,9 +1724,9 @@ namespace SteamSwitcher.Views
         {
             e.Handled = true;
             float step = e.Delta > 0 ? 0.02f : -0.02f;
-            float newVol = SystemVolumeService.AdjustVolume(step);
+            float? newVol = SystemVolumeService.AdjustVolume(step);
             bool isMuted = SystemVolumeService.IsMuted();
-            ShowSeparatedVolumeHud(newVol, isMuted);
+            ShowSeparatedVolumeHud(newVol ?? SystemVolumeService.GetVolume(), isMuted);
         }
 
         private void ShowSeparatedVolumeHud(float volume, bool isMuted)

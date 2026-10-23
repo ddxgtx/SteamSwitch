@@ -279,7 +279,8 @@ namespace SteamSwitcher.Core
             await EnterOperationAsync();
             try
             {
-                _accountLibrary.Reload();
+                // 在后台线程执行同步文件读取，避免调用线程（可能是 UI）被账号库 IO 阻塞。
+                await Task.Run(() => _accountLibrary.Reload()).ConfigureAwait(false);
                 if (reloadAccounts) LoadAccountsCore();
             }
             finally { try { _switchGate.Release(); } catch (ObjectDisposedException) { } }
@@ -916,6 +917,9 @@ namespace SteamSwitcher.Core
             // already writing a transaction can finish and release normally.
             await _switchGate.WaitAsync().ConfigureAwait(false);
             _switchGate.Dispose();
+            // 在 gate 完全空闲后再释放操作生命周期 CTS：此前是 Dispose() 里同步立即释放，
+            // 时序脆弱，可能让仍在访问 _operationToken 的操作观察到 ObjectDisposedException。
+            try { _operationLifetime.Dispose(); } catch (ObjectDisposedException) { }
         }
 
         public void Dispose()
@@ -930,7 +934,6 @@ namespace SteamSwitcher.Core
             avatars?.Dispose();
             _httpClient?.Dispose();
             _gateDisposalTask = DisposeOperationGateWhenIdleAsync();
-            _operationLifetime.Dispose();
         }
     }
 }
