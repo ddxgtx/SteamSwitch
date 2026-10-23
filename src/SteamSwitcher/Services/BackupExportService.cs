@@ -65,6 +65,9 @@ internal static class BackupExportService
             ? ".steamswitch.json" : Path.GetExtension(fileName);
         var stem = fileName[..^extension.Length];
         var target = Path.Combine(folder, $"{stem}-{DateTime.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}{extension}");
+        // 默认（不询问）分支同样必须校验目标：当用户把备份导出目录配成存档仓库根目录时，
+        // 不校验会让导出文件落进仓库，被当成可恢复版本列出或被清理规则删掉。
+        EnsureOutsideDirectory(target, forbiddenDirectory);
         var staging = target + ".pending";
         try
         {

@@ -5,6 +5,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading;
 using Microsoft.Win32;
 using SteamSwitcher.Core;
 using SteamSwitcher.Models;
@@ -109,6 +110,14 @@ namespace SteamSwitcher.Services
     {
         private static readonly object FileLock = new();
 
+        /// <summary>
+        /// Set when <see cref="Load"/> had to fall back to in-memory defaults (or the
+        /// previous backup) because the primary settings file was only transiently
+        /// unreadable. While true, <see cref="Save"/> refuses to overwrite the on-disk
+        /// file, so a momentary lock at startup can never wipe the user's real config.
+        /// </summary>
+        private static bool _lastLoadWasTransientFallback;
+
         public static string SettingsDirectory => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SteamSwitch");
@@ -133,7 +142,13 @@ namespace SteamSwitcher.Services
         {
             lock (FileLock)
             {
-                if (TryLoad(SettingsPath, out var settings, out var primaryTransient))
+                _lastLoadWasTransientFallback = false;
+
+                // Retry the primary read a few times: a transient lock (antivirus
+                // scan, cloud-sync, or a concurrent write) usually clears within a
+                // fraction of a second. Absorbing it here means we almost never fall
+                // back to defaults and never risk overwriting the real settings.
+                if (TryLoadWithRetry(SettingsPath, out var settings, out var primaryTransient))
                     return Normalize(settings);
 
                 // 主文件只是"暂时读不到"（被并发写入占用、杀软扫描、云同步），
@@ -144,10 +159,12 @@ namespace SteamSwitcher.Services
                     if (TryLoad(BackupSettingsPath, out settings, out _))
                     {
                         AppLogger.Warn("Primary settings file is temporarily unreadable; using the previous backup in memory only.");
+                        _lastLoadWasTransientFallback = true;
                         return Normalize(settings);
                     }
 
                     AppLogger.Warn("Primary settings file is temporarily unreadable; using in-memory defaults without writing.");
+                    _lastLoadWasTransientFallback = true;
                     return new AppSettings();
                 }
 
@@ -238,6 +255,21 @@ namespace SteamSwitcher.Services
         {
             lock (FileLock)
             {
+                // If the last load fell back to in-memory defaults because the primary
+                // file was only transiently unreadable, never overwrite the on-disk file
+                // with those defaults. The real settings stay intact; we defer all writes
+                // for this session rather than risk clobbering the user's configuration.
+                // The trade-off (settings changed during this session won't persist) is
+                // far safer than silently wiping real settings the next launch would fix.
+                if (_lastLoadWasTransientFallback)
+                {
+                    if (TryLoad(SettingsPath, out _, out _))
+                        AppLogger.Warn("Skipping settings save: primary file is readable again after a transient failure; preserving on-disk settings.");
+                    else
+                        AppLogger.Warn("Skipping settings save: primary settings file is still unreadable after a transient failure.");
+                    return true;
+                }
+
                 string? temporaryPath = null;
                 try
                 {
@@ -382,6 +414,28 @@ namespace SteamSwitcher.Services
                 AppLogger.Warn($"Unable to load settings file {Path.GetFileName(path)}: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Reads the settings file, retrying a few times only on transient IO failures
+        /// (a momentary lock from an antivirus scan, cloud-sync, or a concurrent write).
+        /// Permanent failures (parse errors, a missing file) return immediately.
+        /// </summary>
+        private static bool TryLoadWithRetry(string path, out AppSettings settings, out bool transientFailure)
+        {
+            const int maxAttempts = 3;
+            settings = null!;
+            transientFailure = false;
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                if (TryLoad(path, out settings, out transientFailure))
+                    return true;
+                if (!transientFailure)
+                    return false;
+                if (attempt < maxAttempts - 1)
+                    Thread.Sleep(150);
+            }
+            return false;
         }
 
         private static void ReplaceFileWithBackup(string temporaryPath, string destinationPath, string backupPath)

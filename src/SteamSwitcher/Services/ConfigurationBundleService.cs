@@ -151,8 +151,12 @@ public sealed class ConfigurationBundleService
                     () => AtomicJsonFile.WriteAsync(settingsPath, validated.Settings, JsonOptions, cancellationToken)
                         .GetAwaiter().GetResult()), cancellationToken).ConfigureAwait(false);
                 _afterWrite?.Invoke(4);
-                if (applyRuntime != null) await applyRuntime().ConfigureAwait(false);
+                // 四个数据文件已全部落盘，先把"提交标记"（journal）删掉，再应用到运行时。
+                // 这样即使应用运行时阶段崩溃/抛异常，下次启动也不会把一次已写盘成功的导入
+                // 误判为"未完成"而回滚掉。若 applyRuntime 失败，下面的 catch 仍会把数据文件
+                // 从事务副本还原回去。
                 File.Delete(journalPath);
+                if (applyRuntime != null) await applyRuntime().ConfigureAwait(false);
             }
             catch
             {

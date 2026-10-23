@@ -76,7 +76,10 @@ namespace SteamSwitcher.Services
                 }
 
                 var endpoint = (IAudioEndpointVolume)obj;
-                ReleaseCom(obj);   // drop the IUnknown RCW; endpoint keeps its own interface RCW
+                // NOTE: `obj` and `endpoint` are the SAME RCW (per-COM-identity, not
+                // per-interface). Releasing `obj` here would disconnect the RCW that the
+                // caller still holds via `endpoint`, so the caller's ReleaseCom(endpoint)
+                // in its finally block is the only place that releases it.
                 ReleaseCom(dev);
                 ReleaseCom(enumerator);
                 return endpoint;
