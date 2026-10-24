@@ -12,12 +12,12 @@
         Width="220"
         Height="42"
         SizeToContent="Manual"
-        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI, sans-serif"
+        FontFamily="Microsoft YaHei UI, Segoe UI Semibold, Segoe UI, sans-serif"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="Grayscale"
-        TextOptions.TextHintingMode="Fixed">
+        TextOptions.TextHintingMode="Auto">
 
     <!-- SizeToContent 必须是 Manual：WidthAndHeight 会让 WPF 在每次内容测量后自动
          调整窗口尺寸，而歌词每句都在变——歌词岛于是被反复 resize。AllowsTransparency
@@ -110,6 +110,18 @@
                         MouseLeftButtonUp="LyricsHost_MouseLeftButtonUp"
                         PreviewMouseWheel="LyricsHost_PreviewMouseWheel" Background="{DynamicResource CompactSurfaceBrush}">
                     <Grid>
+                        <!-- 顶部极光氛围灯带：玻璃/实体胶囊模式下在顶部边缘勾勒轻柔声波流光 -->
+                        <Border x:Name="LyricsAmbientRim" Height="1.5" VerticalAlignment="Top" Margin="20,0,50,0" CornerRadius="1" Opacity="0.55" IsHitTestVisible="False">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="#0038F9D7" Offset="0.0"/>
+                                    <GradientStop Color="#9938F9D7" Offset="0.22"/>
+                                    <GradientStop Color="#BB6AA7FF" Offset="0.52"/>
+                                    <GradientStop Color="#99C084FC" Offset="0.82"/>
+                                    <GradientStop Color="#00C084FC" Offset="1.0"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
                         <Grid Margin="8,0,7,0" ClipToBounds="True">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -118,8 +130,10 @@
 
                         <!-- 左侧/中间：放大双行歌词（右对齐，第一排歌词 + 第二排翻译）与悬停控制器 -->
                         <Grid Grid.Column="0" VerticalAlignment="Center">
-                            <StackPanel x:Name="LyricsTextPanel" HorizontalAlignment="Stretch" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
-                                <StackPanel.CacheMode><BitmapCache EnableClearType="False"/></StackPanel.CacheMode>
+                            <StackPanel x:Name="LyricsTextPanel" HorizontalAlignment="Stretch" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <!-- 不要给歌词面板或 TextBlock 加 BitmapCache / DropShadowEffect：
+                                     任何 Effect 都会把文字先栅格化进离屏位图再做双线性采样与阴影模糊，
+                                     导致小字号中文笔画糊成一团。保持纯矢量字形直出才能锐利清晰。 -->
                                 <StackPanel.RenderTransform>
                                     <TransformGroup>
                                         <ScaleTransform x:Name="LyricsTextScale" ScaleX="1" ScaleY="1"/>
@@ -127,36 +141,24 @@
                                     </TransformGroup>
                                 </StackPanel.RenderTransform>
                                 <!-- 文字配色由玻璃 / 透明背景模式选择，保持清晰对比。 -->
-                                <TextBlock x:Name="LyricText" Foreground="{DynamicResource CompactTextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Stretch" TextAlignment="Right" TextTrimming="CharacterEllipsis">
-                                    <TextBlock.Effect>
-                                        <DropShadowEffect Color="#000000" BlurRadius="6" ShadowDepth="1" Opacity="0.65"/>
-                                    </TextBlock.Effect>
-                                </TextBlock>
+                                <TextBlock x:Name="LyricText" FontFamily="Microsoft YaHei UI, Segoe UI Semibold, Segoe UI, sans-serif" Foreground="{DynamicResource CompactTextPrimaryBrush}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Stretch" TextAlignment="Right" TextTrimming="CharacterEllipsis" SnapsToDevicePixels="True" UseLayoutRounding="True"/>
                                 <!-- 有限宽度让长翻译正确省略，不再由水平 StackPanel 无限测量。 -->
-                                <Grid HorizontalAlignment="Right" Margin="0,1,0,0">
+                                <Grid HorizontalAlignment="Right" Margin="0,1,0,0" SnapsToDevicePixels="True" UseLayoutRounding="True">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <!-- 固定占位 14px：用不透明度而非可见性隐藏，避免
                                          切歌时图标出现/消失让副行文字左右跳一格 -->
-                                    <TextBlock x:Name="MediaIcon" Width="14" Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource CompactTextSecondaryBrush}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0">
-                                        <TextBlock.Effect>
-                                            <DropShadowEffect Color="#000000" BlurRadius="4" ShadowDepth="1" Opacity="0.5"/>
-                                        </TextBlock.Effect>
-                                    </TextBlock>
-                                    <TextBlock x:Name="MediaText" Grid.Column="1" Foreground="{DynamicResource CompactTextSecondaryBrush}" FontSize="12" FontWeight="Medium" HorizontalAlignment="Stretch" TextAlignment="Right" TextTrimming="CharacterEllipsis">
-                                        <TextBlock.Effect>
-                                            <DropShadowEffect Color="#000000" BlurRadius="5" ShadowDepth="1" Opacity="0.2"/>
-                                        </TextBlock.Effect>
-                                    </TextBlock>
+                                    <TextBlock x:Name="MediaIcon" Width="14" Text="&#xE8D6;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource CompactAccentBrush}" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0" SnapsToDevicePixels="True"/>
+                                    <TextBlock x:Name="MediaText" Grid.Column="1" FontFamily="Microsoft YaHei UI, Segoe UI Semibold, Segoe UI, sans-serif" Foreground="{DynamicResource CompactTextSecondaryBrush}" FontSize="12" FontWeight="Medium" HorizontalAlignment="Stretch" TextAlignment="Right" TextTrimming="CharacterEllipsis" SnapsToDevicePixels="True" UseLayoutRounding="True"/>
                                 </Grid>
                             </StackPanel>
 
                             <!-- Lyricify 式悬浮控制条：同一块液态玻璃材质，浮在上层
                                  （ZIndex 高于歌词），歌词横向让位而不是被抹掉。 -->
                             <Border x:Name="LyricsControlsGlass" HorizontalAlignment="Right" VerticalAlignment="Center" CornerRadius="18" Padding="4" BorderThickness="1" Opacity="0" IsHitTestVisible="False" RenderTransformOrigin="1,0.5" Panel.ZIndex="3">
-                                <Border.CacheMode><BitmapCache EnableClearType="False"/></Border.CacheMode>
+                                <!-- 同理不加 BitmapCache：悬停时该玻璃条有缩放/位移动画，缓存会糊掉字形 -->
                                 <Border.Background><DynamicResource ResourceKey="FloatingSurfaceBrush"/></Border.Background><Border.BorderBrush><DynamicResource ResourceKey="FloatingBorderBrush"/></Border.BorderBrush>
                                 <Border.RenderTransform>
                                     <TransformGroup>
@@ -172,11 +174,25 @@
                             </Border>
                         </Grid>
 
-                        <!-- 右侧：36x36 放大高清圆角专辑封面 + 悬浮音波律动徽章 -->
+                        <!-- 右侧：36x36 放大高清圆角专辑封面 + 双环反向流光星环 + 对称声波频谱胶囊 -->
                         <Grid Grid.Column="1" VerticalAlignment="Center" Margin="9,0,1,0" RenderTransformOrigin="0.5,0.5">
                             <Grid.RenderTransform>
                                 <ScaleTransform x:Name="ArtworkScale" ScaleX="1" ScaleY="1"/>
                             </Grid.RenderTransform>
+                            <!-- 外层反向流光伴随环：与内环反向旋转，形成唱片律动星环质感 -->
+                            <Border x:Name="VisualizerOuterHalo" Width="38" Height="38" Margin="-1" CornerRadius="9" BorderThickness="0.9" Opacity="0" IsHitTestVisible="False">
+                                <Border.BorderBrush>
+                                    <LinearGradientBrush StartPoint="1,0" EndPoint="0,1">
+                                        <LinearGradientBrush.Transform>
+                                            <RotateTransform x:Name="VisualizerOuterRotate" Angle="0" CenterX="19" CenterY="19"/>
+                                        </LinearGradientBrush.Transform>
+                                        <GradientStop Color="#99C084FC" Offset="0.0"/>
+                                        <GradientStop Color="#225AC8FA" Offset="0.45"/>
+                                        <GradientStop Color="#9938F9D7" Offset="1.0"/>
+                                    </LinearGradientBrush>
+                                </Border.BorderBrush>
+                            </Border>
+
                             <Border x:Name="ArtworkBorder" Width="36" Height="36" CornerRadius="8" BorderBrush="{DynamicResource CompactBorderBrush}" BorderThickness="1" ClipToBounds="True" Background="{DynamicResource CompactSurfaceBrush}">
                                 <Border.Effect>
                                     <DropShadowEffect Color="#000000" BlurRadius="8" ShadowDepth="1.5" Opacity="0.2"/>
@@ -187,25 +203,89 @@
                                 </Grid>
                             </Border>
 
-                            <!-- 悬浮律动音波小徽章 -->
-                            <Border x:Name="VisualizerBadge" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Background="{DynamicResource CompactSurfaceBrush}" CornerRadius="3" Padding="2,1">
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
-                                    <Border x:Name="VisualizerBar1" Width="2" Height="4" CornerRadius="1" Margin="0.5,0" Background="{DynamicResource CompactAccentBrush}">
+                            <!-- 封面极光流光呼吸环：随音乐律动旋转流光色相与呼吸亮度 -->
+                            <Border x:Name="VisualizerAuraRing" Width="36" Height="36" CornerRadius="8" BorderThickness="1.4" Opacity="0" IsHitTestVisible="False">
+                                <Border.BorderBrush>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <LinearGradientBrush.Transform>
+                                            <RotateTransform x:Name="VisualizerAuraRotate" Angle="0" CenterX="18" CenterY="18"/>
+                                        </LinearGradientBrush.Transform>
+                                        <GradientStop Color="#FF38F9D7" Offset="0.0"/>
+                                        <GradientStop Color="#FF5AC8FA" Offset="0.35"/>
+                                        <GradientStop Color="#FF818CF8" Offset="0.7"/>
+                                        <GradientStop Color="#FFC084FC" Offset="1.0"/>
+                                    </LinearGradientBrush>
+                                </Border.BorderBrush>
+                            </Border>
+
+                            <!-- 悬浮 7 段中心对称极光声波频谱胶囊 -->
+                            <Border x:Name="VisualizerBadge" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1.5" Height="12" Background="#E2091120" BorderBrush="#887CE7FF" BorderThickness="0.85" CornerRadius="6" Padding="3.4,1" IsHitTestVisible="False">
+                                <StackPanel Orientation="Horizontal" Height="10" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <Border x:Name="VisualizerBar1" Width="1.7" Height="2.4" CornerRadius="0.85" Margin="0.55,0" VerticalAlignment="Center" Opacity="0.55">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#FF38F9D7" Offset="0"/>
+                                                <GradientStop Color="#FF4FACFE" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
                                     </Border>
-                                    <Border x:Name="VisualizerBar2" Width="2" Height="7" CornerRadius="1" Margin="0.5,0" Background="{DynamicResource CompactAccentBrush}">
+                                    <Border x:Name="VisualizerBar2" Width="1.7" Height="3.4" CornerRadius="0.85" Margin="0.55,0" VerticalAlignment="Center" Opacity="0.65">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#FF64D2FF" Offset="0"/>
+                                                <GradientStop Color="#FF5B93F0" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
                                     </Border>
-                                    <Border x:Name="VisualizerBar3" Width="2" Height="5" CornerRadius="1" Margin="0.5,0" Background="{DynamicResource CompactAccentBrush}">
+                                    <Border x:Name="VisualizerBar3" Width="1.7" Height="4.4" CornerRadius="0.85" Margin="0.55,0" VerticalAlignment="Center" Opacity="0.75">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#FF8BE9FD" Offset="0"/>
+                                                <GradientStop Color="#FF7C83FD" Offset="0.55"/>
+                                                <GradientStop Color="#FF6AA7FF" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
                                     </Border>
-                                    <Border x:Name="VisualizerBar4" Width="2" Height="6" CornerRadius="1" Margin="0.5,0" Background="{DynamicResource CompactAccentBrush}">
+                                    <Border x:Name="VisualizerBar4" Width="1.8" Height="5.4" CornerRadius="0.9" Margin="0.55,0" VerticalAlignment="Center" Opacity="0.85">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#FFA5F3FC" Offset="0"/>
+                                                <GradientStop Color="#FF818CF8" Offset="0.5"/>
+                                                <GradientStop Color="#FFE879F9" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <Border x:Name="VisualizerBar5" Width="1.7" Height="4.4" CornerRadius="0.85" Margin="0.55,0" VerticalAlignment="Center" Opacity="0.75">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#FF8BE9FD" Offset="0"/>
+                                                <GradientStop Color="#FF7C83FD" Offset="0.55"/>
+                                                <GradientStop Color="#FF6AA7FF" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <Border x:Name="VisualizerBar6" Width="1.7" Height="3.4" CornerRadius="0.85" Margin="0.55,0" VerticalAlignment="Center" Opacity="0.65">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#FF64D2FF" Offset="0"/>
+                                                <GradientStop Color="#FF5B93F0" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <Border x:Name="VisualizerBar7" Width="1.7" Height="2.4" CornerRadius="0.85" Margin="0.55,0" VerticalAlignment="Center" Opacity="0.55">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#FF38F9D7" Offset="0"/>
+                                                <GradientStop Color="#FF4FACFE" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
                                     </Border>
                                 </StackPanel>
                             </Border>
                         </Grid>
 
-                        <!-- 底部发光流动进度条：固定宽度并右对齐到歌词列。
-                             之前跨满两列会随歌词长度伸缩，每首歌长短不一；
-                             右边距留给封面列，避开悬浮在封面右下角的律动徽章。 -->
-                        <ProgressBar x:Name="LyricsProgress" Grid.ColumnSpan="2" Width="84" HorizontalAlignment="Right" Height="6" Margin="0,0,46,0" VerticalAlignment="Bottom" Minimum="0" Maximum="1" Value="0" Background="{DynamicResource CompactSubtleBrush}" Foreground="{DynamicResource CompactAccentBrush}" BorderThickness="0">
+                        <!-- 底部极光星轨进度条：固定宽度并右对齐到歌词列，末端带双层微光彗星节点 -->
+                        <ProgressBar x:Name="LyricsProgress" Grid.ColumnSpan="2" Width="102" HorizontalAlignment="Right" Height="6" Margin="0,0,46,0" VerticalAlignment="Bottom" Minimum="0" Maximum="1" Value="0" Background="{DynamicResource CompactSubtleBrush}" Foreground="{DynamicResource CompactAccentBrush}" BorderThickness="0">
                             <ProgressBar.Template>
                                 <ControlTemplate TargetType="ProgressBar">
                                     <Grid x:Name="PART_Track">
@@ -213,14 +293,17 @@
                                         <Border x:Name="PART_Indicator" HorizontalAlignment="Left" Height="2" VerticalAlignment="Center" CornerRadius="1">
                                             <Border.Background>
                                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                                    <GradientStop Color="#5B93F0" Offset="0"/>
-                                                    <GradientStop Color="#9FC6FF" Offset="1"/>
+                                                    <GradientStop Color="#38F9D7" Offset="0"/>
+                                                    <GradientStop Color="#5AC8FA" Offset="0.38"/>
+                                                    <GradientStop Color="#818CF8" Offset="0.74"/>
+                                                    <GradientStop Color="#E879F9" Offset="1"/>
                                                 </LinearGradientBrush>
                                             </Border.Background>
                                             <Grid>
-                                                <Ellipse Width="4" Height="4" Fill="#EAF3FF" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-1.5,0">
+                                                <Ellipse Width="7" Height="7" Fill="#447CE7FF" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-3,0"/>
+                                                <Ellipse Width="4" Height="4" Fill="#FFFFFF" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-1.5,0">
                                                     <Ellipse.Effect>
-                                                        <DropShadowEffect Color="#6AA7FF" BlurRadius="6" ShadowDepth="0" Opacity="0.9"/>
+                                                        <DropShadowEffect Color="#7CE7FF" BlurRadius="6" ShadowDepth="0" Opacity="0.95"/>
                                                     </Ellipse.Effect>
                                                 </Ellipse>
                                             </Grid>

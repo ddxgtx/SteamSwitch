@@ -9,6 +9,11 @@ public partial class MainWindow
     private void RetrySettingsSave_Click(object sender, RoutedEventArgs e)
     {
         if (_viewModel.IsLoading || _configurationChangeInProgress) return;
+        if (_viewModel.SettingsSaveRecoveryHint != null)
+        {
+            ExportSettings_Click(sender, e);
+            return;
+        }
         if (_viewModel.SaveSettingsNow()) _viewModel.StatusText = "设置已保存，当前修改已写入本地。";
     }
 
@@ -17,6 +22,7 @@ public partial class MainWindow
         if (!_viewModel.TryGetRecentBackupExport(out var path)) return;
         try
         {
+            HideToast();
             Process.Start(new ProcessStartInfo("explorer.exe") { Arguments = $"/select,\"{path}\"", UseShellExecute = true });
         }
         catch (Exception ex) { ShowConfigurationError("定位备份文件", ex); }

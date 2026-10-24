@@ -73,7 +73,7 @@ namespace SteamSwitcher.Views
         private static readonly TimeSpan EmbedRetryBackoff = TimeSpan.FromSeconds(2);
         private int _lyricsVerticalOffset;
         private int _lyricsFontSize = 14;
-        private string _lyricsFontFamily = "Segoe UI Variable Text";
+        private string _lyricsFontFamily = "Microsoft YaHei UI";
         private bool _adaptiveLayoutDirty = true;
         private IReadOnlyList<SyncedLyricLine>? _lastLayoutLyrics;
         private TaskbarMediaSnapshot? _pendingMediaSnapshot;
@@ -103,6 +103,7 @@ namespace SteamSwitcher.Views
         private System.Windows.Threading.DispatcherTimer? _hoverProbeTimer;
         private System.Windows.Threading.DispatcherTimer? _hoverUnlockTimer;
         private byte[]? _lastArtwork;
+        private readonly MediaDisplayContinuity _artworkContinuity = new();
         private string _lastLyricText = string.Empty;
         private string _lastCompositeText = string.Empty;
         private string _lastTooltipText = string.Empty;
@@ -508,14 +509,14 @@ namespace SteamSwitcher.Views
             int verticalOffset = 0,
             int fontSize = 14,
             bool transparentBackground = true,
-            string fontFamily = "Segoe UI Variable Text",
+            string fontFamily = "Microsoft YaHei UI",
             bool splitLongLines = false,
             bool showProgressBar = true,
             bool hideWhenNoMedia = true,
             bool onlyMusicLyrics = true)
         {
             string normalizedFontFamily = string.IsNullOrWhiteSpace(fontFamily)
-                ? "Segoe UI Variable Text"
+                ? "Microsoft YaHei UI"
                 : fontFamily.Trim();
             int normalizedWidth = Math.Clamp(width, 240, 720);
             int normalizedFontSize = Math.Clamp(fontSize, 12, 18);
@@ -535,6 +536,8 @@ namespace SteamSwitcher.Views
             _lyricsTransparentBackground = transparentBackground;
             if (VisualizerBadge != null)
                 VisualizerBadge.Visibility = showVisualizer ? Visibility.Visible : Visibility.Collapsed;
+            if (VisualizerAuraRing != null)
+                VisualizerAuraRing.Visibility = showVisualizer ? Visibility.Visible : Visibility.Collapsed;
             if (!showVisualizer)
             {
                 _visualizerTimer?.Stop();
@@ -552,6 +555,8 @@ namespace SteamSwitcher.Views
             _mediaService.OnlyMusicLyrics = onlyMusicLyrics;
             if (!_lyricsAdaptiveWidth)
             {
+                _widthDebounceTimer?.Stop();
+                _pendingAdaptiveWidth = _lyricsWidth;
                 _currentAdaptiveLyricsWidth = _lyricsWidth;
             }
             _lastLayoutLyrics = null;
@@ -707,15 +712,17 @@ namespace SteamSwitcher.Views
             // 无媒体会话时（且用户开了"无歌曲时隐藏"）歌词岛也要跟着收起来，
             // 不能只在这里按 _lyricsEnabled 判断。
             bool hasSessionNow = _lastSnapshot is { HasSession: true };
+            bool hasPanelItems = hasGames || _pinnedAccounts.Count > 0;
             LyricsHost.Visibility = _lyricsEnabled && !(_lyricsHideWhenNoMedia && !hasSessionNow)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             LyricsHost.Width = (_lyricsAdaptiveWidth && _currentAdaptiveLyricsWidth > 0) ? _currentAdaptiveLyricsWidth : _lyricsWidth;
             // Keep the capsule inside the explicitly sized taskbar window, so
             // its lower glass rim is not clipped at the default icon size.
-            LyricsHost.Height = Math.Max(42, PanelHeight);
+            // 仅显示歌词时保持 42px 高度，避免被 PanelHeight (46px+) 撑高后触发 Viewbox 小数缩放导致文字发虚。
+            LyricsHost.Height = hasPanelItems ? Math.Max(42, PanelHeight) : 42;
             LyricsHost.CornerRadius = new CornerRadius(LyricsHost.Height / 2);
-            LyricsHost.Margin = new Thickness(0, 0, hasGames || _pinnedAccounts.Count > 0 ? 14 : 0, 0);
+            LyricsHost.Margin = new Thickness(0, 0, hasPanelItems ? 14 : 0, 0);
             if (_lyricsTransparentBackground)
             {
                 LyricsHost.Background = Brushes.Transparent;
@@ -732,18 +739,20 @@ namespace SteamSwitcher.Views
             MediaText.SetResourceReference(TextBlock.ForegroundProperty,
                 _lyricsTransparentBackground || _glassEnabled ? "GlassTextSecondaryBrush" : "FloatingTextSecondaryBrush");
             MediaIcon.SetResourceReference(TextBlock.ForegroundProperty,
-                _lyricsTransparentBackground || _glassEnabled ? "GlassTextSecondaryBrush" : "FloatingTextSecondaryBrush");
-            // Clear glass needs text shadow over both light and dark wallpapers.
+                _lyricsTransparentBackground || _glassEnabled ? "GlassAccentBrush" : "FloatingAccentBrush");
+            if (LyricsAmbientRim != null)
+            {
+                LyricsAmbientRim.Visibility = _lyricsTransparentBackground ? Visibility.Collapsed : Visibility.Visible;
+            }
+            // 严禁给 TextBlock 挂 DropShadowEffect：WPF 会将带 Effect 的文本先栅格化为离屏位图，
+            // 叠加阴影模糊与双线性重采样，直接造成任务栏小字号中文发虚、笔画粘连。
             foreach (var text in new[] { LyricText, MediaText, MediaIcon })
-                text.Effect = _lyricsTransparentBackground || _glassEnabled
-                    ? new System.Windows.Media.Effects.DropShadowEffect
-                    { Color = Colors.Black, BlurRadius = 4, ShadowDepth = 1, Opacity = 0.5 }
-                    : null;
+                text.Effect = null;
             LyricsHost.BorderThickness = _lyricsTransparentBackground ? new Thickness(0) : new Thickness(1);
             LyricsHost.RenderTransform = new TranslateTransform(0, _lyricsVerticalOffset);
             if (LyricsProgress != null)
                 LyricsProgress.Visibility = _lyricsShowProgressBar ? Visibility.Visible : Visibility.Collapsed;
-            var lyricsFont = new FontFamily(_lyricsFontFamily);
+            var lyricsFont = BuildLyricsFontFamily(_lyricsFontFamily);
             LyricText.FontFamily = lyricsFont;
             MediaText.FontFamily = lyricsFont;
             LyricText.FontSize = _lyricsFontSize;
@@ -753,6 +762,20 @@ namespace SteamSwitcher.Views
             {
                 ArtworkBorder.CornerRadius = _lyricsArtworkRounded ? new CornerRadius(8) : new CornerRadius(0);
                 UpdateArtworkClip();
+            }
+            if (VisualizerOuterHalo != null)
+            {
+                VisualizerOuterHalo.Visibility = _lyricsShowVisualizer ? Visibility.Visible : Visibility.Collapsed;
+                VisualizerOuterHalo.CornerRadius = _lyricsArtworkRounded ? new CornerRadius(9) : new CornerRadius(0);
+            }
+            if (VisualizerAuraRing != null)
+            {
+                VisualizerAuraRing.Visibility = _lyricsShowVisualizer ? Visibility.Visible : Visibility.Collapsed;
+                VisualizerAuraRing.CornerRadius = _lyricsArtworkRounded ? new CornerRadius(8) : new CornerRadius(0);
+            }
+            if (VisualizerBadge != null)
+            {
+                VisualizerBadge.Visibility = _lyricsShowVisualizer ? Visibility.Visible : Visibility.Collapsed;
             }
             if (!_lyricsShowControls && LyricsControlsGlass != null)
             {
@@ -802,10 +825,32 @@ namespace SteamSwitcher.Views
             AlbumArtwork.Clip = new RectangleGeometry(new Rect(0, 0, width, height), radius, radius);
         }
 
+        public static FontFamily BuildLyricsFontFamily(string? fontFamily)
+        {
+            var cleaned = string.IsNullOrWhiteSpace(fontFamily)
+                ? "Microsoft YaHei UI"
+                : fontFamily.Trim();
+            if (string.Equals(cleaned, "Segoe UI Variable Text", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(cleaned, "Segoe UI", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(cleaned, "Segoe UI Semibold", StringComparison.OrdinalIgnoreCase))
+            {
+                return new FontFamily("Segoe UI Semibold, Microsoft YaHei UI, Segoe UI, sans-serif");
+            }
+            if (string.Equals(cleaned, "Microsoft YaHei UI", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(cleaned, "Microsoft YaHei", StringComparison.OrdinalIgnoreCase))
+            {
+                return new FontFamily("Microsoft YaHei UI, Segoe UI Semibold, Segoe UI, sans-serif");
+            }
+            return new FontFamily($"{cleaned}, Microsoft YaHei UI, Segoe UI Semibold, Segoe UI, sans-serif");
+        }
+
         private void ApplyLayout()
         {
             int w = CalcWidth();
-            int h = Math.Max(PanelHeight, _lyricsEnabled ? 42 : 36);
+            bool hasPanelItems = _pinnedGames.Count > 0 || _pinnedQuickLaunchItems.Count > 0 || _pinnedAccounts.Count > 0;
+            int h = hasPanelItems
+                ? Math.Max(PanelHeight, _lyricsEnabled ? 42 : 36)
+                : (_lyricsEnabled ? 42 : 36);
 
             Width = w;
             Height = h;
@@ -875,39 +920,111 @@ namespace SteamSwitcher.Views
 
         private void VisualizerTimer_Tick(object? sender, EventArgs e)
         {
-            if (!_isPlaying || VisualizerBar1 == null || VisualizerBar2 == null || VisualizerBar3 == null || VisualizerBar4 == null)
+            if (!_isPlaying)
                 return;
 
-            // 正弦相位驱动 + 二次缓动，比随机跳变更顺滑、更像真实频谱呼吸。
-            _visualizerPhase += Math.PI * 2 * 0.19;
-            AnimateVisualizerBar(VisualizerBar1, 3 + 7 * VisualizerWave(_visualizerPhase));
-            AnimateVisualizerBar(VisualizerBar2, 3 + 9 * VisualizerWave(_visualizerPhase + 1.05));
-            AnimateVisualizerBar(VisualizerBar3, 3 + 7 * VisualizerWave(_visualizerPhase + 2.10));
-            AnimateVisualizerBar(VisualizerBar4, 3 + 8 * VisualizerWave(_visualizerPhase + 3.15));
+            var bars = new[]
+            {
+                VisualizerBar1, VisualizerBar2, VisualizerBar3, VisualizerBar4,
+                VisualizerBar5, VisualizerBar6, VisualizerBar7
+            };
+            if (bars[0] == null)
+                return;
+
+            // 多频段谐波合成 + 重音呼吸包络：7 根中心对称极光声波柱，中轴主频饱满分明，两侧高频灵动闪烁。
+            _visualizerPhase += 0.44;
+            _visualizerBeatPhase += 0.28;
+            double beat = Math.Pow(0.5 + 0.5 * Math.Sin(_visualizerBeatPhase), 2.2);
+
+            for (int i = 0; i < bars.Length; i++)
+            {
+                var bar = bars[i];
+                if (bar == null) continue;
+                double distanceFromCenter = Math.Abs(i - 3);
+                double centerWeight = 1.0 - distanceFromCenter * 0.17;
+                double fundamental = VisualizerWave(_visualizerPhase + i * 0.68);
+                double overtone = 0.5 + 0.5 * Math.Sin(_visualizerPhase * 1.92 - i * 1.05);
+                double shimmer = 0.5 + 0.5 * Math.Cos(_visualizerPhase * 3.10 + i * 1.42);
+                double rawEnergy = fundamental * 0.46 + overtone * 0.34 + shimmer * 0.20;
+                double energy = Math.Clamp(rawEnergy * (0.66 + 0.34 * beat), 0.10, 1.0);
+
+                double minH = 2.0;
+                double maxH = 3.8 + 6.0 * centerWeight;
+                double targetHeight = minH + (maxH - minH) * energy;
+                double targetOpacity = 0.64 + 0.36 * energy;
+                AnimateVisualizerBar(bar, targetHeight, targetOpacity);
+            }
+
+            if (VisualizerAuraRing != null && _lyricsShowVisualizer)
+            {
+                double ringOpacity = 0.36 + 0.52 * beat;
+                AnimateDouble(VisualizerAuraRing, OpacityProperty, ringOpacity, 95);
+                if (VisualizerAuraRotate != null)
+                {
+                    _visualizerAuraAngle = (_visualizerAuraAngle + 15) % 360;
+                    VisualizerAuraRotate.Angle = _visualizerAuraAngle;
+                }
+            }
+            if (VisualizerOuterHalo != null && _lyricsShowVisualizer)
+            {
+                double outerOpacity = 0.22 + 0.42 * beat;
+                AnimateDouble(VisualizerOuterHalo, OpacityProperty, outerOpacity, 95);
+                if (VisualizerOuterRotate != null)
+                {
+                    VisualizerOuterRotate.Angle = (360 - _visualizerAuraAngle * 0.8) % 360;
+                }
+            }
+            if (LyricsAmbientRim != null && !_lyricsTransparentBackground)
+            {
+                double rimOpacity = 0.38 + 0.45 * beat;
+                AnimateDouble(LyricsAmbientRim, OpacityProperty, rimOpacity, 95);
+            }
         }
 
         private double _visualizerPhase;
+        private double _visualizerBeatPhase;
+        private double _visualizerAuraAngle;
 
         private static double VisualizerWave(double phase) => 0.5 - 0.5 * Math.Cos(phase);
 
         /// <summary>
-        /// 条形高度必须从"屏幕上当前的值"起跳。XAML 里的 Height 是基值，直接写
-        /// new DoubleAnimation(h, 130) 会让每次 Tick 都从那个固定基值弹向新值——
-        /// 130ms 一轮下来，右下角这四根柱子就是肉眼可见的持续抖动。
+        /// 条形高度必须从"屏幕上当前的值"起跳，并在固定高度容器内垂直居中双向延展，
+        /// 既呈现对称声波美学，又不会改变外部胶囊尺寸引发父容器重排。
         /// </summary>
-        private static void AnimateVisualizerBar(System.Windows.Controls.Border bar, double height)
+        private static void AnimateVisualizerBar(System.Windows.Controls.Border bar, double height, double opacity)
         {
-            AnimateDouble(bar, FrameworkElement.HeightProperty, height, 130,
-                new QuadraticEase { EasingMode = EasingMode.EaseInOut });
+            var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
+            AnimateDouble(bar, FrameworkElement.HeightProperty, height, 95, ease);
+            AnimateDouble(bar, OpacityProperty, opacity, 95, ease);
         }
 
         private void StopVisualizer()
         {
-            foreach (var bar in new[] { VisualizerBar1, VisualizerBar2, VisualizerBar3, VisualizerBar4 })
+            ReadOnlySpan<double> restingHeights = [2.2, 3.0, 3.8, 4.6, 3.8, 3.0, 2.2];
+            var bars = new[]
             {
+                VisualizerBar1, VisualizerBar2, VisualizerBar3, VisualizerBar4,
+                VisualizerBar5, VisualizerBar6, VisualizerBar7
+            };
+            var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+            for (int i = 0; i < bars.Length; i++)
+            {
+                var bar = bars[i];
                 if (bar == null) continue;
-                AnimateDouble(bar, FrameworkElement.HeightProperty, 3, 180,
-                    new QuadraticEase { EasingMode = EasingMode.EaseOut });
+                AnimateDouble(bar, FrameworkElement.HeightProperty, restingHeights[i], 200, ease);
+                AnimateDouble(bar, OpacityProperty, 0.48, 200, ease);
+            }
+            if (VisualizerAuraRing != null)
+            {
+                AnimateDouble(VisualizerAuraRing, OpacityProperty, 0, 220, ease);
+            }
+            if (VisualizerOuterHalo != null)
+            {
+                AnimateDouble(VisualizerOuterHalo, OpacityProperty, 0, 220, ease);
+            }
+            if (LyricsAmbientRim != null && !_lyricsTransparentBackground)
+            {
+                AnimateDouble(LyricsAmbientRim, OpacityProperty, 0.45, 220, ease);
             }
         }
 
@@ -919,6 +1036,7 @@ namespace SteamSwitcher.Views
                 return;
 
             _lastTrackVersion = snapshot.TrackVersion;
+            var previousSnapshot = _lastSnapshot;
             _lastSnapshot = snapshot;
             // Do not early-return when LyricText is null (it is detached during a
             // Rebuild). The other controls are still valid and must keep updating;
@@ -926,9 +1044,17 @@ namespace SteamSwitcher.Views
             _isPlaying = snapshot.IsPlaying && snapshot.HasSession;
             if (_isPlaying && _lyricsShowVisualizer)
             {
+                if (VisualizerAuraRing != null && VisualizerAuraRing.Opacity <= 0.05)
+                {
+                    VisualizerAuraRing.Opacity = 0.65;
+                }
+                if (VisualizerOuterHalo != null && VisualizerOuterHalo.Opacity <= 0.05)
+                {
+                    VisualizerOuterHalo.Opacity = 0.38;
+                }
                 if (_visualizerTimer == null)
                 {
-                    _visualizerTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(130) };
+                    _visualizerTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(95) };
                     _visualizerTimer.Tick += VisualizerTimer_Tick;
                 }
                 if (!_visualizerTimer.IsEnabled)
@@ -948,15 +1074,19 @@ namespace SteamSwitcher.Views
             if (trackChanged)
             {
                 _adaptiveLayoutDirty = true;
+                _widthDebounceTimer?.Stop();
+                _pendingAdaptiveWidth = _currentAdaptiveLyricsWidth;
+                _artworkContinuity.MarkHealthy();
                 _lastTrackKey = currentTrackKey;
                 _lastLyricText = string.Empty;
                 // 刻意不清空封面：把 Source 置 null 会让封面先闪成 fallback 音符
                 // 图标、再闪回新封面，这正是切歌时"窗口闪一下"最刺眼的来源。
-                // 新封面在同一帧内由下面的逻辑替换；真的没有封面时才回落图标。
+                // 新封面就绪后直接替换；短暂缺失保留旧封面，宽限期后才回落图标。
             }
 
             // 专辑封面展示逻辑 (Lyricify 严谨标准)
-            if (snapshot.Artwork is { Length: > 0 })
+            bool hasUsableArtwork = false;
+            if (snapshot.HasSession && snapshot.Artwork is { Length: > 0 })
             {
                 if (AlbumArtwork.Source == null || _lastArtwork == null ||
                     (!ReferenceEquals(_lastArtwork, snapshot.Artwork) && !_lastArtwork.AsSpan().SequenceEqual(snapshot.Artwork)))
@@ -970,11 +1100,15 @@ namespace SteamSwitcher.Views
                         ArtworkFallback.Visibility = Visibility.Collapsed;
                     }
                 }
+                hasUsableArtwork = ReferenceEquals(_lastArtwork, snapshot.Artwork) ||
+                    (_lastArtwork != null && _lastArtwork.AsSpan().SequenceEqual(snapshot.Artwork));
             }
-            else if (trackChanged || !snapshot.HasSession)
+            if (hasUsableArtwork)
             {
-                // 没有新封面可用时才回落 fallback：切歌但拿不到封面的情况下，
-                // 旧封面继续显示比闪一下图标更稳。
+                _artworkContinuity.MarkHealthy();
+            }
+            else if (!snapshot.HasSession || !_artworkContinuity.HoldLastMedia(AlbumArtwork.Source != null))
+            {
                 _lastArtwork = null;
                 AlbumArtwork.Source = null;
                 AlbumArtwork.Visibility = Visibility.Collapsed;
@@ -1050,13 +1184,19 @@ namespace SteamSwitcher.Views
                 ApplyLayout();
             }
 
-            // Lyricify 式行切换：新一句歌词轻微上滑+淡入。
-            // 切歌走的是另一条路：直接定住，不做淡入（否则旧词一闪）。
+            // Only consecutive real lyric lines in the same sheet get a line transition.
+            // Metadata, first network results and source reloads are content handoffs,
+            // even when TrackKey did not change in this polling interval.
+            bool animateLyricLine = !trackChanged && previousSnapshot != null &&
+                !string.IsNullOrWhiteSpace(previousSnapshot.CurrentLyric) &&
+                !string.IsNullOrWhiteSpace(snapshot.CurrentLyric) &&
+                ReferenceEquals(previousSnapshot.LayoutLyrics, snapshot.LayoutLyrics) &&
+                !_lyricsTrackInfoOnly;
             if (LyricText != null && !string.Equals(_lastLyricText, primaryText, StringComparison.Ordinal))
             {
                 _lastLyricText = primaryText;
                 LyricText.Text = primaryText;
-                AnimateLyricLineTransition(isTrackChange: trackChanged);
+                AnimateLyricLineTransition(isTrackChange: !animateLyricLine);
             }
 
             // 2. 副行图标与文本更新。曲目信息缺失时整行留空，
@@ -1174,9 +1314,9 @@ namespace SteamSwitcher.Views
         /// </summary>
         private void AnimateLyricLineTransition(bool isTrackChange = false)
         {
-            if (_interactionLocked || LyricText == null) return;
+            if (LyricText == null) return;
 
-            if (isTrackChange)
+            if (isTrackChange || _interactionLocked || !SystemParameters.ClientAreaAnimation)
             {
                 // 换歌不是同一首歌里换行：整行替换时再播一遍"上滑淡入"，
                 // 看到的不是过渡而是旧词一闪。直接定住，动画只留给逐句过渡。
@@ -1198,9 +1338,9 @@ namespace SteamSwitcher.Views
             // 而基值恒为 0 ——那样这条位移永远不生效，只剩淡入在动。
             AnimateDouble(LyricsTranslate, TranslateTransform.YProperty, 0, 240, ease, fromOverride: 7);
             LyricText.BeginAnimation(OpacityProperty,
-                new DoubleAnimation(0, 1, duration) { EasingFunction = ease });
+                new DoubleAnimation(0.85, 1, duration) { EasingFunction = ease });
             MediaText?.BeginAnimation(OpacityProperty,
-                new DoubleAnimation(0.2, 1, duration) { EasingFunction = ease });
+                new DoubleAnimation(0.85, 1, duration) { EasingFunction = ease });
         }
 
         public void SetPreviewControlsVisible(bool visible)
@@ -1417,7 +1557,11 @@ namespace SteamSwitcher.Views
             // 阈值放宽到 10px：4px 以内的差异在任务栏上只会表现为持续的微抖动，
             // 而每次写入都会触发一次嵌入层的 SetWindowPos 重定位。
             if (Math.Abs(width - _currentAdaptiveLyricsWidth) < 10)
+            {
+                _widthDebounceTimer?.Stop();
+                _pendingAdaptiveWidth = _currentAdaptiveLyricsWidth;
                 return;
+            }
 
             // 切歌与"歌词刚抓取到"通常只隔几百毫秒，两者各自触发一次就会 resize
             // 两次、在任务栏上闪两下。合并进一个稳定窗口，只应用最后一次。
@@ -1441,6 +1585,13 @@ namespace SteamSwitcher.Views
 
         private void CommitAdaptiveLyricsWidth()
         {
+            if (_isClosed || _interactionLocked || !_lyricsAdaptiveWidth || !_lyricsEnabled)
+            {
+                // A timer queued before hover/settings changes must obey the current state.
+                // Remeasure on the next eligible snapshot instead of moving under the pointer.
+                _adaptiveLayoutDirty = true;
+                return;
+            }
             int width = Math.Clamp(_pendingAdaptiveWidth, AdaptiveMinimumLyricsWidth, 720);
             if (Math.Abs(width - _currentAdaptiveLyricsWidth) < 10)
                 return;
@@ -1729,21 +1880,86 @@ namespace SteamSwitcher.Views
             ShowSeparatedVolumeHud(newVol ?? SystemVolumeService.GetVolume(), isMuted);
         }
 
+        private bool TryGetElementDipBounds(FrameworkElement? element, out Rect dipBounds)
+        {
+            dipBounds = Rect.Empty;
+            if (element == null || !element.IsVisible || element.ActualWidth <= 0 || element.ActualHeight <= 0)
+                return false;
+
+            try
+            {
+                Point screenTopLeft = element.PointToScreen(new Point(0, 0));
+                Point screenBottomRight = element.PointToScreen(new Point(element.ActualWidth, element.ActualHeight));
+                var source = PresentationSource.FromVisual(element) ?? PresentationSource.FromVisual(this);
+                if (source?.CompositionTarget != null)
+                {
+                    var matrix = source.CompositionTarget.TransformFromDevice;
+                    screenTopLeft = matrix.Transform(screenTopLeft);
+                    screenBottomRight = matrix.Transform(screenBottomRight);
+                }
+
+                dipBounds = new Rect(screenTopLeft, screenBottomRight);
+                return dipBounds.Width > 0 && dipBounds.Height > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public bool TryGetNotificationAnchor(out Point centerScreenPoint, out double anchorTop)
+        {
+            centerScreenPoint = default;
+            anchorTop = 0;
+            if (_isClosed || !_isPinned)
+                return false;
+
+            double bandTop = double.NaN;
+            if (TryGetElementDipBounds(this, out var bandBounds))
+                bandTop = bandBounds.Top;
+
+            if (TryGetElementDipBounds(GameAvatarContainer, out var switchBarBounds))
+            {
+                centerScreenPoint = new Point(
+                    switchBarBounds.Left + (switchBarBounds.Width / 2.0),
+                    double.IsNaN(bandTop) ? switchBarBounds.Top : bandTop);
+                anchorTop = centerScreenPoint.Y;
+                return true;
+            }
+
+            if (!double.IsNaN(bandTop) && bandBounds.Width > 0)
+            {
+                centerScreenPoint = new Point(bandBounds.Left + (bandBounds.Width / 2.0), bandBounds.Top);
+                anchorTop = bandBounds.Top;
+                return true;
+            }
+
+            return false;
+        }
+
         private void ShowSeparatedVolumeHud(float volume, bool isMuted)
         {
             try
             {
                 // 音量条锚在专辑图片的正上方居中：原先按整个歌词岛中心计算，
                 // 封面偏右时浮窗会压在歌词上。取不到封面尺寸就退回整岛居中。
-                Point topLeft = LyricsHost.PointToScreen(new Point(0, 0));
-                Point center = new Point(topLeft.X + (LyricsHost.ActualWidth / 2), topLeft.Y);
-                double anchorTop = topLeft.Y;
-
-                if (ArtworkBorder != null && ArtworkBorder.ActualWidth > 0)
+                Point center;
+                double anchorTop;
+                if (TryGetElementDipBounds(ArtworkBorder, out var artworkBounds))
                 {
-                    Point artworkTopLeft = ArtworkBorder.PointToScreen(new Point(0, 0));
-                    center = new Point(artworkTopLeft.X + (ArtworkBorder.ActualWidth / 2), artworkTopLeft.Y);
-                    anchorTop = artworkTopLeft.Y;
+                    center = new Point(artworkBounds.Left + (artworkBounds.Width / 2.0), artworkBounds.Top);
+                    anchorTop = artworkBounds.Top;
+                }
+                else if (TryGetElementDipBounds(LyricsHost, out var lyricsBounds))
+                {
+                    center = new Point(lyricsBounds.Left + (lyricsBounds.Width / 2.0), lyricsBounds.Top);
+                    anchorTop = lyricsBounds.Top;
+                }
+                else
+                {
+                    Point topLeft = LyricsHost.PointToScreen(new Point(0, 0));
+                    center = new Point(topLeft.X + (LyricsHost.ActualWidth / 2), topLeft.Y);
+                    anchorTop = topLeft.Y;
                 }
 
                 _volumeFlyout.ShowVolume(center, anchorTop, volume, isMuted);
@@ -1844,7 +2060,6 @@ namespace SteamSwitcher.Views
         internal void SetPreviewLyricsEnabled(bool enabled)
         {
             _lyricsEnabled = enabled;
-            _lyricsShowVisualizer = false;
             // 预览/测试路径绝不能把窗口贴到用户真实任务栏上。
             SuppressAutoEmbed = true;
             Rebuild();

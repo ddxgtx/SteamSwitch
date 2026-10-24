@@ -80,6 +80,8 @@ artifacts/
 .preview/
 .workbuddy/
 build/
+docs/audits/
 isolated-profile/
 settings-apply-smoke
 settings-apply-smoke.json
+*.png.json

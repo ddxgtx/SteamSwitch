@@ -5,7 +5,7 @@
         Width="580" Height="430" ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         PreviewKeyDown="Window_PreviewKeyDown"
-        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
+        FontFamily="Microsoft YaHei UI, Segoe UI Variable Text, Segoe UI, sans-serif"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="Grayscale"

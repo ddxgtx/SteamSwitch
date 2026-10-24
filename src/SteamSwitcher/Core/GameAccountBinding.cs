@@ -24,7 +24,7 @@ namespace SteamSwitcher.Core
         public bool StartInBigPicture { get; set; }
     }
 
-    public class GameAccountBinding
+    public class GameAccountBinding : IGameAccountBinding
     {
         private readonly string _configPath;
         private readonly Dictionary<int, GameBinding> _bindings = new();

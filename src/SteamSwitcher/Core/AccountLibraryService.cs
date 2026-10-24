@@ -178,22 +178,25 @@ namespace SteamSwitcher.Core
 
         /// <summary>
         /// Upserts every account currently present in loginusers.vdf into the
-        /// library. Returns true when the library content changed.
+        /// library. Returns true when the library content changed, and reports
+        /// how many brand-new accounts were added (for save feedback).
         /// </summary>
-        public bool MergeFromVdf(IReadOnlyCollection<SteamAccount> vdfAccounts)
+        public bool MergeFromVdf(IReadOnlyCollection<SteamAccount> vdfAccounts, out int added)
         {
+            added = 0;
             if (vdfAccounts.Count == 0)
                 return false;
 
             lock (_sync)
             {
-                return MergeFromVdfCore(vdfAccounts);
+                return MergeFromVdfCore(vdfAccounts, out added);
             }
         }
 
-        private bool MergeFromVdfCore(IReadOnlyCollection<SteamAccount> vdfAccounts)
+        private bool MergeFromVdfCore(IReadOnlyCollection<SteamAccount> vdfAccounts, out int added)
         {
             var changed = false;
+            added = 0;
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             foreach (var account in vdfAccounts)
             {
@@ -205,6 +208,7 @@ namespace SteamSwitcher.Core
                     entry = new SavedAccountEntry { SteamId = account.SteamId };
                     _entries[account.SteamId] = entry;
                     changed = true;
+                    added++;
                 }
 
                 if (!string.IsNullOrWhiteSpace(account.AccountName) &&

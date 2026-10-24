@@ -13,19 +13,21 @@ internal sealed class AsyncRunLifetime
     internal Lease? Begin()
     {
         CancellationTokenSource? previous;
-        long generation;
+        Lease lease;
         lock (_sync)
         {
             if (_disposed != 0) return null;
             previous = _runCancellation;
             _runCancellation = new CancellationTokenSource();
             _running = 1;
-            generation = ++_generation;
+            lease = new Lease(++_generation, _runCancellation.Token);
         }
         // Cancel outside the lock: a cancellation callback that re-enters these
         // methods would otherwise deadlock on _sync.
         CancelAndDispose(previous);
-        return new Lease(generation, _runCancellation.Token);
+        // Cancellation can re-enter Stop/Begin and replace the shared source.
+        // Return this generation's captured token even if it was already superseded.
+        return lease;
     }
 
     internal bool IsCurrent(Lease lease) => Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _running) != 0 &&

@@ -800,24 +800,34 @@
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="FontSize" Value="12"/>
-        <Setter Property="Height" Value="32"/>
+        <Setter Property="Height" Value="34"/>
         <Setter Property="Padding" Value="10,0"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="ItemContainerStyle" Value="{StaticResource SettingComboBoxItem}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBox">
                     <Grid>
-                        <ToggleButton MinWidth="{TemplateBinding MinWidth}" HorizontalAlignment="Stretch" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                        <ToggleButton MinWidth="{TemplateBinding MinWidth}" MinHeight="{TemplateBinding Height}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
                                       IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" Focusable="False" Cursor="Hand">
                             <ToggleButton.Template>
                                 <ControlTemplate TargetType="ToggleButton">
-                                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
+                                    <Border x:Name="ComboBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" SnapsToDevicePixels="True">
                                         <Grid>
-                                            <ContentPresenter Margin="10,0,26,0" VerticalAlignment="Center"/>
+                                            <ContentPresenter Margin="11,0,26,0" VerticalAlignment="Center"/>
                                             <TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                         </Grid>
                                     </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{DynamicResource AccentBorderBrush}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </ToggleButton.Template>
                             <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" VerticalAlignment="Center"/>
@@ -913,7 +923,7 @@
         <Setter Property="Height" Value="44"/>
         <Setter Property="Padding" Value="13,0"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
-        <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI"/>
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI Variable Text, Segoe UI, sans-serif"/>
         <Setter Property="FontSize" Value="14"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
         <Setter Property="Background" Value="{DynamicResource InputBgBrush}"/>
@@ -1005,7 +1015,7 @@
 
     <!-- Shared visual vocabulary for all pages and owned dialogs. -->
     <Style x:Key="DialogWindowStyle" TargetType="Window">
-        <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI"/>
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI Variable Text, Segoe UI, sans-serif"/>
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
         <Setter Property="UseLayoutRounding" Value="True"/>

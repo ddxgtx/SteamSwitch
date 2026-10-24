@@ -32,6 +32,21 @@ public sealed class ConfigurationBundleService
     private readonly Action<int>? _afterWrite;
 
     public ConfigurationBundleService(string directory) : this(directory, null) { }
+
+    internal static bool IsManagedConfigurationFile(string directory, string path)
+    {
+        var root = Path.GetFullPath(directory);
+        var target = Path.GetFullPath(path);
+        foreach (var name in FileNames.Append(JournalName))
+        {
+            var managedPath = Path.Combine(root, name);
+            if (string.Equals(target, managedPath, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(target, managedPath + ".bak", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
     internal ConfigurationBundleService(string directory, Action<int>? afterWrite)
     {
         _directory = Path.GetFullPath(directory);
@@ -136,12 +151,8 @@ public sealed class ConfigurationBundleService
             var journal = new ImportJournal { TransactionName = transactionName, ExistingFiles = existing };
             var journalPath = Path.Combine(_directory, JournalName);
             var temporaryJournal = Path.Combine(transaction, "journal.json");
-            await using (var stream = new FileStream(temporaryJournal, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-            {
-                await JsonSerializer.SerializeAsync(stream, journal, cancellationToken: cancellationToken).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
-            }
-            File.Move(temporaryJournal, journalPath);
+            await WriteImportJournalAsync(temporaryJournal, journalPath, journal, cancellationToken).ConfigureAwait(false);
+            bool recoveryComplete = false;
             try
             {
                 await AtomicJsonFile.WriteAsync(Path.Combine(_directory, "accounts.json"), validated.Accounts, JsonOptions, cancellationToken).ConfigureAwait(false);
@@ -163,20 +174,40 @@ public sealed class ConfigurationBundleService
                 // 从事务副本还原回去。
                 File.Delete(journalPath);
                 if (applyRuntime != null) await applyRuntime().ConfigureAwait(false);
+                recoveryComplete = true;
             }
             catch
             {
+                // The disk commit already removed its journal. If runtime application
+                // fails, establish a new recovery record BEFORE touching the originals.
+                // A locked file may also block rollback; its journal and full snapshot
+                // must survive so the next launch can finish the recovery.
+                if (!File.Exists(journalPath))
+                    await WriteImportJournalAsync(temporaryJournal, journalPath, journal, CancellationToken.None).ConfigureAwait(false);
                 RestoreOriginalFiles(_directory, transaction, existing);
                 File.Delete(journalPath);
+                recoveryComplete = true;
                 throw;
             }
             finally
             {
                 // Keep rollback data when recovery itself failed.
-                if (!File.Exists(journalPath)) TryRemoveTransaction(transaction);
+                if (recoveryComplete) TryRemoveTransaction(transaction);
             }
         }
         finally { ImportGate.Release(); }
+    }
+
+    private static async Task WriteImportJournalAsync(string temporaryPath, string journalPath,
+        ImportJournal journal, CancellationToken cancellationToken)
+    {
+        await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write,
+                         FileShare.None, 4096, FileOptions.WriteThrough))
+        {
+            await JsonSerializer.SerializeAsync(stream, journal, cancellationToken: cancellationToken).ConfigureAwait(false);
+            stream.Flush(flushToDisk: true);
+        }
+        File.Move(temporaryPath, journalPath);
     }
 
     public static void RecoverInterruptedImport(string directory)
@@ -190,12 +221,12 @@ public sealed class ConfigurationBundleService
             ?? throw new InvalidDataException("配置恢复记录为空。");
         var prefix = ".configuration-import-";
         var allowed = FileNames.SelectMany(name => new[] { name, name + ".bak" }).ToHashSet(StringComparer.Ordinal);
-        if (!journal.TransactionName.StartsWith(prefix, StringComparison.Ordinal) ||
+        if (string.IsNullOrEmpty(journal.TransactionName) || !journal.TransactionName.StartsWith(prefix, StringComparison.Ordinal) ||
             !Guid.TryParseExact(journal.TransactionName[prefix.Length..], "N", out _) ||
             journal.ExistingFiles == null || journal.ExistingFiles.Any(name => !allowed.Contains(name)))
             throw new InvalidDataException("配置恢复记录包含无效路径。");
         var transaction = Path.Combine(root, journal.TransactionName);
-        if (!Directory.Exists(transaction)) throw new IOException("配置恢复副本缺失，原配置未被覆盖。");
+        if (!Directory.Exists(transaction)) throw new IOException("配置恢复副本缺失，已保留恢复记录，请从备份恢复配置。");
         RestoreOriginalFiles(root, transaction, journal.ExistingFiles);
         File.Delete(journalPath);
         TryRemoveTransaction(transaction);
@@ -203,10 +234,9 @@ public sealed class ConfigurationBundleService
     }
 
     /// <summary>
-    /// 恢复记录本身损坏（记录非法、恢复副本缺失）时 RecoverInterruptedImport 会抛异常。
-    /// 若让异常冒泡到启动流程，应用会直接退出，且此后每次启动都进不去、也无法在界面里
-    /// 执行"一键修复"。这里把无法采信的记录连同暂存目录一并清掉，
-    /// 让应用能用磁盘上的当前配置正常启动——原配置从未被覆盖，丢弃是安全的。
+    /// Quarantine an unreadable recovery record so startup can proceed. Preserve every
+    /// transaction snapshot: some data files may already have been overwritten before
+    /// a failed import, so these copies can be the only remaining originals.
     /// </summary>
     public static void DiscardInterruptedImport(string directory)
     {
@@ -215,11 +245,7 @@ public sealed class ConfigurationBundleService
             var root = Path.GetFullPath(directory);
             var journalPath = Path.Combine(root, JournalName);
             if (File.Exists(journalPath))
-                File.Delete(journalPath);
-
-            if (!Directory.Exists(root)) return;
-            foreach (var staging in Directory.GetDirectories(root, ".configuration-import-*"))
-                TryRemoveTransaction(staging);
+                File.Move(journalPath, journalPath + ".failed-" + Guid.NewGuid().ToString("N"));
         }
         catch (Exception ex)
         {

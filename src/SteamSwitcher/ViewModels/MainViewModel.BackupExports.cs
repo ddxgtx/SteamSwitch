@@ -36,7 +36,15 @@ public partial class MainViewModel
         StatusText = "正在保存备份，请稍候…";
         try
         {
-            var path = await BackupExportService.ExportAsync(SettingsSession.Copy(_settings), kind, fileName, write, choosePath, forbiddenDirectory);
+            Task WriteExportAsync(string destination)
+            {
+                // All export kinds share this gate, including the recovery action
+                // shown when the original settings could not be read at startup.
+                if (ConfigurationBundleService.IsManagedConfigurationFile(_configurationDirectory, destination))
+                    throw new InvalidOperationException("不能覆盖正在使用的配置文件或其恢复备份，请选择其他导出文件名或目录。");
+                return write(destination);
+            }
+            var path = await BackupExportService.ExportAsync(SettingsSession.Copy(_settings), kind, fileName, WriteExportAsync, choosePath, forbiddenDirectory);
             if (_disposed) return path;
             if (path == null)
             {

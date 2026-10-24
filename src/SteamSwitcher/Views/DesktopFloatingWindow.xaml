@@ -12,40 +12,31 @@
         SizeToContent="WidthAndHeight"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
-        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
-        TextOptions.TextFormattingMode="Display"
+        FontFamily="Microsoft YaHei UI, Segoe UI Variable Text, Segoe UI, sans-serif"
+        TextOptions.TextFormattingMode="Ideal"
         TextOptions.TextRenderingMode="Grayscale"
-        TextOptions.TextHintingMode="Fixed"
         MouseLeftButtonDown="Window_MouseLeftButtonDown"
         MouseRightButtonDown="Window_MouseRightButtonDown">
 
     <Grid Margin="12">
         <controls:RoundedClipBorder x:Name="RootGlass"
                 CornerRadius="22"
-                Padding="10,9"
+                Padding="12,9"
                 BorderThickness="1"
                 BorderBrush="{DynamicResource FloatingBorderBrush}" Background="{DynamicResource FloatingSurfaceBrush}">
             <Border.Effect>
                 <DropShadowEffect Color="#171C32" BlurRadius="22" ShadowDepth="4" Opacity="0.16"/>
             </Border.Effect>
             <Grid>
-            <Grid.Resources>
-                <Style TargetType="TextBlock">
-                    <Setter Property="Effect">
-                        <Setter.Value><DropShadowEffect Color="#000000" BlurRadius="3" ShadowDepth="1" Opacity="0.65"/></Setter.Value>
-                    </Setter>
-                </Style>
-            </Grid.Resources>
+            <!-- 不对 TextBlock 附加 DropShadowEffect，避免矢量字形栅格化后出现黑边发糊 -->
             <Border x:Name="TintLayer" CornerRadius="18" IsHitTestVisible="False" Opacity="0.045"/>
             <DockPanel Margin="6,4" LastChildFill="False">
                 <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center" Margin="2,0,10,0">
                     <StackPanel Orientation="Horizontal">
-                        <Border Width="6" Height="6" CornerRadius="3" Background="{DynamicResource FloatingAccentBrush}" VerticalAlignment="Center" Margin="0,0,6,0">
-
-                        </Border>
-                        <TextBlock Text="Steam Switch" Foreground="{DynamicResource FloatingTextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/>
+                        <Border Width="6" Height="6" CornerRadius="3" Background="{DynamicResource FloatingAccentBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="Steam Switch" Foreground="{DynamicResource FloatingTextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
                     </StackPanel>
-                    <TextBlock x:Name="HintText" Text="桌面快捷入口" Foreground="{DynamicResource FloatingTextSecondaryBrush}" FontSize="11" Margin="12,3,0,0"/>
+                    <TextBlock x:Name="HintText" Text="桌面快捷入口" Foreground="{DynamicResource FloatingTextSecondaryBrush}" FontSize="12" FontWeight="Medium" Margin="12,2,0,0"/>
                 </StackPanel>
                 <Border DockPanel.Dock="Left" Width="1" Margin="0,8,8,8" Background="{DynamicResource FloatingSubtleBrush}"/>
                 <StackPanel DockPanel.Dock="Right" x:Name="AvatarPanel" Orientation="Horizontal" VerticalAlignment="Center"/>

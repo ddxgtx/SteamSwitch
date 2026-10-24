@@ -31,11 +31,13 @@ namespace SteamSwitcher.ViewModels
             gameName = !string.IsNullOrWhiteSpace(gameName)
                 ? gameName
                 : !string.IsNullOrWhiteSpace(binding?.GameName) ? binding.GameName : $"Steam App {appId}";
-            var needsMonitor = binding?.BackupAfterExit == true || binding?.CloseSteamAfterExit == true;
+            var backupBeforeLaunch = GameSaveCenterEnabled && binding?.BackupBeforeLaunch == true;
+            var backupAfterExit = GameSaveCenterEnabled && binding?.BackupAfterExit == true;
+            var needsMonitor = backupAfterExit || binding?.CloseSteamAfterExit == true;
             SteamLibraryGame? installedGame = null;
             HashSet<int>? processIdsBeforeLaunch = null;
 
-            if (binding?.BackupBeforeLaunch == true)
+            if (backupBeforeLaunch)
             {
                 StatusText = $"正在备份《{gameName}》启动前存档…";
                 var backup = await _gameSaveAutoBackupService.BackupGameAsync(
@@ -117,7 +119,7 @@ namespace SteamSwitcher.ViewModels
                     });
                     return;
                 }
-                if (binding.BackupAfterExit)
+                if (GameSaveCenterEnabled && binding.BackupAfterExit)
                 {
                     var backup = await _gameSaveAutoBackupService.BackupGameAsync(
                         account.SteamId,
@@ -221,7 +223,7 @@ namespace SteamSwitcher.ViewModels
             DispatchToUi(UpdateAccountsList);
         }
 
-        public async Task InitializeAsync(bool checkForUpdates = true, bool startIntegrations = true)
+        public async Task InitializeAsync(bool checkForUpdates = true, bool startIntegrations = true, bool throwOnFailure = false)
         {
             IsLoading = true;
             StatusText = "正在检测 Steam...";
@@ -250,6 +252,7 @@ namespace SteamSwitcher.ViewModels
                 {
                     // 加载失败不能中断初始化，但必须让用户知道项目没被读到。
                     StatusText = $"快速启动配置读取失败：{ex.Message}（已保留磁盘文件）";
+                    if (throwOnFailure) throw;
                 }
                 UpdateQuickLaunchList();
                 UpdateGameBindingsList();
@@ -271,6 +274,7 @@ namespace SteamSwitcher.ViewModels
             {
                 AppLogger.Error("MainViewModel initialization failed.", ex);
                 StatusText = $"初始化失败: {ex.Message}";
+                if (throwOnFailure) throw;
             }
             finally
             {

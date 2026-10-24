@@ -12,7 +12,7 @@
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="FontSize" Value="13"/>
-        <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI"/>
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI Variable Text, Segoe UI, sans-serif"/>
         <Setter Property="Padding" Value="10,8"/>
         <Setter Property="MinHeight" Value="36"/>
         <Setter Property="MinWidth" Value="200"/>

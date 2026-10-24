@@ -22,6 +22,7 @@ namespace SteamSwitcher.Services
         public event EventHandler? ExitRequested;
         public event EventHandler<bool>? ToggleTaskbarLyricsRequested;
         public event EventHandler? EmergencyRestoreRequested;
+        public event EventHandler<(string Title, string Message, int Timeout)>? NotificationRequested;
 
         public TrayIconService(Window ownerWindow, bool createNativeIcon = true)
         {
@@ -149,7 +150,7 @@ namespace SteamSwitcher.Services
 
         public void ShowNotification(string title, string message, int timeout = 3000)
         {
-            _notifyIcon?.ShowBalloonTip(timeout, title, message, ToolTipIcon.Info);
+            NotificationRequested?.Invoke(this, (title, message, timeout));
         }
 
         public void Dispose()

@@ -13,8 +13,8 @@
         SizeToContent="WidthAndHeight"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
-        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI, sans-serif"
-        TextOptions.TextFormattingMode="Display"
+        FontFamily="Microsoft YaHei UI, Segoe UI Variable Text, Segoe UI, sans-serif"
+        TextOptions.TextFormattingMode="Ideal"
         TextOptions.TextRenderingMode="Grayscale"
         MouseEnter="Window_MouseEnter"
         MouseLeave="Window_MouseLeave">
@@ -104,10 +104,10 @@
             </StackPanel>
         </Border>
 
-        <!-- 模式 2：音量调节 HUD 胶囊 (图标 + 流光进度条 + 百分比) -->
+        <!-- 模式 2：音量调节 HUD 胶囊 (图标 + 极光流光进度条 + 百分比) -->
         <Border x:Name="VolumeHost"
                 CornerRadius="22"
-                Padding="12,6"
+                Padding="13,7"
                 BorderThickness="1"
                 Visibility="Collapsed"
                 RenderTransformOrigin="0.5,0.5" Background="{DynamicResource FloatingSurfaceBrush}" BorderBrush="{DynamicResource FloatingBorderBrush}">
@@ -118,13 +118,20 @@
                 <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="4" Opacity="0.16"/>
             </Border.Effect>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock x:Name="VolumeIcon" Text="&#xE767;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource GlassAccentBrush}" FontSize="13.5" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <ProgressBar x:Name="VolumeProgressBar" Width="84" Height="5" Minimum="0" Maximum="100" Value="50" Margin="0,0,10,0" Background="{DynamicResource FloatingBorderBrush}" Foreground="{DynamicResource GlassAccentBrush}" BorderThickness="0">
+                <TextBlock x:Name="VolumeIcon" Text="&#xE767;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource GlassAccentBrush}" FontSize="13.5" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                <ProgressBar x:Name="VolumeProgressBar" Width="88" Height="5" Minimum="0" Maximum="100" Value="50" Margin="0,0,10,0" Background="{DynamicResource FloatingSubtleBrush}" Foreground="{DynamicResource GlassAccentBrush}" BorderThickness="0">
                     <ProgressBar.Template>
                         <ControlTemplate TargetType="ProgressBar">
                             <Grid x:Name="PART_Track" ClipToBounds="True">
                                 <Border Background="{TemplateBinding Background}" CornerRadius="2.5"/>
-                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="2.5" Background="{DynamicResource GlassAccentBrush}">
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="2.5">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="#38F9D7" Offset="0"/>
+                                            <GradientStop Color="#5AC8FA" Offset="0.55"/>
+                                            <GradientStop Color="#818CF8" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
                                 </Border>
                             </Grid>
                         </ControlTemplate>
@@ -133,5 +140,157 @@
                 <TextBlock x:Name="VolumePercentText" Text="50%" Foreground="{DynamicResource GlassTextPrimaryBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Width="34" TextAlignment="Right"/>
             </StackPanel>
         </Border>
+
+        <!-- 模式 3：任务栏切换栏上方灵动消息胶囊 (单层纯净深色毛玻璃胶囊、同心圆头像/徽标、底部悬浮流光锚点) -->
+        <Grid x:Name="NotificationHost"
+              Visibility="Collapsed"
+              RenderTransformOrigin="0.5,1"
+              IsHitTestVisible="False">
+            <Grid.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="NotificationScale" ScaleX="1" ScaleY="1"/>
+                    <TranslateTransform x:Name="NotificationTranslate" Y="0"/>
+                </TransformGroup>
+            </Grid.RenderTransform>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Border x:Name="NotificationCard"
+                    Grid.Row="0"
+                    CornerRadius="25"
+                    Padding="0"
+                    BorderThickness="1"
+                    MinWidth="212"
+                    MaxWidth="368">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#EC152238" Offset="0"/>
+                        <GradientStop Color="#F20F1829" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Border.BorderBrush>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop x:Name="NotificationBorderStop1" Color="#667CE7FF" Offset="0"/>
+                        <GradientStop x:Name="NotificationBorderStop2" Color="#28FFFFFF" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.BorderBrush>
+                <Border.Effect>
+                    <DropShadowEffect Color="#000000" BlurRadius="24" ShadowDepth="5" Opacity="0.24"/>
+                </Border.Effect>
+                <Grid>
+                    <!-- 顶部微光流光灯带 (无负边距，贴合胶囊顶部内沿) -->
+                    <Border VerticalAlignment="Top" HorizontalAlignment="Stretch" Height="1.5" Margin="26,0,26,0" CornerRadius="1" Opacity="0.78" IsHitTestVisible="False">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="#005AC8FA" Offset="0"/>
+                                <GradientStop x:Name="NotificationTopGlowStop" Color="#FF5AC8FA" Offset="0.5"/>
+                                <GradientStop Color="#00818CF8" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                    </Border>
+
+                    <Grid VerticalAlignment="Center" Margin="9,8,18,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 左侧：34x34 同心圆账号头像或柔光状态徽标 -->
+                        <Grid Grid.Column="0" Width="34" Height="34" Margin="0,0,12,0" VerticalAlignment="Center">
+                            <Border x:Name="NotificationBadgeRing"
+                                    Width="34"
+                                    Height="34"
+                                    CornerRadius="17"
+                                    BorderThickness="1"
+                                    Background="#2438BDF8"
+                                    BorderBrush="#557CE7FF">
+                                <Grid>
+                                    <TextBlock x:Name="NotificationIconGlyph"
+                                               Text="&#xE73E;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               FontSize="14"
+                                               Foreground="#7CE7FF"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"/>
+                                    <Ellipse x:Name="NotificationAvatarEllipse"
+                                             Width="32"
+                                             Height="32"
+                                             Visibility="Collapsed"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center">
+                                        <Ellipse.Fill>
+                                            <ImageBrush x:Name="NotificationAvatarBrush"
+                                                        Stretch="UniformToFill"
+                                                        RenderOptions.BitmapScalingMode="HighQuality"/>
+                                        </Ellipse.Fill>
+                                    </Ellipse>
+                                </Grid>
+                            </Border>
+
+                            <Border x:Name="NotificationAvatarCornerBadge"
+                                    Width="13"
+                                    Height="13"
+                                    CornerRadius="6.5"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Bottom"
+                                    Margin="0,0,-0.5,-0.5"
+                                    Background="#10B981"
+                                    BorderBrush="#0E1626"
+                                    BorderThickness="1.2"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="NotificationAvatarCornerGlyph"
+                                           Text="&#xE73E;"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="7"
+                                           Foreground="#FFFFFF"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+
+                        <!-- 右侧：12px 清晰分类副标 + 13.5px 消息正文 (避开 10.5px 点阵粘连区间) -->
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                                <Ellipse x:Name="NotificationStatusDot"
+                                         Width="5.5"
+                                         Height="5.5"
+                                         Fill="#5AC8FA"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,6,0"/>
+                                <TextBlock x:Name="NotificationCategoryText"
+                                           Text="账号切换"
+                                           FontSize="12"
+                                           FontWeight="Medium"
+                                           Foreground="#A8C5E6"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock x:Name="NotificationMessageText"
+                                       Text="已切换到 主账号"
+                                       FontSize="13.5"
+                                       FontWeight="SemiBold"
+                                       Foreground="#F8FAFC"
+                                       MaxWidth="286"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- 底部悬浮流光微胶囊锚点 -->
+            <Grid Grid.Row="1" HorizontalAlignment="Center" Margin="0,4.5,0,0">
+                <Grid.RenderTransform>
+                    <TranslateTransform x:Name="NotificationPointerTranslate" X="0"/>
+                </Grid.RenderTransform>
+                <Border x:Name="NotificationPointerPill"
+                        Width="18"
+                        Height="3"
+                        CornerRadius="1.5"
+                        Background="#995AC8FA"
+                        HorizontalAlignment="Center"/>
+                <Path x:Name="NotificationPointerStroke" Visibility="Collapsed"/>
+            </Grid>
+        </Grid>
     </Grid>
 </Window>

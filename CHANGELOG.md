@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.3.0] - 2026-10-22
+## [3.3.0] - 2026-10-24
+
+### UI Polish, Taskbar Bubble & Crash-Resilient Desktop Icons - 2026-10-24
+- **专属任务栏毛玻璃消息气泡**：替换原生 Windows 托盘气泡通知，在任务栏切换栏正上方悬浮展示单层流光毛玻璃胶囊气泡（`NotificationHost`），支持首次弹出前精确预测量布局与 22 DIP 悬浮呼吸间距。
+- **创意任务栏歌词灵动岛与字体选择**：升级任务栏歌词胶囊的极光顶边流光、封面双环呼吸光晕、玻璃微胶囊五柱对称频谱与彗星高光进度条；新增任务栏歌词字体设置项，结合灰度抗锯齿与 `Ideal` 排版解决透明窗口下 ClearType 彩边发糊问题。
+- **桌面图标隐藏跨进程兜底守护**：新增 `--desktop-icon-guard <pid>` 独立守护模式，主进程被强制结束（`TerminateProcess`）时自动恢复桌面图标，配合启动时标记文件恢复与退出清理形成三层兜底。
+- **全站界面美化与透明玻璃恢复**：恢复透明玻璃模式的深色通透质感（`FloatingSurfaceBrush`），优化桌面快捷悬浮窗文字锐度、游戏存档中心底部悬浮操作坞（Floating Dock）以及桌面图标管理页布局。
+- **代码架构与可靠性加固**：引入 `CompositionRoot`、`ISettingsSession`、`AsyncRunLifetime` 与设置文件瞬时锁保护重试，消除并发写盘与导出路径越界隐患。
 
 ### Bug sweep - 2026-10-22
 全仓四路并行审查（核心账号/Steam 服务、窗口与交互、设置与更新、媒体与存档）后确认并修复的问题：

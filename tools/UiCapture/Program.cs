@@ -33,6 +33,8 @@ internal static class Program
                 MainViews, OtherViews,
                 Batch = "UiCapture <output-directory> render-all | all-smoke",
                 Smoke = "Append -smoke to any visual mode; lyrics-stability-smoke checks 80 media updates and hover/track transitions. Existing exit-lifecycle-smoke, exit-direct-smoke and settings-apply-smoke remain available.",
+                MediaRegression = "lyrics-handoff checks metadata-first handoffs, delayed lyrics/covers, grace expiry, hover/rapid-skip/fixed-width timers and idle cleanup; lyrics-track-change checks single-frame track swaps.",
+                SettingsRegression = "maintenance-guidance checks grouped actions at the requested window size; settings-protection-guidance checks real write-protection bindings and recovery instructions without touching the user's profile.",
                 Isolation = "Every rendering process uses a new profile below the output directory; no Window.Show, native input, Steam launch, registry startup write or network request is used. Focus is a template visual preview, not OS keyboard navigation validation."
             }, new JsonSerializerOptions { WriteIndented = true }));
             return;
@@ -163,7 +165,8 @@ internal static class Program
             const string nextSongLyric = "下一首歌词：这是一段超过固定任务栏宽度的长歌词，应保持字号并在末尾显示省略号";
             band.SetPreviewMedia(initial with { TrackKey = "next-song", TrackVersion = 2, Artwork = null,
                 CurrentLyric = nextSongLyric, CurrentTranslation = sheet[1].Translation! });
-            if (cover.Source != null || lyric.Text != nextSongLyric) throw new InvalidOperationException("Real track change retained stale content.");
+            if (!ReferenceEquals(cover.Source, stableCover) || lyric.Text != nextSongLyric)
+                throw new InvalidOperationException("Track handoff cleared the cover or retained stale lyrics.");
             var stabilitySize = NaturalSize((FrameworkElement)band.Content, 440, 56);
             CaptureVisual((FrameworkElement)band.Content, stabilitySize.Width, stabilitySize.Height, outputPath, requestedView, theme, state, smoke);
             if (lyric.ActualWidth > panel.ActualWidth + 1 || subtitle.ActualWidth > panel.ActualWidth + 1 || panel.ActualWidth <= 0)
@@ -261,6 +264,114 @@ internal static class Program
             return;
         }
 
+        if (view == "lyrics-handoff")
+        {
+            // Reproduce the real sequence: metadata first, then network lyrics/artwork.
+            // Collect failures so one run audits all independent handoff regressions.
+            var failures = new List<string>();
+            void Check(bool ok, string message) { if (!ok) failures.Add(message); }
+            void AdvanceAnimation(int milliseconds = 30)
+            {
+                var frame = new System.Windows.Threading.DispatcherFrame();
+                var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+                timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+                timer.Start();
+                System.Windows.Threading.Dispatcher.PushFrame(frame);
+            }
+            var band = new TaskbarBandWindow(profile.AccountManager);
+            band.SetLyricsSettings(false, true, false, 320, showVisualizer: false,
+                adaptiveWidth: true, hideWhenNoMedia: false);
+            band.SetPreviewLyricsEnabled(true);
+            var lyric = (TextBlock)band.FindName("LyricText");
+            var subtitle = (TextBlock)band.FindName("MediaText");
+            var cover = (Image)band.FindName("AlbumArtwork");
+            var host = (FrameworkElement)band.FindName("LyricsHost");
+            var commitWidth = typeof(TaskbarBandWindow).GetMethod("CommitAdaptiveLyricsWidth", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            void CommitWidth() => commitWidth.Invoke(band, null);
+            void CaptureStage(string suffix)
+            {
+                var root = (FrameworkElement)band.Content;
+                var size = NaturalSize(root, 440, 56);
+                CaptureVisual(root, size.Width, size.Height,
+                    Path.Combine(Path.GetDirectoryName(outputPath)!, Path.GetFileNameWithoutExtension(outputPath) + suffix + ".png"),
+                    requestedView, theme, state, false);
+            }
+            SyncedLyricLine[] sheet = [new(TimeSpan.Zero, "第一句歌词", "First line"), new(TimeSpan.FromSeconds(3), "第二句歌词", "Second line")];
+            var first = new TaskbarMediaSnapshot(true, true, "", "", "同步歌词", File.ReadAllBytes(profile.IconPath),
+                Title: "旧歌", Artist: "歌手", HasSyncedLyrics: true, CurrentLyric: sheet[0].Text,
+                CurrentTranslation: sheet[0].Translation!, TrackKey: "old", TrackVersion: 1, LayoutLyrics: sheet);
+            band.SetPreviewMedia(first);
+            band.SetPreviewMedia(first);
+            CommitWidth();
+            var originalCover = cover.Source;
+            var metadata = first with { Title = "新歌", TrackKey = "new", TrackVersion = 2,
+                CurrentLyric = "", CurrentTranslation = "", HasSyncedLyrics = false, LayoutLyrics = null, Artwork = null };
+            band.SetPreviewMedia(metadata);
+            Check(ReferenceEquals(originalCover, cover.Source), "Metadata-only handoff cleared the cover before its replacement arrived.");
+            Check(lyric.Text == "新歌", "The handoff displayed the previous song's lyric.");
+            CaptureStage("-01-metadata");
+            var arrived = metadata with { HasSyncedLyrics = true, CurrentLyric = sheet[0].Text,
+                CurrentTranslation = sheet[0].Translation!, LayoutLyrics = sheet };
+            band.SetPreviewMedia(arrived);
+            AdvanceAnimation();
+            Check(lyric.Opacity == 1 && subtitle.Opacity == 1, "Asynchronous first lyrics faded from transparent after the metadata frame.");
+            CaptureStage("-02-lyrics");
+            band.SetPreviewMedia(arrived with { CurrentLyric = sheet[1].Text });
+            AdvanceAnimation();
+            Check(lyric.Opacity >= .8 && subtitle.Opacity >= .8, "Normal line updates briefly erased the text.");
+            band.SetPreviewMedia(arrived with { TrackKey = "same-text", TrackVersion = 3, CurrentLyric = sheet[1].Text });
+            Check(lyric.Opacity == 1 && subtitle.Opacity == 1, "Changing tracks with identical text did not cancel the preceding animation.");
+            // A failed cover request must eventually show the fallback rather than an
+            // unrelated previous cover. Use a real dispatcher turn, not Thread.Sleep.
+            AdvanceAnimation(1250);
+            band.SetPreviewMedia(arrived with { TrackKey = "same-text", TrackVersion = 3, CurrentLyric = sheet[1].Text });
+            Check(cover.Source == null, "Missing artwork retained the previous song's cover past the grace period.");
+            band.SetPreviewMedia(arrived with { TrackKey = "same-text", TrackVersion = 3, Artwork = new byte[] { 1, 2, 3 } });
+            Check(cover.Source == null, "Malformed artwork bypassed cover validation.");
+            band.SetPreviewMedia(arrived with { TrackKey = "same-text", TrackVersion = 3, Artwork = first.Artwork });
+            Check(cover.Source != null, "A delayed valid cover did not replace the fallback.");
+            band.SetPreviewMedia(first with { TrackVersion = 1 });
+            Check(lyric.Text == sheet[0].Text, "An old track version overwrote the latest lyrics.");
+
+            SyncedLyricLine[] longSheet = [new(TimeSpan.Zero, new string('长', 48))];
+            var longTrack = arrived with { TrackKey = "long", TrackVersion = 4, CurrentLyric = longSheet[0].Text, LayoutLyrics = longSheet };
+            band.SetPreviewMedia(longTrack);
+            band.SetPreviewMedia(longTrack);
+            var widthBefore = host.Width;
+            band.SetPreviewControlsVisible(true);
+            CommitWidth();
+            Check(host.Width == widthBefore, "A pending width timer moved the band while the pointer was hovering.");
+            band.SetPreviewControlsVisible(false);
+            band.SetPreviewMedia(longTrack);
+            CommitWidth();
+            Check(host.Width > widthBefore, "The deferred layout was not applied after hover ended.");
+
+            // Queue a short song's width, then change tracks before the timer fires.
+            var shortTrack = arrived with { TrackKey = "short", TrackVersion = 5, LayoutLyrics = sheet };
+            band.SetPreviewMedia(shortTrack);
+            band.SetPreviewMedia(shortTrack);
+            band.SetPreviewMedia(longTrack with { TrackKey = "rapid-next", TrackVersion = 6 });
+            widthBefore = host.Width;
+            CommitWidth();
+            Check(host.Width == widthBefore, "Rapid skipping committed a width calculated for the previous song.");
+
+            band.SetPreviewMedia(longTrack with { TrackKey = "fixed", TrackVersion = 7 });
+            band.SetPreviewMedia(longTrack with { TrackKey = "fixed", TrackVersion = 7 });
+            band.SetLyricsSettings(false, true, false, 320, showVisualizer: false,
+                adaptiveWidth: false, hideWhenNoMedia: false);
+            band.SetPreviewLyricsEnabled(true);
+            CommitWidth();
+            Check(host.Width == 320, "A queued adaptive timer overwrote the user's fixed width.");
+            band.SetPreviewMedia(arrived with { TrackVersion = 8, HasSession = false });
+            Check(cover.Source == null, "Idle media retained artwork indefinitely.");
+            CaptureStage("-03-idle");
+            band.Close();
+            Console.WriteLine(JsonSerializer.Serialize(new { Mode = "lyrics-handoff", Theme = theme, Failures = failures }));
+            if (failures.Count > 0) throw new InvalidOperationException(string.Join("\n", failures));
+            Console.WriteLine("Lyrics handoff passed: delayed lyrics/artwork, readable transitions, identical text, hover, rapid skipping, fixed width and idle cleanup.");
+            return;
+        }
+
         if (view == "context-menu-live")
         {
             VerifyContextMenus(previewModel, profile.AccountManager, outputPath, theme);
@@ -270,7 +381,7 @@ internal static class Program
         if (view.StartsWith("taskbar-band", StringComparison.Ordinal))
         {
             var bandWindow = new TaskbarBandWindow(profile.AccountManager);
-            bandWindow.SetLyricsSettings(false, true, false, 320, showVisualizer: false, adaptiveWidth: false,
+            bandWindow.SetLyricsSettings(false, true, false, 320, showVisualizer: view.Contains("glass", StringComparison.Ordinal), adaptiveWidth: false,
                 transparentBackground: !view.Contains("glass", StringComparison.Ordinal), hideWhenNoMedia: false);
             bandWindow.SetPreviewLyricsEnabled(true);
             var previewIcon = profile.IconPath;
@@ -404,15 +515,27 @@ internal static class Program
             return;
         }
 
-        if (view is "media-flyout" or "volume-flyout" or "volume-flyout-muted")
+        if (view is "media-flyout" or "volume-flyout" or "volume-flyout-muted" or "notification-flyout" or "notification-flyout-info" or "notification-flyout-error")
         {
             var flyout = new TaskbarFlyoutWindow();
-            // ShowControls/ShowVolume make a native window visible; configure only its content instead.
-            SetVisibility(flyout, "ControlsHost", view == "media-flyout" ? Visibility.Visible : Visibility.Collapsed);
-            SetVisibility(flyout, "VolumeHost", view == "media-flyout" ? Visibility.Collapsed : Visibility.Visible);
-            SetText(flyout, "VolumePercentText", view == "volume-flyout-muted" ? "0%" : "68%");
-            SetText(flyout, "VolumeIcon", view == "volume-flyout-muted" ? "\uE74F" : "\uE767");
-            if (flyout.FindName("VolumeProgressBar") is ProgressBar volume) volume.Value = view == "volume-flyout-muted" ? 0 : 68;
+            if (view.StartsWith("notification-flyout", StringComparison.Ordinal))
+            {
+                var sampleMsg = view == "notification-flyout-error"
+                    ? "切换失败，请确保 Steam 已关闭"
+                    : view == "notification-flyout-info"
+                        ? "主账号 已是当前账号"
+                        : "已切换到 主账号，Steam 已启动";
+                flyout.ConfigureNotificationContent(sampleMsg);
+            }
+            else
+            {
+                // ShowControls/ShowVolume make a native window visible; configure only its content instead.
+                SetVisibility(flyout, "ControlsHost", view == "media-flyout" ? Visibility.Visible : Visibility.Collapsed);
+                SetVisibility(flyout, "VolumeHost", view == "media-flyout" ? Visibility.Collapsed : Visibility.Visible);
+                SetText(flyout, "VolumePercentText", view == "volume-flyout-muted" ? "0%" : "68%");
+                SetText(flyout, "VolumeIcon", view == "volume-flyout-muted" ? "\uE74F" : "\uE767");
+                if (flyout.FindName("VolumeProgressBar") is ProgressBar volume) volume.Value = view == "volume-flyout-muted" ? 0 : 68;
+            }
             var flyoutRoot = (FrameworkElement)flyout.Content;
             var desired = NaturalSize(flyoutRoot, 260, 90);
             CaptureVisual(flyoutRoot, desired.Width, desired.Height, outputPath, requestedView, theme, state, smoke);
@@ -502,7 +625,7 @@ internal static class Program
             return;
         }
 
-        if (!MainViews.Contains(view) && !specialSmoke && view is not ("main-guidance" or "account-library-guidance" or "settings-backup-guidance" or "settings-advanced" or "backup-feedback-guidance" or "persistence-error-guidance")) throw new ArgumentException($"Unknown view mode: {view}. Use --list.");
+        if (!MainViews.Contains(view) && !specialSmoke && view is not ("main-guidance" or "account-library-guidance" or "settings-backup-guidance" or "settings-advanced" or "backup-feedback-guidance" or "persistence-error-guidance" or "maintenance-guidance" or "settings-protection-guidance")) throw new ArgumentException($"Unknown view mode: {view}. Use --list.");
 
         if (view == "accounts-failed")
             typeof(MainViewModel).GetField("_lastFailedSwitchAccount", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -603,6 +726,58 @@ internal static class Program
         if (view == "persistence-error-guidance")
         {
             VerifyPersistenceErrorUi(window, viewModel, profile, outputPath, width, height, theme);
+            return;
+        }
+        if (view is "maintenance-guidance" or "settings-protection-guidance")
+        {
+            typeof(MainWindow).GetMethod("SwitchToSettings", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
+            var maintenanceRoot = (FrameworkElement)window.FindName("RootBorder");
+            void Layout() { maintenanceRoot.Measure(new Size(width, height)); maintenanceRoot.Arrange(new Rect(0, 0, width, height)); maintenanceRoot.UpdateLayout(); }
+            if (view == "settings-protection-guidance")
+            {
+                profile.SaveProtectionReason = "启动时未能完整读取设置，原文件已保护。请先导出当前修改，再重启程序重新读取原设置。";
+                viewModel.BackupExportDirectory = Path.Combine(profile.Directory, "exports");
+                viewModel.TaskbarLyricsWidth = 600;
+                if (viewModel.SaveSettingsNow() || !viewModel.HasUnsavedSettings || !viewModel.HasSettingsSaveError)
+                    throw new InvalidOperationException("A protected write lost pending settings or reported success.");
+                Layout();
+                if (!((TextBlock)window.FindName("SettingsSaveStateLabel")).Text.Contains("原文件已保护") ||
+                    !((TextBlock)window.FindName("ToastText")).Text.Contains("重启"))
+                    throw new InvalidOperationException("The real UI omitted the write-protection recovery instructions.");
+            }
+            else
+            {
+                ((TabControl)window.FindName("SettingsTabs")).SelectedIndex = 1;
+                Layout();
+                ((ScrollViewer)window.FindName("AdvancedSettingsScroll")).ScrollToEnd();
+            }
+            PumpPreview(450, Layout);
+            if (view == "maintenance-guidance")
+            {
+                foreach (var name in new[] { "DiagnosticsActionsPanel", "ConfigurationTransferActionsPanel", "RecoveryActionsPanel" })
+                {
+                    var panel = (FrameworkElement)window.FindName(name);
+                    var bounds = panel.TransformToAncestor(maintenanceRoot).TransformBounds(new Rect(panel.RenderSize));
+                    if (bounds.Top < 250 || bounds.Bottom > height - 70 || bounds.Left < 230 || bounds.Right > width)
+                        throw new InvalidOperationException($"Maintenance actions are clipped or overlap navigation/footer: {name} {bounds}.");
+                }
+            }
+            CaptureVisual(maintenanceRoot, width, height, outputPath, view, theme, "default", false);
+            if (view == "settings-protection-guidance")
+            {
+                var action = (Button)window.FindName("RetrySettingsSaveButton");
+                if (!Equals(action.Content, "导出当前修改"))
+                    throw new InvalidOperationException("Read protection offered a futile save retry instead of preserving current edits.");
+                action.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                var exportWait = Stopwatch.StartNew();
+                while (!viewModel.HasRecentBackupExport && exportWait.ElapsedMilliseconds < 5000) PumpPreview(20, Layout);
+                if (!viewModel.HasRecentBackupExport || !viewModel.HasUnsavedSettings || !viewModel.HasSettingsSaveError)
+                    throw new InvalidOperationException("The protection action failed to export edits or incorrectly cleared write protection.");
+                var exported = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(viewModel.RecentBackupExportPath!))!;
+                if (exported.TaskbarLyricsWidth != 600)
+                    throw new InvalidOperationException("The recovery export lost the pending lyric width.");
+            }
+            Console.WriteLine($"{view} passed ({width}x{height}, {theme}): actual WPF bindings and layout, isolated settings only.");
             return;
         }
         if (view is "accounts-current" or "accounts-target" or "accounts-busy" or "accounts-failed")
@@ -735,7 +910,7 @@ internal static class Program
             "lyrics" => "SwitchToTaskbarLyrics",
             "lyrics-advanced" => "SwitchToTaskbarLyricsAdvanced",
             "quick" or "quick-populated" => "SwitchToQuickLaunch",
-            "settings" or "settings-advanced" or "configuration" => "SwitchToSettings",
+            "settings" or "settings-advanced" or "configuration" or "maintenance-guidance" or "settings-protection-guidance" => "SwitchToSettings",
             _ => "SwitchToAccounts"
         };
         var minimalModeField = typeof(MainViewModel).GetField(
@@ -802,6 +977,7 @@ internal static class Program
     private sealed class IsolatedPreviewProfile : IDisposable
     {
         public bool CanSaveSettings { get; set; } = true;
+        public string? SaveProtectionReason { get; set; }
         public string Directory { get; }
         public string IconPath { get; }
         public AccountManager AccountManager { get; }
@@ -835,10 +1011,12 @@ internal static class Program
             Model = new MainViewModel(AccountManager, Bindings, QuickLaunch,
                 new SettingsSession(settings, snapshot =>
                 {
+                    if (SaveProtectionReason != null)
+                        return SettingsService.SaveToDirectory(snapshot, Directory, primaryReadIncomplete: true);
                     if (!CanSaveSettings) return false;
                     File.WriteAllText(Path.Combine(Directory, "settings.json"), JsonSerializer.Serialize(snapshot));
                     return true;
-                }), () => false, _ => true, Directory, monitorSystemState: false);
+                }, () => SaveProtectionReason), () => false, _ => true, Directory, monitorSystemState: false);
         }
 
         public UpdateService CreateUpdateService() => new(new NoNetworkHandler(), Path.Combine(Directory, "update-rate-limit.json"), Path.Combine(Directory, "updates"));
@@ -1177,7 +1355,7 @@ internal static class Program
         model.BackupExportDirectory = Path.Combine(profile.Directory, "backups");
         model.SaveSettingsNow();
         Layout();
-        if (Button("FooterRevealBackupButton").Visibility != Visibility.Collapsed) throw new InvalidOperationException("A backup action is visible before an export exists.");
+        if (Button("ToastActionButton").Visibility != Visibility.Collapsed) throw new InvalidOperationException("A backup action is visible before an export exists.");
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<string?> export;
         var previousContext = System.Threading.SynchronizationContext.Current;
@@ -1205,7 +1383,10 @@ internal static class Program
         PumpPreview(30, Layout);
         AssertVisible("RecentBackupExportCard");
         AssertVisible("RevealRecentBackupExportButton");
-        AssertVisible("FooterRevealBackupButton");
+        AssertVisible("ToastHost");
+        AssertVisible("ToastActionButton");
+        if (!Equals(Button("ToastActionButton").Content, "定位备份"))
+            throw new InvalidOperationException("Toast did not offer the reveal-backup action.");
         if (((TextBlock)window.FindName("RecentBackupExportFileLabel")).Text != Path.GetFileName(saved) || !Button("BackupAccountsButton").IsEnabled)
             throw new InvalidOperationException("The completed backup lost its file identity or left controls disabled.");
         profile.CanSaveSettings = false;
@@ -1213,25 +1394,28 @@ internal static class Program
         if (model.SaveSettingsNow()) throw new InvalidOperationException("The simulated settings failure unexpectedly succeeded.");
         Layout();
         AssertVisible("RetrySettingsSaveButton");
-        AssertVisible("FooterRetrySettingsSaveButton");
+        AssertVisible("ToastHost");
+        AssertVisible("ToastActionButton");
+        if (!Equals(Button("ToastActionButton").Content, "立即重试"))
+            throw new InvalidOperationException("Toast did not switch to the retry-save action on failure.");
         if (!((TextBlock)window.FindName("SettingsSaveStateLabel")).Text.Contains("保存失败")) throw new InvalidOperationException("A failed write still claims settings are saved.");
-        if (((TextBlock)window.FindName("OperationFeedbackText")).ActualWidth < 200)
+        if (((TextBlock)window.FindName("ToastText")).ActualWidth < 200)
             throw new InvalidOperationException("Retry and reveal actions squeezed the failure feedback too far.");
         PumpPreview(450, Layout); // Capture the settled page, after its navigation fade.
         CaptureVisual(root, width, height, Path.ChangeExtension(outputPath, ".save-error.png"), "backup-save-error", theme, "default", false);
         profile.CanSaveSettings = true;
         Button("RetrySettingsSaveButton").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         Layout();
-        if (model.HasSettingsSaveError || model.HasUnsavedSettings || Button("RetrySettingsSaveButton").Visibility != Visibility.Collapsed || Button("FooterRetrySettingsSaveButton").Visibility != Visibility.Collapsed)
+        if (model.HasSettingsSaveError || model.HasUnsavedSettings || Button("RetrySettingsSaveButton").Visibility != Visibility.Collapsed || Equals(Button("ToastActionButton").Content, "立即重试"))
             throw new InvalidOperationException("The actual retry button did not clear the failed save state.");
-        if (((TextBlock)window.FindName("OperationFeedbackText")).ActualWidth < 200)
+        if (((TextBlock)window.FindName("ToastText")).ActualWidth < 200)
             throw new InvalidOperationException("Backup actions squeezed feedback below the supported readable width.");
         CaptureVisual(root, width, height, outputPath, "backup-feedback", theme, "default", false);
         File.Delete(saved);
         // The real reveal handler must report a missing file and stop before launching Explorer.
-        Button("FooterRevealBackupButton").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        Button("ToastActionButton").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         Layout();
-        if (model.HasRecentBackupExport || Button("FooterRevealBackupButton").Visibility != Visibility.Collapsed || !model.StatusText.Contains("已移动、删除或无法访问"))
+        if (model.HasRecentBackupExport || Button("ToastActionButton").Visibility != Visibility.Collapsed || !model.StatusText.Contains("已移动、删除或无法访问"))
             throw new InvalidOperationException("A missing backup left a stale reveal action enabled.");
         Console.WriteLine($"Backup feedback passed ({width}x{height}): busy gating, visible recent file/reveal actions, settings failure/retry, readable footer and missing-file handling; no Explorer or clipboard operation executed.");
     }
@@ -1524,7 +1708,7 @@ internal static class Program
         model.IsLoading = true;
         model.StatusText = "正在处理测试操作";
         Layout();
-        if (action.IsEnabled || Text("OperationFeedbackText").Text != model.StatusText)
+        if (action.IsEnabled || Text("OperationBusyText").Text != model.StatusText)
             throw new InvalidOperationException("Busy state did not disable the primary action or update feedback.");
         model.IsLoading = false;
         model.SelectedAccount = null;
@@ -1538,7 +1722,7 @@ internal static class Program
         var archiveBounds = archiveButton.TransformToAncestor(root).TransformBounds(new Rect(archiveButton.RenderSize));
         if (introBounds.Right > archiveBounds.Left)
             throw new InvalidOperationException("Account guidance overlaps the archive button.");
-        if (Text("OperationFeedbackText").ActualWidth < 200)
+        if (Text("ToastText").ActualWidth < 200 || ((FrameworkElement)window.FindName("ToastHost")).Visibility != Visibility.Visible)
             throw new InvalidOperationException("Operation feedback has too little space at the supported minimum window width.");
 
         typeof(MainWindow).GetMethod("SwitchToGames", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);

@@ -21,13 +21,13 @@ public class AccountLibraryServiceTests
             .Select(index => Account((76561198000000000L + index).ToString(), $"saved_{index:D3}", $"玩家 {index:D3}"))
             .ToArray();
         var library = new AccountLibraryService(path);
-        library.MergeFromVdf(original);
+        library.MergeFromVdf(original, out _);
         await library.SaveAsync();
 
         // Simulate Steam retaining only a small subset of previously seen users.
         var visible = original.Take(5).ToArray();
         var reloaded = new AccountLibraryService(path);
-        reloaded.MergeFromVdf(visible);
+        reloaded.MergeFromVdf(visible, out _);
         await reloaded.SaveAsync();
         var afterRestart = new AccountLibraryService(path);
         Assert.HasCount(100, afterRestart.Entries);
@@ -56,12 +56,27 @@ public class AccountLibraryServiceTests
         using var dir = new TemporaryDirectory();
         var service = new AccountLibraryService(dir.Combine("accounts.json"));
 
-        Assert.IsTrue(service.MergeFromVdf(new[] { Account("1", "alice", "Alice"), Account("2", "bob", "Bob") }));
+        var changed = service.MergeFromVdf(new[] { Account("1", "alice", "Alice"), Account("2", "bob", "Bob") }, out var added);
 
+        Assert.IsTrue(changed);
+        Assert.AreEqual(2, added, "Two brand-new accounts should be reported as added.");
         Assert.AreEqual(2, service.Entries.Count);
         CollectionAssert.AreEquivalent(
             new[] { "1", "2" },
             service.Entries.Select(e => e.SteamId).ToArray());
+    }
+
+    [TestMethod]
+    public void MergeFromVdf_ReportsZeroAdded_WhenOnlyUpdatingExisting()
+    {
+        using var dir = new TemporaryDirectory();
+        var service = new AccountLibraryService(dir.Combine("accounts.json"));
+
+        service.MergeFromVdf(new[] { Account("1", "alice", "Alice") }, out _);
+        var changed = service.MergeFromVdf(new[] { Account("1", "alice", "Renamed") }, out var added);
+
+        Assert.IsTrue(changed, "A persona rename is a change that must be persisted.");
+        Assert.AreEqual(0, added, "Updating an existing account is not a new save.");
     }
 
     [TestMethod]
@@ -70,8 +85,8 @@ public class AccountLibraryServiceTests
         using var dir = new TemporaryDirectory();
         var service = new AccountLibraryService(dir.Combine("accounts.json"));
 
-        service.MergeFromVdf(new[] { Account("1", "alice", "OldName") });
-        var changed = service.MergeFromVdf(new[] { Account("1", "alice", "NewName") });
+        service.MergeFromVdf(new[] { Account("1", "alice", "OldName") }, out _);
+        var changed = service.MergeFromVdf(new[] { Account("1", "alice", "NewName") }, out _);
 
         Assert.IsTrue(changed, "Renaming a persona must be persisted.");
         Assert.AreEqual(1, service.Entries.Count);
@@ -85,14 +100,14 @@ public class AccountLibraryServiceTests
         var service = new AccountLibraryService(dir.Combine("accounts.json"));
 
         var account = Account("1", "alice", "Alice");
-        service.MergeFromVdf(new[] { account });
+        service.MergeFromVdf(new[] { account }, out _);
 
         // Same content; only LastSeenUnix advances, which is a change on the
         // first repeat, so seed a stable snapshot and merge identical data.
         var entry = service.Entries.Single();
         entry.LastSeenUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-        Assert.IsFalse(service.MergeFromVdf(new[] { account }));
+        Assert.IsFalse(service.MergeFromVdf(new[] { account }, out _));
     }
 
     [TestMethod]
@@ -101,7 +116,7 @@ public class AccountLibraryServiceTests
         using var dir = new TemporaryDirectory();
         var service = new AccountLibraryService(dir.Combine("accounts.json"));
 
-        Assert.IsFalse(service.MergeFromVdf(new[] { Account("", "ghost", "Ghost") }));
+        Assert.IsFalse(service.MergeFromVdf(new[] { Account("", "ghost", "Ghost") }, out _));
         Assert.AreEqual(0, service.Entries.Count);
     }
 
@@ -111,7 +126,7 @@ public class AccountLibraryServiceTests
         using var dir = new TemporaryDirectory();
         var service = new AccountLibraryService(dir.Combine("accounts.json"));
 
-        service.MergeFromVdf(new[] { Account("1", "kept", "Kept"), Account("2", "pruned", "Pruned") });
+        service.MergeFromVdf(new[] { Account("1", "kept", "Kept"), Account("2", "pruned", "Pruned") }, out _);
         var stillOnSteam = new[] { Account("1", "kept", "Kept") };
 
         var archived = service.BuildArchivedAccounts(stillOnSteam);
@@ -129,11 +144,11 @@ public class AccountLibraryServiceTests
         using var dir = new TemporaryDirectory();
         var service = new AccountLibraryService(dir.Combine("accounts.json"));
 
-        service.MergeFromVdf(new[] { Account("old", "old", "Old") });
+        service.MergeFromVdf(new[] { Account("old", "old", "Old") }, out _);
         var oldEntry = service.Entries.Single();
         oldEntry.LastSeenUnix = 1_000;
 
-        service.MergeFromVdf(new[] { Account("recent", "recent", "Recent") });
+        service.MergeFromVdf(new[] { Account("recent", "recent", "Recent") }, out _);
         service.Entries.Single(e => e.SteamId == "recent").LastSeenUnix = 9_000;
 
         var archived = service.BuildArchivedAccounts(Array.Empty<SteamAccount>());
@@ -149,7 +164,7 @@ public class AccountLibraryServiceTests
         using var dir = new TemporaryDirectory();
         var path = dir.Combine("accounts.json");
         var service = new AccountLibraryService(path);
-        service.MergeFromVdf(new[] { Account("1", "alice", "Alice") });
+        service.MergeFromVdf(new[] { Account("1", "alice", "Alice") }, out _);
         service.Entries.Single().AvatarPath = @"C:\cache\1.png";
         await service.SaveAsync();
 

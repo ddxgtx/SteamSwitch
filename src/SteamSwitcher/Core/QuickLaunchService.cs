@@ -13,7 +13,7 @@ using SteamSwitcher.Services;
 
 namespace SteamSwitcher.Core
 {
-    public class QuickLaunchService : IDisposable
+    public class QuickLaunchService : IQuickLaunchService
     {
         private readonly string _configPath;
         private readonly Dictionary<string, QuickLaunchItem> _items = new(StringComparer.Ordinal);

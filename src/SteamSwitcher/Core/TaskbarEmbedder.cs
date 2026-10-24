@@ -335,15 +335,16 @@ namespace SteamSwitcher.Core
                 int desiredWidth = DipsToPixels(_width);
                 int width = GetEffectiveWidth(taskbarWidth, trayX, desiredWidth);
                 int x = CalculateX(taskbarWidth, trayX, width);
-                int availableHeight = Math.Max(24, taskbarHeight - 4);
-                int desiredHeight = DipsToPixels(_embeddedWindow.ActualHeight > 0
-                    ? _embeddedWindow.ActualHeight
-                    : _embeddedWindow.Height);
+                int availableHeight = Math.Max(24, taskbarHeight - 2);
+                double targetDipHeight = !double.IsNaN(_embeddedWindow.Height) && _embeddedWindow.Height > 0
+                    ? _embeddedWindow.Height
+                    : _embeddedWindow.ActualHeight;
+                int desiredHeight = DipsToPixels(targetDipHeight);
                 if (desiredHeight <= 0)
                     desiredHeight = availableHeight;
 
                 int height = Math.Clamp(desiredHeight, 24, availableHeight);
-                int y = Math.Max(2, (taskbarHeight - height) / 2) + _offsetY;
+                int y = Math.Max(1, (taskbarHeight - height) / 2) + _offsetY;
 
                 if (!forceFrameRefresh &&
                     hwnd == _lastPositionHwnd &&

@@ -51,7 +51,7 @@ namespace SteamSwitcher.Core
         public bool IsComplete => HasUsableBackup && Failed == 0 && Unavailable == 0;
     }
 
-    public sealed class GameSaveAutoBackupService : IDisposable
+    public sealed class GameSaveAutoBackupService : IGameSaveAutoBackupService
     {
         private readonly AccountManager _accountManager;
         private readonly Func<AppSettings> _settingsProvider;

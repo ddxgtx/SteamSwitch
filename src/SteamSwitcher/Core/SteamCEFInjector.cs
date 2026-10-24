@@ -17,7 +17,7 @@ namespace SteamSwitcher.Core
         private readonly int _debugPort;
         private readonly int _webSocketPort;
         private readonly string _webSocketToken;
-        private readonly GameAccountBinding _binding;
+        private readonly IGameAccountBinding _binding;
         private readonly AccountManager _accountManager;
         private CancellationTokenSource? _scanCts;
         private string? _script;
@@ -33,7 +33,7 @@ namespace SteamSwitcher.Core
         public event EventHandler<string>? StatusChanged;
 
         public SteamCEFInjector(
-            GameAccountBinding binding,
+            IGameAccountBinding binding,
             AccountManager accountManager,
             int debugPort,
             int webSocketPort,

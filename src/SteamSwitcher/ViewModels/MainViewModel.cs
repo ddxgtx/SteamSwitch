@@ -27,16 +27,16 @@ namespace SteamSwitcher.ViewModels
     {
         private const int SteamDebugPort = 8080;
         private readonly AccountManager _accountManager;
-        private readonly SettingsSession _settingsSession;
+        private readonly ISettingsSession _settingsSession;
         private AppSettings _settings => _settingsSession.Current;
         private bool _applyingSettings;
-        private readonly GameAccountBinding _gameBinding;
-        private readonly QuickLaunchService _quickLaunch;
+        private readonly IGameAccountBinding _gameBinding;
+        private readonly IQuickLaunchService _quickLaunch;
         private readonly Func<bool> _readStartupState;
         private readonly Func<bool, bool> _writeStartupState;
         private readonly bool _monitorSystemState;
         private readonly string _configurationDirectory;
-        private readonly GameSaveAutoBackupService _gameSaveAutoBackupService;
+        private readonly IGameSaveAutoBackupService _gameSaveAutoBackupService;
         private readonly CancellationTokenSource _launchWorkflowCts = new();
         private readonly CancellationTokenSource _lifetimeCts = new();
         private readonly SemaphoreSlim _operationGate = new(1, 1);
@@ -202,7 +202,7 @@ namespace SteamSwitcher.ViewModels
 
         public DesktopEnhanceSettings CreateDesktopEnhanceSettings() => new()
         {
-            EnableAutoHideIcons = DesktopAutoHideIconsEnabled,
+            EnableAutoHideIcons = DesktopIconHiderEnabled && DesktopAutoHideIconsEnabled,
             HideMode = DesktopIconHideMode,
             IdleSeconds = DesktopIconIdleSeconds,
             RestoreByMouseMove = DesktopRestoreByMouseMove,
@@ -217,6 +217,7 @@ namespace SteamSwitcher.ViewModels
         partial void OnDesktopAutoHideCountdownChanged(int value) => OnPropertyChanged(nameof(DesktopAutoHideCountdownText));
         partial void OnDesktopAutoHideIconsEnabledChanged(bool value) => OnPropertyChanged(nameof(DesktopAutoHideCountdownText));
         partial void OnDesktopIconHideModeChanged(DesktopIconHideMode value) => OnPropertyChanged(nameof(DesktopAutoHideCountdownText));
+        partial void OnDesktopIconHiderEnabledChanged(bool value) => OnPropertyChanged(nameof(DesktopAutoHideCountdownText));
         partial void OnDesktopToggleIconsOnClickChanged(bool value)
         {
             OnPropertyChanged(nameof(DesktopClickToggleStatusText));
@@ -306,6 +307,16 @@ namespace SteamSwitcher.ViewModels
         [ObservableProperty]
         private bool _smartSaveDiscoveryEnabled = true;
 
+        // 功能模块总开关：关闭后隐藏导航入口、停止对应后台行为。
+        [ObservableProperty]
+        private bool _gameSaveCenterEnabled = true;
+
+        [ObservableProperty]
+        private bool _desktopIconHiderEnabled = true;
+
+        [ObservableProperty]
+        private bool _taskbarLyricsModuleEnabled = true;
+
         [ObservableProperty]
         private bool _playSoundOnSwitch = true;
 
@@ -316,7 +327,13 @@ namespace SteamSwitcher.ViewModels
         private int _taskbarLyricsFontSize = 14;
 
         [ObservableProperty]
-        private string _taskbarLyricsFontFamily = "Segoe UI Variable Text";
+        private string _taskbarLyricsFontFamily = "Microsoft YaHei UI";
+
+        public System.Windows.Media.FontFamily TaskbarLyricsPreviewFontFamily =>
+            Views.TaskbarBandWindow.BuildLyricsFontFamily(TaskbarLyricsFontFamily);
+
+        partial void OnTaskbarLyricsFontFamilyChanged(string value) =>
+            OnPropertyChanged(nameof(TaskbarLyricsPreviewFontFamily));
 
         [ObservableProperty]
         private string _gameSaveAutoBackupStatusText = "已关闭";
@@ -371,9 +388,6 @@ namespace SteamSwitcher.ViewModels
         private bool _autoScanGamesOnStartup;
 
         [ObservableProperty]
-        private bool _confirmBeforeGameLaunch;
-
-        [ObservableProperty]
         private bool _silentCloseSteam = true;
 
         [ObservableProperty]
@@ -390,7 +404,7 @@ namespace SteamSwitcher.ViewModels
 
         public AccountManager GetAccountManager() => _accountManager;
         public AppSettings GetSettings() => _settings;
-        public GameAccountBinding GetGameBinding() => _gameBinding;
+        public IGameAccountBinding GetGameBinding() => _gameBinding;
         public GameBinding? GetGameBinding(int appId) => _gameBinding.GetBinding(appId);
 
         public Task SaveGameLaunchWorkflowAsync(
@@ -872,14 +886,14 @@ namespace SteamSwitcher.ViewModels
         }
 
         public MainViewModel() : this(new AccountManager(), new GameAccountBinding(), new QuickLaunchService(),
-            new SettingsSession(SettingsService.Load(), SettingsService.Save),
+            new SettingsSession(SettingsService.Load(), SettingsService.Save, () => SettingsService.SaveProtectionReason),
             SettingsService.IsStartWithWindowsEnabled, SettingsService.SetStartWithWindows,
             SettingsService.SettingsDirectory, monitorSystemState: true)
         {
         }
 
-        internal MainViewModel(AccountManager accountManager, GameAccountBinding gameBinding,
-            QuickLaunchService quickLaunch, SettingsSession settingsSession,
+        internal MainViewModel(AccountManager accountManager, IGameAccountBinding gameBinding,
+            IQuickLaunchService quickLaunch, ISettingsSession settingsSession,
             Func<bool> readStartupState, Func<bool, bool> writeStartupState,
             string configurationDirectory, bool monitorSystemState = false)
         {
@@ -897,6 +911,7 @@ namespace SteamSwitcher.ViewModels
             _quickLaunch.ItemsChanged += OnQuickLaunchItemsChanged;
 
             _settingsSession = settingsSession;
+            _settingsSaveFailed = settingsSession.SaveProtectionReason != null;
             _settings.CustomGameSaveFolders ??= new List<CustomGameSaveDefinition>();
             _gameSaveAutoBackupService = new GameSaveAutoBackupService(_accountManager, () => _settings);
             _gameSaveAutoBackupService.BackupCompleted += OnGameSaveAutoBackupCompleted;
@@ -950,12 +965,15 @@ namespace SteamSwitcher.ViewModels
 
         private void SyncGameSaveAutoBackupService()
         {
-            _gameSaveAutoBackupService.Enabled = _monitorSystemState &&
+            _gameSaveAutoBackupService.Enabled = GameSaveCenterEnabled && _monitorSystemState &&
                 (GameSaveAutoBackupEnabled || GameSavePeriodicBackupEnabled);
         }
 
         private string CreateGameSaveAutoBackupStatusText()
         {
+            if (!GameSaveCenterEnabled)
+                return "模块已关闭";
+
             if (_settings.GameSaveLastAutoBackup.HasValue &&
                 (GameSaveAutoBackupEnabled || GameSavePeriodicBackupEnabled))
                 return $"最近备份：{_settings.GameSaveLastAutoBackup.Value:MM-dd HH:mm}";
@@ -1661,7 +1679,11 @@ namespace SteamSwitcher.ViewModels
                 // 进程枚举 + 读 MainModule 是重同步 IO，Steam 进程多时会卡顿 UI。
                 IsSteamRunning = await Task.Run(() => _accountManager.GetSteamService().IsSteamRunning());
                 UpdateAccountsList();
-                StatusText = $"已刷新，共 {_accountManager.Accounts.Count} 个账号";
+                var total = _accountManager.Accounts.Count;
+                var newlySaved = _accountManager.LastCollectedNewAccounts;
+                StatusText = newlySaved > 0
+                    ? $"已保存 {newlySaved} 个新账号，共 {total} 个账号"
+                    : $"已是最新，共 {total} 个账号";
             }
             catch (Exception ex)
             {

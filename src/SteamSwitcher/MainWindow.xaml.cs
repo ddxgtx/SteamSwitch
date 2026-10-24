@@ -4,7 +4,6 @@ using System.ComponentModel;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text.Json;
 using System.Threading;
@@ -16,6 +15,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using SteamSwitcher.Core;
 using SteamSwitcher.Models;
 using SteamSwitcher.Services;
@@ -32,6 +32,8 @@ namespace SteamSwitcher
         private readonly DesktopIconService _desktopIconService = new();
         private TaskbarBandWindow? _taskbarBand;
         private DesktopFloatingWindow? _desktopFloatingWindow;
+        private Views.TaskbarFlyoutWindow? _notificationFlyout;
+        private System.Windows.Threading.DispatcherTimer? _notificationFlyoutTimer;
         private string _lastDiagnosticReport = string.Empty;
         private CancellationTokenSource? _lyricsDiagnosticCts;
         private GameSaveCenterWindow? _gameSaveCenterWindow;
@@ -56,28 +58,7 @@ namespace SteamSwitcher
         private Style? _accountListItemStyle;
         private Style? _accountGridItemStyle;
         private HwndSource? _hwndSource;
-
-        [DllImport("user32.dll")]
-        private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
-
-        [DllImport("gdi32.dll")]
-        private static extern IntPtr CreateRoundRectRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect, int nWidthEllipse, int nHeightEllipse);
-
-        [DllImport("gdi32.dll")]
-        private static extern bool DeleteObject(IntPtr hObject);
-
-        [DllImport("dwmapi.dll")]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int valueSize);
-
-        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        private static extern uint RegisterWindowMessage(string lpString);
-
-        private static readonly uint WmTaskbarCreated = RegisterWindowMessage("TaskbarCreated");
-
-        private const int DwmwaWindowCornerPreference = 33;
-        private const int DwmwaBorderColor = 34;
-        private const int DwmWindowCornerPreferenceRound = 2;
-        private const int DwmColorNone = unchecked((int)0xFFFFFFFE);
+        private readonly System.Windows.Threading.DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromMilliseconds(2800) };
 
         private void PostToUi(Action action)
         {
@@ -87,8 +68,233 @@ namespace SteamSwitcher
             catch (InvalidOperationException) { }
         }
 
+        // 页面切换淡入：窗口加载完成后的导航播放一次轻量渐显，启动过程保持瞬时切换。
+        private void PlayViewEnterAnimation(FrameworkElement view)
+        {
+            if (view is null || !IsLoaded) return;
+            try
+            {
+                var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                var duration = new Duration(TimeSpan.FromMilliseconds(180));
+                view.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration) { EasingFunction = ease });
+            }
+            catch (InvalidOperationException) { }
+        }
+
+        // 操作反馈改为窗口内右上角瞬时提示，替代原先底部常驻状态栏。
+        private string? _pendingToastText;
+
+        private void OnToastTimerTick(object? sender, EventArgs e) => HideToast();
+
+        private void OnViewModelToastPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (_shutdownStarted || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+                return;
+            if (!Dispatcher.CheckAccess())
+            {
+                PostToUi(() => OnViewModelToastPropertyChanged(sender, e));
+                return;
+            }
+
+            if (e.PropertyName == nameof(MainViewModel.StatusText))
+            {
+                if (_viewModel == null) return;
+                // 加载遮罩已在显示时，先缓存最终结果，等加载结束再弹提示，避免被遮罩吞掉。
+                _pendingToastText = _viewModel.StatusText;
+                if (!_viewModel.IsLoading)
+                    ShowStatusToast();
+            }
+            else if (e.PropertyName == nameof(MainViewModel.IsLoading))
+            {
+                if (_viewModel != null && !_viewModel.IsLoading && !string.IsNullOrEmpty(_pendingToastText))
+                {
+                    ShowStatusToast();
+                    _pendingToastText = null;
+                }
+            }
+            else if (e.PropertyName == nameof(MainViewModel.TaskbarLyricsFontFamily))
+            {
+                SyncLyricsFontCombos();
+            }
+            else if (e.PropertyName is nameof(MainViewModel.HasFailedAccountSwitch)
+                     or nameof(MainViewModel.HasSettingsSaveError)
+                     or nameof(MainViewModel.HasRecentBackupExport)
+                     or nameof(MainViewModel.SettingsSaveActionText))
+            {
+                if (_viewModel != null && !_viewModel.IsLoading &&
+                    (_viewModel.HasSettingsSaveError || _viewModel.HasFailedAccountSwitch))
+                {
+                    ShowStatusToast();
+                }
+                else if (ToastHost.Visibility == Visibility.Visible)
+                {
+                    RefreshToastAction();
+                }
+            }
+        }
+
+        private void ShowStatusToast()
+        {
+            if (_viewModel == null || _viewModel.IsLoading || string.IsNullOrWhiteSpace(_viewModel.StatusText))
+                return;
+            if (!_viewModel.HasSettingsSaveError &&
+                !_viewModel.HasFailedAccountSwitch &&
+                !_viewModel.HasRecentBackupExport &&
+                (_viewModel.StatusText == "就绪" ||
+                 _viewModel.StatusText.EndsWith("· 界面预览", StringComparison.Ordinal)))
+            {
+                HideToast();
+                return;
+            }
+            ToastText.Text = _viewModel.StatusText;
+            ToastHost.Visibility = Visibility.Visible;
+            RefreshToastAction();
+        }
+
+        private void RefreshToastAction()
+        {
+            if (_viewModel == null)
+            {
+                ToastActionButton.Visibility = Visibility.Collapsed;
+                _toastTimer.Stop();
+                return;
+            }
+            var isError = _viewModel.HasSettingsSaveError || _viewModel.HasFailedAccountSwitch;
+            ToastHost.BorderBrush = (Brush)FindResource(isError ? "DangerFgBrush" : "AccentBorderBrush");
+            if (ToastIconBadge != null && ToastIcon != null)
+            {
+                ToastIconBadge.Background = (Brush)FindResource(isError ? "DangerBgBrush" : "AccentBgBrush");
+                ToastIcon.Foreground = (Brush)FindResource(isError ? "DangerFgBrush" : "AccentBrush");
+                ToastIcon.Text = isError ? "\uE783" : "\uE946";
+            }
+            if (_viewModel.HasSettingsSaveError)
+            {
+                ToastActionButton.Content = _viewModel.SettingsSaveActionText;
+                ToastActionButton.Visibility = Visibility.Visible;
+            }
+            else if (_viewModel.HasFailedAccountSwitch)
+            {
+                ToastActionButton.Content = "重试切换";
+                ToastActionButton.Visibility = Visibility.Visible;
+            }
+            else if (_viewModel.HasRecentBackupExport)
+            {
+                ToastActionButton.Content = "定位备份";
+                ToastActionButton.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ToastActionButton.Visibility = Visibility.Collapsed;
+            }
+
+            _toastTimer.Stop();
+            // 持久错误态（设置未保存/账号切换失败）保持提示可见，直到恢复成功或用户手动关闭，避免丢失重试入口。
+            if (!isError && ToastHost.Visibility == Visibility.Visible)
+            {
+                _toastTimer.Interval = ToastActionButton.Visibility == Visibility.Visible
+                    ? TimeSpan.FromMilliseconds(6000)
+                    : TimeSpan.FromMilliseconds(2800);
+                _toastTimer.Start();
+            }
+        }
+
+        private void HideToast()
+        {
+            ToastHost.Visibility = Visibility.Collapsed;
+            _toastTimer.Stop();
+        }
+
+        private void ShowTaskbarNotification(string message, int timeoutMs = 1800, Models.SteamAccount? accountOverride = null)
+        {
+            if (_previewMode || _shutdownStarted || string.IsNullOrWhiteSpace(message))
+                return;
+
+            PostToUi(() =>
+            {
+                if (_previewMode || _shutdownStarted)
+                    return;
+
+                try
+                {
+                    string? avatarPath = accountOverride?.AvatarPath;
+                    if (string.IsNullOrWhiteSpace(avatarPath))
+                    {
+                        var accountManager = _viewModel.GetAccountManager();
+                        var matchedAccount = accountManager.Accounts.FirstOrDefault(a =>
+                            !string.IsNullOrWhiteSpace(a.PersonaName)
+                            && message.Contains(a.PersonaName, StringComparison.OrdinalIgnoreCase));
+                        if (matchedAccount == null && (message.Contains("账号") || message.Contains("切换到") || message.Contains("当前已是")))
+                            matchedAccount = accountManager.CurrentAccount;
+                        avatarPath = matchedAccount?.AvatarPath;
+                    }
+
+                    Point center;
+                    double anchorTop;
+                    if (_taskbarBand != null && _taskbarBand.TryGetNotificationAnchor(out var bandCenter, out var bandTop))
+                    {
+                        center = bandCenter;
+                        anchorTop = bandTop;
+                    }
+                    else if (_desktopFloatingWindow != null && _desktopFloatingWindow.IsVisible && _desktopFloatingWindow.ActualWidth > 0)
+                    {
+                        center = new Point(
+                            _desktopFloatingWindow.Left + (_desktopFloatingWindow.ActualWidth / 2.0),
+                            _desktopFloatingWindow.Top);
+                        anchorTop = _desktopFloatingWindow.Top;
+                    }
+                    else
+                    {
+                        var workArea = SystemParameters.WorkArea;
+                        center = new Point(workArea.Right - 140, workArea.Bottom - 2);
+                        anchorTop = workArea.Bottom - 2;
+                    }
+
+                    _notificationFlyout ??= new Views.TaskbarFlyoutWindow();
+                    _notificationFlyout.ShowNotificationBubble(center, anchorTop, message, avatarPath);
+
+                    if (_notificationFlyoutTimer == null)
+                    {
+                        _notificationFlyoutTimer = new System.Windows.Threading.DispatcherTimer();
+                        _notificationFlyoutTimer.Tick += (_, _) =>
+                        {
+                            _notificationFlyoutTimer.Stop();
+                            _notificationFlyout?.HideFlyout();
+                        };
+                    }
+
+                    _notificationFlyoutTimer.Stop();
+                    _notificationFlyoutTimer.Interval = TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs, 1600, 3600));
+                    _notificationFlyoutTimer.Start();
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error("Failed to display taskbar notification bubble.", ex);
+                }
+            });
+        }
+
+        private void ToastActionButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_viewModel == null) return;
+            if (_viewModel.HasSettingsSaveError)
+            {
+                RetrySettingsSave_Click(sender, e);
+            }
+            else if (_viewModel.HasFailedAccountSwitch)
+            {
+                HideToast();
+                RetryAccountSwitch_Click(sender, e);
+            }
+            else if (_viewModel.HasRecentBackupExport)
+            {
+                RevealRecentBackupExport_Click(sender, e);
+            }
+        }
+
+        private void ToastCloseButton_Click(object sender, RoutedEventArgs e) => HideToast();
+
         public MainWindow(bool startHidden = false, string[]? startupArguments = null)
-            : this(new MainViewModel(), startHidden, startupArguments, previewMode: false)
+            : this(CompositionRoot.CreateMainViewModel(), startHidden, startupArguments, previewMode: false)
         {
         }
 
@@ -108,9 +314,12 @@ namespace SteamSwitcher
             DataContext = _viewModel;
 
             InitializeComponent();
+            SyncLyricsFontCombos();
             _accountListItemStyle = AccountListBox.ItemContainerStyle;
             ApplyAccountSort();
             InitializeAccountLibraryFeedback();
+            _viewModel.PropertyChanged += OnViewModelToastPropertyChanged;
+            _toastTimer.Tick += OnToastTimerTick;
             Closing += Window_Closing;
             // Must subscribe after InitializeComponent: WindowChromeWorker registers its
             // own SourceInitialized handler while the XAML WindowChrome is applied, and
@@ -140,12 +349,13 @@ namespace SteamSwitcher
             _trayIcon.ToggleTaskbarLyricsRequested += (s, enabled) => SetTaskbarLyricsEnabled(enabled);
             _trayIcon.EmergencyRestoreRequested += (s, e) => EmergencyRestore_Click(this, new RoutedEventArgs());
             _trayIcon.ExitRequested += (s, e) => RequestExit();
+            _trayIcon.NotificationRequested += (s, args) => ShowTaskbarNotification(args.Message, args.Timeout);
             _viewModel.GetAccountManager().CurrentAccountChanged += OnCurrentAccountChanged;
             _viewModel.GetAccountManager().ConfirmForceCloseAfterTimeoutAsync = ConfirmForceCloseAfterTimeoutAsync;
 
             _viewModel.NotificationRequested += (s, message) =>
             {
-                _trayIcon.ShowNotification("Steam Switch", message, 1000);
+                ShowTaskbarNotification(message, 1800);
             };
 
             _viewModel.UpdateAvailable += (s, updateInfo) =>
@@ -154,7 +364,7 @@ namespace SteamSwitcher
                 {
                     if (!_isInteractiveSession)
                     {
-                        _trayIcon.ShowNotification("Steam Switch", "发现新版本，可打开主界面检查更新", 2000);
+                        ShowTaskbarNotification("发现新版本，可打开主界面检查更新", 2400);
                         return;
                     }
 
@@ -162,7 +372,7 @@ namespace SteamSwitcher
                     // fires again while a previous dialog is still open.
                     if (_updateDialogOpen)
                     {
-                        _trayIcon.ShowNotification("Steam Switch", "更新提示已打开", 1200);
+                        ShowTaskbarNotification("更新提示已打开", 1500);
                         return;
                     }
 
@@ -218,7 +428,7 @@ namespace SteamSwitcher
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
-            if ((uint)msg == WmTaskbarCreated)
+            if ((uint)msg == Native.WindowNative.WmTaskbarCreated)
             {
                 // Re-embed the band onto the recreated taskbar. Rebuild alone
                 // was insufficient after Explorer restarted because the window
@@ -522,49 +732,20 @@ namespace SteamSwitcher
 
         private void ApplyNativeWindowAppearance()
         {
-            try
-            {
-                var hwnd = new WindowInteropHelper(this).Handle;
-                if (hwnd == IntPtr.Zero) return;
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero) return;
 
-                // Windows 11 can draw the outer corner itself. Suppressing the DWM border
-                // also removes the bright strip that otherwise appears above a custom title bar.
-                if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
-                {
-                    var cornerPreference = DwmWindowCornerPreferenceRound;
-                    DwmSetWindowAttribute(hwnd, DwmwaWindowCornerPreference, ref cornerPreference, sizeof(int));
+            var source = PresentationSource.FromVisual(this);
+            double dpiX = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+            double dpiY = source?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
 
-                    var borderColor = DwmColorNone;
-                    DwmSetWindowAttribute(hwnd, DwmwaBorderColor, ref borderColor, sizeof(int));
-
-                    // Clear the legacy region so DWM owns anti-aliased corners and maximized state.
-                    SetWindowRgn(hwnd, IntPtr.Zero, true);
-                    return;
-                }
-
-                if (WindowState == WindowState.Maximized)
-                {
-                    SetWindowRgn(hwnd, IntPtr.Zero, true);
-                    return;
-                }
-
-                var source = PresentationSource.FromVisual(this);
-                double dpiX = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
-                double dpiY = source?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
-
-                int width = (int)(ActualWidth * dpiX);
-                int height = (int)(ActualHeight * dpiY);
-                int radius = (int)(16 * dpiX);
-
-                if (width <= 0 || height <= 0) return;
-
-                var rgn = CreateRoundRectRgn(0, 0, width, height, radius, radius);
-                if (SetWindowRgn(hwnd, rgn, true) == 0)
-                {
-                    DeleteObject(rgn);
-                }
-            }
-            catch { }
+            Native.WindowNative.ApplyWindowAppearance(
+                hwnd,
+                WindowState == WindowState.Maximized,
+                ActualWidth,
+                ActualHeight,
+                dpiX,
+                dpiY);
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -895,14 +1076,19 @@ namespace SteamSwitcher
             var lyricsProbe = Interlocked.Exchange(ref _lyricsDiagnosticCts, null);
             var taskbarBand = _taskbarBand;
             var floatingWindow = _desktopFloatingWindow;
+            var notificationFlyout = _notificationFlyout;
             var saveCenter = _gameSaveCenterWindow;
             _taskbarBand = null;
             _desktopFloatingWindow = null;
+            _notificationFlyout = null;
             _gameSaveCenterWindow = null;
 
             var failures = ExitCleanup.Run(
                 ("window message hook", () => hwndSource?.RemoveHook(WndProc)),
                 ("band rebuild debounce", () => _bandRebuildTimer?.Stop()),
+                ("toast timer", () => { _toastTimer.Stop(); _toastTimer.Tick -= OnToastTimerTick; }),
+                ("notification flyout timer", () => _notificationFlyoutTimer?.Stop()),
+                ("toast property subscription", () => _viewModel.PropertyChanged -= OnViewModelToastPropertyChanged),
                 ("diagnostic cancellation", () => lyricsProbe?.Cancel()),
                 ("diagnostic token", () => lyricsProbe?.Dispose()),
                 ("account subscription", () => _viewModel.GetAccountManager().CurrentAccountChanged -= OnCurrentAccountChanged),
@@ -913,6 +1099,7 @@ namespace SteamSwitcher
                 ("taskbar detach", () => taskbarBand?.Detach()),
                 ("taskbar window", () => taskbarBand?.Close()),
                 ("floating window", () => floatingWindow?.Close()),
+                ("notification flyout window", () => notificationFlyout?.Close()),
                 ("save center subscription", () => { if (saveCenter != null) saveCenter.CloseRequested -= GameSaveCenter_CloseRequested; }),
                 ("save center", () => saveCenter?.Dispose()),
                 ("desktop visibility subscription", () => _desktopIconService.IconVisibilityChanged -= OnDesktopIconVisibilityChanged),
@@ -1043,6 +1230,11 @@ namespace SteamSwitcher
 
         private void SideSaveCenter_Click(object sender, RoutedEventArgs e)
         {
+            if (!_viewModel.GameSaveCenterEnabled)
+            {
+                _viewModel.StatusText = "游戏存档模块已关闭，可在偏好设置中重新开启";
+                return;
+            }
             if (_gameSaveCenterWindow == null)
             {
                 _gameSaveCenterWindow = new GameSaveCenterWindow(_viewModel);
@@ -1059,11 +1251,21 @@ namespace SteamSwitcher
 
         private void SideDesktopIcons_Click(object sender, RoutedEventArgs e)
         {
+            if (!_viewModel.DesktopIconHiderEnabled)
+            {
+                _viewModel.StatusText = "桌面图标模块已关闭，可在偏好设置中重新开启";
+                return;
+            }
             SwitchToDesktopIcons();
         }
 
         private void SideTaskbarLyrics_Click(object sender, RoutedEventArgs e)
         {
+            if (!_viewModel.TaskbarLyricsModuleEnabled)
+            {
+                _viewModel.StatusText = "任务栏歌词模块已关闭，可在偏好设置中重新开启";
+                return;
+            }
             SwitchToTaskbarLyrics();
         }
 
@@ -1088,6 +1290,7 @@ namespace SteamSwitcher
             DesktopIconsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsAdvancedView.Visibility = Visibility.Collapsed;
+            PlayViewEnterAnimation(AccountView);
             PageTitle.Text = "多账号库";
             PageSubtitle.Text = "双击卡片快速切换 Steam 身份，支持置顶常用账号。";
             SetSidebarActive(SideAccounts, SideAccentAccount,
@@ -1110,6 +1313,7 @@ namespace SteamSwitcher
             DesktopIconsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsAdvancedView.Visibility = Visibility.Collapsed;
+            PlayViewEnterAnimation(GameView);
             PageTitle.Text = "游戏库绑定";
             PageSubtitle.Text = "智能扫描本机 Steam 游戏，为每个游戏绑定专属启动账号。";
             SetSidebarActive(SideGames, SideAccentGame,
@@ -1154,6 +1358,7 @@ namespace SteamSwitcher
             DesktopIconsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsAdvancedView.Visibility = Visibility.Collapsed;
+            PlayViewEnterAnimation(SaveCenterHost);
             PageTitle.Text = "游戏存档中心";
             PageSubtitle.Text = "按 Steam 账号与游戏目录智能检查、备份与安全恢复 userdata 存档。";
             SetSidebarActive(SideSaveCenter, SideAccentSave,
@@ -1176,8 +1381,9 @@ namespace SteamSwitcher
             DesktopIconsView.Visibility = Visibility.Visible;
             TaskbarLyricsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsAdvancedView.Visibility = Visibility.Collapsed;
+            PlayViewEnterAnimation(DesktopIconsView);
             PageTitle.Text = "桌面图标智能隐藏";
-            PageSubtitle.Text = "深度定制 Windows 任务栏视觉材质、动态变色与前台窗口场景保护。";
+            PageSubtitle.Text = "智能监测鼠标与桌面活动，自动收起桌面图标，还原纯净壁纸视野。";
             SetSidebarActive(SideDesktopIcons, SideAccentDesktopIcons,
                              SideAccounts, SideAccentAccount,
                              SideGames, SideAccentGame,
@@ -1198,6 +1404,7 @@ namespace SteamSwitcher
             DesktopIconsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsView.Visibility = Visibility.Visible;
             TaskbarLyricsAdvancedView.Visibility = Visibility.Collapsed;
+            PlayViewEnterAnimation(TaskbarLyricsView);
             PageTitle.Text = "任务栏歌词";
             PageSubtitle.Text = "在任务栏实时显示多平台同步歌词，支持媒体快捷控制与自适应宽度。";
             SyncLyricsAdvancedValueLabels();
@@ -1227,6 +1434,7 @@ namespace SteamSwitcher
             DesktopIconsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsAdvancedView.Visibility = Visibility.Visible;
+            PlayViewEnterAnimation(TaskbarLyricsAdvancedView);
             PageTitle.Text = "歌词高级设置";
             PageSubtitle.Text = "外观、布局、时间轴校正与性能调优，按需微调歌词岛表现。";
             SyncLyricsAdvancedValueLabels();
@@ -1242,6 +1450,7 @@ namespace SteamSwitcher
         /// <summary>滑块旁的数字标签不走绑定，进入页面时需要按当前值刷新一次。</summary>
         private void SyncLyricsAdvancedValueLabels()
         {
+            SyncLyricsFontCombos();
             if (TaskbarLyricsWidthText != null)
                 TaskbarLyricsWidthText.Text = $"{_viewModel.TaskbarLyricsWidth} px";
             if (LyricOffsetText != null)
@@ -1261,6 +1470,7 @@ namespace SteamSwitcher
             DesktopIconsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsAdvancedView.Visibility = Visibility.Collapsed;
+            PlayViewEnterAnimation(QuickLaunchView);
             PageTitle.Text = "快捷启动";
             PageSubtitle.Text = "将常用账号、独立游戏与外部程序组织成桌面快捷面板，支持拖拽排序。";
             SetSidebarActive(SideQuickLaunch, SideAccentQuickLaunch,
@@ -1320,8 +1530,10 @@ namespace SteamSwitcher
             DesktopIconsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsView.Visibility = Visibility.Collapsed;
             TaskbarLyricsAdvancedView.Visibility = Visibility.Collapsed;
+            PlayViewEnterAnimation(SettingsView);
             PageTitle.Text = "偏好设置";
             PageSubtitle.Text = "常用选项与高级配置分开管理，修改后自动保存。";
+            SyncLyricsFontCombos();
             SetSidebarActive(SideSettings, SideAccentSettings,
                              SideAccounts, SideAccentAccount,
                              SideGames, SideAccentGame,
@@ -1333,11 +1545,10 @@ namespace SteamSwitcher
 
         private void SetSidebarActive(Button active, Border activeAccent, params object[] inactivePairs)
         {
-            var res = Application.Current.Resources;
             active.SetResourceReference(Control.BackgroundProperty, "SidebarActiveBgBrush");
             active.SetResourceReference(Control.ForegroundProperty, "SidebarActiveFgBrush");
             active.FontWeight = FontWeights.SemiBold;
-            activeAccent.Background = (Brush)res["SidebarActiveFgBrush"];
+            activeAccent.SetResourceReference(Border.BackgroundProperty, "AccentBrush");
 
             for (var i = 0; i + 1 < inactivePairs.Length; i += 2)
             {
@@ -2136,15 +2347,65 @@ namespace SteamSwitcher
 
         private void SetTaskbarLyricsEnabled(bool enabled)
         {
+            if (enabled && !_viewModel.TaskbarLyricsModuleEnabled)
+            {
+                // 模块总开关已关闭：忽略开启请求，保持歌词收起并提示去设置里开模块。
+                _viewModel.TaskbarLyricsEnabled = false;
+                ApplyTaskbarLyricsSettings();
+                SyncTrayFeatureStates();
+                _viewModel.StatusText = "任务栏歌词模块已关闭，可在偏好设置中重新开启";
+                return;
+            }
             _viewModel.TaskbarLyricsEnabled = enabled;
             ApplyTaskbarLyricsSettings();
             SyncTrayFeatureStates();
             _viewModel.StatusText = enabled ? "任务栏歌词已开启" : "任务栏歌词已关闭";
         }
 
+        private bool EffectiveTaskbarLyricsEnabled =>
+            _viewModel.TaskbarLyricsModuleEnabled && _viewModel.TaskbarLyricsEnabled;
+
         private void SyncTrayFeatureStates()
         {
-            _trayIcon?.UpdateFeatureStates(_viewModel.TaskbarLyricsEnabled);
+            _trayIcon?.UpdateFeatureStates(EffectiveTaskbarLyricsEnabled);
+        }
+
+        private void SettingsGameSaveCenter_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            var enabled = _viewModel.GameSaveCenterEnabled;
+            _viewModel.StatusText = enabled
+                ? "游戏存档模块已开启，自动备份已恢复"
+                : "游戏存档模块已关闭，存档监控与自动备份已停止";
+            if (!enabled && SaveCenterHost.Visibility == Visibility.Visible)
+                SwitchToAccounts();
+        }
+
+        private void SettingsDesktopIconHider_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            ConfigureDesktopEnhance();
+            _viewModel.StatusText = _viewModel.DesktopIconHiderEnabled
+                ? "桌面图标模块已开启"
+                : "桌面图标模块已关闭，图标已恢复显示";
+            if (!_viewModel.DesktopIconHiderEnabled && DesktopIconsView.Visibility == Visibility.Visible)
+                SwitchToAccounts();
+        }
+
+        private void SettingsTaskbarLyricsModule_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded || _viewModel == null) return;
+            if (!_viewModel.TaskbarLyricsModuleEnabled)
+            {
+                SetTaskbarLyricsEnabled(false);
+                if (TaskbarLyricsView.Visibility == Visibility.Visible ||
+                    TaskbarLyricsAdvancedView.Visibility == Visibility.Visible)
+                    SwitchToAccounts();
+            }
+            else
+            {
+                _viewModel.StatusText = "任务栏歌词模块已开启";
+            }
         }
 
         private void TaskbarLyrics_Changed(object sender, RoutedEventArgs e)
@@ -2183,13 +2444,52 @@ namespace SteamSwitcher
             ApplyTaskbarLyricsSettings();
         }
 
+        private bool _synchronizingLyricsFontCombos;
+
         private void TaskbarLyricsFontFamily_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (!IsLoaded || _viewModel == null || sender is not ComboBox { SelectedValue: string fontFamily })
+            if (!IsLoaded || _synchronizingLyricsFontCombos || _viewModel == null ||
+                sender is not ComboBox { SelectedItem: ComboBoxItem { Tag: string fontFamily } })
                 return;
 
             _viewModel.TaskbarLyricsFontFamily = fontFamily;
+            SyncLyricsFontCombos();
             ApplyTaskbarLyricsSettings();
+        }
+
+        private void SyncLyricsFontCombos()
+        {
+            if (_viewModel == null || _synchronizingLyricsFontCombos) return;
+            _synchronizingLyricsFontCombos = true;
+            try
+            {
+                var currentFont = string.IsNullOrWhiteSpace(_viewModel.TaskbarLyricsFontFamily)
+                    ? "Microsoft YaHei UI"
+                    : _viewModel.TaskbarLyricsFontFamily.Trim();
+
+                foreach (var combo in new[] { TaskbarLyricsPrimaryFontCombo, TaskbarLyricsAdvancedFontCombo, SettingsLyricsFontCombo })
+                {
+                    if (combo == null) continue;
+                    var existing = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
+                        string.Equals(item.Tag?.ToString(), currentFont, StringComparison.OrdinalIgnoreCase));
+                    if (existing == null)
+                    {
+                        existing = new ComboBoxItem
+                        {
+                            Tag = currentFont,
+                            Content = $"{currentFont}（自定义）",
+                            FontFamily = TaskbarBandWindow.BuildLyricsFontFamily(currentFont)
+                        };
+                        combo.Items.Add(existing);
+                    }
+                    if (!ReferenceEquals(combo.SelectedItem, existing))
+                        combo.SelectedItem = existing;
+                }
+            }
+            finally
+            {
+                _synchronizingLyricsFontCombos = false;
+            }
         }
 
         private void LyricOffsetSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -2205,7 +2505,7 @@ namespace SteamSwitcher
         private void ApplyLyricsSettingsToBand()
         {
             _taskbarBand?.SetLyricsSettings(
-                enabled: _viewModel.TaskbarLyricsEnabled,
+                enabled: EffectiveTaskbarLyricsEnabled,
                 showControls: _viewModel.TaskbarLyricsShowControls,
                 onlineLyrics: _viewModel.TaskbarLyricsOnlineEnabled,
                 width: _viewModel.TaskbarLyricsWidth,
@@ -2233,7 +2533,8 @@ namespace SteamSwitcher
 
         private void ApplyTaskbarLyricsSettings()
         {
-            if (_viewModel.TaskbarLyricsEnabled || _viewModel.IsTaskbarPinned)
+            SyncLyricsFontCombos();
+            if (EffectiveTaskbarLyricsEnabled || _viewModel.IsTaskbarPinned)
             {
                 if (_taskbarBand == null)
                 {
@@ -2272,6 +2573,11 @@ namespace SteamSwitcher
 
         private void DesktopHideNow_Click(object sender, RoutedEventArgs e)
         {
+            if (!_viewModel.DesktopIconHiderEnabled)
+            {
+                _viewModel.StatusText = "桌面图标模块已关闭，可在偏好设置中重新开启";
+                return;
+            }
             if (!_viewModel.DesktopAutoHideIconsEnabled)
             {
                 _viewModel.StatusText = "请先开启桌面图标智能隐藏";
@@ -2307,6 +2613,11 @@ namespace SteamSwitcher
 
         private void DesktopImmersiveMode_Click(object sender, RoutedEventArgs e)
         {
+            if (!_viewModel.DesktopIconHiderEnabled)
+            {
+                _viewModel.StatusText = "桌面图标模块已关闭，可在偏好设置中重新开启";
+                return;
+            }
             _viewModel.DesktopImmersiveModeEnabled = true;
             _viewModel.DesktopAutoHideIconsEnabled = true;
             ConfigureDesktopEnhance();
@@ -2508,15 +2819,6 @@ namespace SteamSwitcher
         {
             if (sender is CheckBox cb && _viewModel != null)
                 _viewModel.SmartSaveDiscoveryEnabled = cb.IsChecked == true;
-        }
-
-        private void SettingsConfirmBeforeLaunch_Changed(object sender, RoutedEventArgs e)
-        {
-            if (sender is CheckBox cb && _viewModel != null)
-            {
-                bool val = cb.IsChecked == true;
-                _viewModel.ConfirmBeforeGameLaunch = val;
-            }
         }
 
         private void SettingsLibraryInjection_Changed(object sender, RoutedEventArgs e)
@@ -2978,7 +3280,7 @@ namespace SteamSwitcher
         {
             if (_viewModel.IsLoading || !await _accountInteractionGate.WaitAsync(0))
             {
-                _trayIcon.ShowNotification("Steam Switch", "账号操作正在进行，请稍候", 1200);
+                ShowTaskbarNotification("账号操作正在进行，请稍候", 1600, account);
                 return;
             }
 
@@ -2989,14 +3291,14 @@ namespace SteamSwitcher
                 : $"正在切换到 {account.PersonaName}...";
 
             if (forceRestart)
-                _trayIcon.ShowNotification("Steam Switch", $"正在强制重启 Steam 并切换到 {account.PersonaName}", 1200);
+                ShowTaskbarNotification($"正在强制重启 Steam 并切换到 {account.PersonaName}", 1800, account);
 
             try
             {
                 if (!forceRestart && AccountManager.AreSameAccount(accountManager.CurrentAccount, account))
                 {
                     _viewModel.StatusText = $"{account.PersonaName} 已是当前账号";
-                    _trayIcon.ShowNotification("Steam Switch", $"{account.PersonaName} 已是当前账号", 1000);
+                    ShowTaskbarNotification($"{account.PersonaName} 已是当前账号", 1600, account);
                     return;
                 }
 
@@ -3009,7 +3311,7 @@ namespace SteamSwitcher
                         ? "强制重启并切换账号失败"
                         : "切换失败，请确保 Steam 已关闭";
                     _viewModel.StatusText = failedMessage;
-                    _trayIcon.ShowNotification("Steam Switch", failedMessage, 1500);
+                    ShowTaskbarNotification(failedMessage, 2000, account);
                     return;
                 }
 
@@ -3033,13 +3335,13 @@ namespace SteamSwitcher
                     _viewModel.StatusText = $"已切换到 {account.PersonaName}";
                 }
 
-                _trayIcon.ShowNotification("Steam Switch", _viewModel.StatusText, 1500);
+                ShowTaskbarNotification(_viewModel.StatusText, 1900, account);
             }
             catch (Exception ex)
             {
                 AppLogger.Error("Taskbar account switch failed.", ex);
                 _viewModel.StatusText = forceRestart ? "强制重启并切换账号失败" : "账号切换失败";
-                _trayIcon.ShowNotification("Steam Switch", _viewModel.StatusText, 1500);
+                ShowTaskbarNotification(_viewModel.StatusText, 2000, account);
             }
             finally
             {
@@ -3055,13 +3357,6 @@ namespace SteamSwitcher
         {
             try
             {
-                if (_viewModel.ConfirmBeforeGameLaunch)
-                {
-                    var game = _viewModel.GameList.FirstOrDefault(g => g.AppId == appId);
-                    var gameName = game?.Name ?? $"AppID {appId}";
-                    var result = MessageBox.Show($"确定启动游戏“{gameName}”吗？", "启动确认", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                    if (result != MessageBoxResult.Yes) return;
-                }
                 await _viewModel.LaunchPinnedGameAsync(appId);
                 _trayIcon.UpdateMenu(_viewModel.Accounts, _viewModel.SelectedAccount);
                 SyncTrayFeatureStates();
@@ -3070,7 +3365,7 @@ namespace SteamSwitcher
             {
                 AppLogger.Error($"Taskbar game launch failed for AppId={appId}.", ex);
                 _viewModel.StatusText = "游戏启动失败，请查看日志";
-                try { _trayIcon.ShowNotification("Steam Switch", "游戏启动失败，请查看日志", 1500); } catch { }
+                try { ShowTaskbarNotification("游戏启动失败，请查看日志", 2000); } catch { }
             }
         }
 
@@ -3265,7 +3560,7 @@ namespace SteamSwitcher
         {
             _viewModel.TaskbarLyricsWidth = 320;
             _viewModel.TaskbarLyricsFontSize = 14;
-            _viewModel.TaskbarLyricsFontFamily = "Segoe UI Variable Text";
+            _viewModel.TaskbarLyricsFontFamily = "Microsoft YaHei UI";
             _viewModel.TaskbarLyricsAdaptiveWidth = true;
             _viewModel.TaskbarLyricsShowSecondaryLine = true;
             _viewModel.TaskbarLyricsShowProgressBar = true;
@@ -3400,7 +3695,7 @@ namespace SteamSwitcher
 
         private async Task UpdateLyricsConnectivityDiagnosticAsync()
         {
-            if (!_viewModel.TaskbarLyricsOnlineEnabled)
+            if (!_viewModel.TaskbarLyricsModuleEnabled || !_viewModel.TaskbarLyricsOnlineEnabled)
                 return;
             // Copy/export and the diagnostics button can be used in quick
             // succession. Cancel the older probe so a slow response cannot
@@ -3410,8 +3705,8 @@ namespace SteamSwitcher
             previousProbe?.Cancel();
             void CleanupProbe()
             {
-                if (Interlocked.CompareExchange(ref _lyricsDiagnosticCts, null, probeCts) == probeCts)
-                    probeCts.Dispose();
+                Interlocked.CompareExchange(ref _lyricsDiagnosticCts, null, probeCts);
+                probeCts.Dispose();
             }
             string result;
             try
@@ -3429,7 +3724,7 @@ namespace SteamSwitcher
                 result = $"[警告] 歌词网络连通性：无法访问（{ex.Message}）";
             }
 
-            if (_shutdownStarted || !_viewModel.TaskbarLyricsOnlineEnabled ||
+            if (_shutdownStarted || !_viewModel.TaskbarLyricsModuleEnabled || !_viewModel.TaskbarLyricsOnlineEnabled ||
                 !ReferenceEquals(Volatile.Read(ref _lyricsDiagnosticCts), probeCts))
             {
                 CleanupProbe();
@@ -3453,9 +3748,11 @@ namespace SteamSwitcher
                 await UpdateLyricsConnectivityDiagnosticAsync();
                 if (string.IsNullOrWhiteSpace(_lastDiagnosticReport)) return;
                 var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "文本报告 (*.txt)|*.txt", FileName = $"SteamSwitch-diagnostic-{DateTime.Now:yyyyMMdd-HHmmss}.txt" };
-                if (dialog.ShowDialog() == true)
+                if (dialog.ShowDialog(this) == true)
                 {
-                    File.WriteAllText(dialog.FileName, _lastDiagnosticReport);
+                    if (ConfigurationBundleService.IsManagedConfigurationFile(SettingsService.SettingsDirectory, dialog.FileName))
+                        throw new InvalidOperationException("不能覆盖正在使用的配置文件或其恢复备份，请选择其他导出文件名或目录。");
+                    await File.WriteAllTextAsync(dialog.FileName, _lastDiagnosticReport);
                     _viewModel.StatusText = "诊断报告已导出";
                 }
             }

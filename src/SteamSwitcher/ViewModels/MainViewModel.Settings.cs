@@ -12,7 +12,13 @@ public partial class MainViewModel
     private bool _settingsSaveFailed;
     public bool HasSettingsSaveError => _settingsSaveFailed;
     public bool HasUnsavedSettings => _settingsSession.IsDirty;
-    public string SettingsSaveStatusText => HasSettingsSaveError ? "保存失败，请重试" : HasUnsavedSettings ? "正在保存…" : "更改自动保存";
+    public string SettingsSaveStatusText => HasSettingsSaveError
+        ? _settingsSession.SaveProtectionReason != null ? "保存已暂停，原文件已保护" : "保存失败，请重试"
+        : HasUnsavedSettings ? "正在保存…" : "更改自动保存";
+    public string SettingsSaveErrorSummary => _settingsSession.SaveProtectionReason != null
+        ? "设置未保存 · 原文件已保护" : "设置尚未保存 · 正在重试";
+    public string? SettingsSaveRecoveryHint => _settingsSession.SaveProtectionReason;
+    public string SettingsSaveActionText => _settingsSession.SaveProtectionReason != null ? "导出当前修改" : "立即重试";
     public string CloseButtonToolTip => MinimizeToTray
         ? "收起到托盘（完全退出请右键托盘图标选择“退出”）"
         : "退出 Steam Switch";
@@ -35,10 +41,14 @@ public partial class MainViewModel
         _settingsSaveFailed = !saved;
         OnPropertyChanged(nameof(HasSettingsSaveError));
         OnPropertyChanged(nameof(SettingsSaveStatusText));
+        OnPropertyChanged(nameof(SettingsSaveErrorSummary));
+        OnPropertyChanged(nameof(SettingsSaveRecoveryHint));
+        OnPropertyChanged(nameof(SettingsSaveActionText));
         if (!saved)
         {
-            StatusText = "设置尚未保存：请检查磁盘空间和目录权限，程序将自动重试";
-            if (!_disposed && _settingsSaveTimer != null)
+            var protectionReason = _settingsSession.SaveProtectionReason;
+            StatusText = protectionReason ?? "设置尚未保存：请检查磁盘空间和目录权限，程序将自动重试";
+            if (protectionReason == null && !_disposed && _settingsSaveTimer != null)
             {
                 _settingsSaveTimer.Interval = TimeSpan.FromSeconds(5);
                 _settingsSaveTimer.Start();
@@ -108,7 +118,7 @@ public partial class MainViewModel
             InitializeMinimalModeTimer();
             MinimalModeChanged?.Invoke(this, MinimalMode);
             DesktopFloatingDockEnabledChanged?.Invoke(this, DesktopFloatingDockEnabled);
-            await InitializeAsync(checkForUpdates: false, startIntegrations: false);
+            await InitializeAsync(checkForUpdates: false, startIntegrations: false, throwOnFailure: true);
             PinnedAccountsChanged?.Invoke(this, EventArgs.Empty);
             PinnedGamesChanged?.Invoke(this, EventArgs.Empty);
             QuickLaunchChanged?.Invoke(this, EventArgs.Empty);
@@ -245,7 +255,7 @@ public partial class MainViewModel
             _lyricSourceNeteaseEnabled = _settings.LyricSourceNeteaseEnabled;
             _lyricSourceKugouEnabled = _settings.LyricSourceKugouEnabled;
             _lyricSourceLrclibEnabled = _settings.LyricSourceLrclibEnabled;
-            _lyricOffsetMs = Math.Clamp(_settings.LyricOffsetMs, -2000, 2000);
+            _lyricOffsetMs = Math.Clamp(_settings.LyricOffsetMs, -3000, 3000);
             _lyricSplitLongLines = _settings.LyricSplitLongLines;
             _settings.TaskbarLyricsWidth = _taskbarLyricsWidth;
             _gameSaveManualRetention = Math.Clamp(_settings.GameSaveManualRetention, 1, 100);
@@ -258,6 +268,9 @@ public partial class MainViewModel
             _settings.GameSavePeriodicIntervalMinutes = _gameSavePeriodicIntervalMinutes;
             _smartSaveDiscoveryEnabled = _settings.SmartSaveDiscoveryEnabled;
             _gameSaveAutoBackupStatusText = CreateGameSaveAutoBackupStatusText();
+            _gameSaveCenterEnabled = _settings.GameSaveCenterEnabled;
+            _desktopIconHiderEnabled = _settings.DesktopIconHiderEnabled;
+            _taskbarLyricsModuleEnabled = _settings.TaskbarLyricsModuleEnabled;
 
             _desktopFloatingEnabled = _settings.DesktopFloatingEnabled;
             _desktopFloatingTopmost = _settings.DesktopFloatingTopmost;
@@ -276,7 +289,6 @@ public partial class MainViewModel
             _desktopFloatingDockEnabled = _settings.DesktopFloatingDockEnabled;
             _enableLibraryInjection = _settings.EnableLibraryInjection;
             _autoScanGamesOnStartup = _settings.AutoScanGamesOnStartup;
-            _confirmBeforeGameLaunch = _settings.ConfirmBeforeGameLaunch;
             _silentCloseSteam = _settings.SilentCloseSteam;
             _useBetaUpdateChannel = _settings.UseBetaUpdateChannel;
             _checkUpdateOnStartup = _settings.CheckUpdateOnStartup;
@@ -437,7 +449,7 @@ public partial class MainViewModel
                     _settings.LyricSourceLrclibEnabled = LyricSourceLrclibEnabled;
                     break;
                 case nameof(LyricOffsetMs):
-                    _settings.LyricOffsetMs = Math.Clamp(LyricOffsetMs, -2000, 2000);
+                    _settings.LyricOffsetMs = Math.Clamp(LyricOffsetMs, -3000, 3000);
                     break;
                 case nameof(LyricSplitLongLines):
                     _settings.LyricSplitLongLines = LyricSplitLongLines;
@@ -469,6 +481,17 @@ public partial class MainViewModel
                 case nameof(SmartSaveDiscoveryEnabled):
                     _settings.SmartSaveDiscoveryEnabled = SmartSaveDiscoveryEnabled;
                     break;
+                case nameof(GameSaveCenterEnabled):
+                    _settings.GameSaveCenterEnabled = GameSaveCenterEnabled;
+                    SyncGameSaveAutoBackupService();
+                    GameSaveAutoBackupStatusText = CreateGameSaveAutoBackupStatusText();
+                    break;
+                case nameof(DesktopIconHiderEnabled):
+                    _settings.DesktopIconHiderEnabled = DesktopIconHiderEnabled;
+                    break;
+                case nameof(TaskbarLyricsModuleEnabled):
+                    _settings.TaskbarLyricsModuleEnabled = TaskbarLyricsModuleEnabled;
+                    break;
                 case nameof(PlaySoundOnSwitch):
                     _settings.PlaySoundOnSwitch = PlaySoundOnSwitch;
                     break;
@@ -480,7 +503,7 @@ public partial class MainViewModel
                     break;
                 case nameof(TaskbarLyricsFontFamily):
                     _settings.TaskbarLyricsFontFamily = string.IsNullOrWhiteSpace(TaskbarLyricsFontFamily)
-                        ? "Segoe UI Variable Text"
+                        ? "Microsoft YaHei UI"
                         : TaskbarLyricsFontFamily.Trim();
                     break;
                 case nameof(DesktopFloatingEnabled):
@@ -529,9 +552,6 @@ public partial class MainViewModel
                     break;
                 case nameof(AutoScanGamesOnStartup):
                     _settings.AutoScanGamesOnStartup = AutoScanGamesOnStartup;
-                    break;
-                case nameof(ConfirmBeforeGameLaunch):
-                    _settings.ConfirmBeforeGameLaunch = ConfirmBeforeGameLaunch;
                     break;
                 case nameof(SilentCloseSteam):
                     _settings.SilentCloseSteam = SilentCloseSteam;

@@ -318,6 +318,13 @@ public partial class MainWindow
             SyncTrayFeatureStates();
             if (_gameSaveCenterWindow != null)
                 await _gameSaveCenterWindow.ReloadSettingsAsync();
+            if ((!_viewModel.GameSaveCenterEnabled && SaveCenterHost.Visibility == Visibility.Visible) ||
+                (!_viewModel.DesktopIconHiderEnabled && DesktopIconsView.Visibility == Visibility.Visible) ||
+                (!_viewModel.TaskbarLyricsModuleEnabled &&
+                 (TaskbarLyricsView.Visibility == Visibility.Visible || TaskbarLyricsAdvancedView.Visibility == Visibility.Visible)))
+            {
+                SwitchToAccounts();
+            }
         }
 
 }

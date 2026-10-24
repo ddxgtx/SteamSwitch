@@ -493,6 +493,7 @@ namespace SteamSwitcher.Core
                     stream.Flush(flushToDisk: true);
                 }
                 File.Move(temporaryPath, markerPath, overwrite: true);
+                TrySpawnOutOfProcessGuard();
                 return true;
             }
             catch (Exception ex)
@@ -503,6 +504,79 @@ namespace SteamSwitcher.Core
             finally
             {
                 try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch { }
+            }
+        }
+
+        private static void TrySpawnOutOfProcessGuard()
+        {
+            try
+            {
+                var exePath = Environment.ProcessPath;
+                if (string.IsNullOrWhiteSpace(exePath) ||
+                    !Path.GetFileName(exePath).StartsWith("SteamSwitch", StringComparison.OrdinalIgnoreCase) ||
+                    !File.Exists(exePath))
+                {
+                    return;
+                }
+
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exePath,
+                    Arguments = $"--desktop-icon-guard {Environment.ProcessId}",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+                };
+                System.Diagnostics.Process.Start(psi)?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn($"Unable to start desktop icon guard process: {ex.Message}");
+            }
+        }
+
+        public static bool TryEmergencyRestoreIconsStatic()
+        {
+            try
+            {
+                var iconList = FindDesktopIconList();
+                if (iconList != IntPtr.Zero)
+                {
+                    ShowWindowAsync(iconList, SwShow);
+                    ShowWindow(iconList, SwShow);
+                }
+                if (iconList != IntPtr.Zero && IsWindowVisible(iconList))
+                {
+                    DeleteRecoveryMarker();
+                    return true;
+                }
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static void RunOutOfProcessGuard(int parentPid)
+        {
+            try
+            {
+                using var parent = System.Diagnostics.Process.GetProcessById(parentPid);
+                while (!parent.WaitForExit(400))
+                {
+                    if (!File.Exists(RecoveryMarkerPath))
+                        return;
+                }
+            }
+            catch
+            {
+                // Parent process has already exited or cannot be opened.
+            }
+
+            if (File.Exists(RecoveryMarkerPath) || AreDesktopIconsHidden())
+            {
+                TryEmergencyRestoreIconsStatic();
             }
         }
 

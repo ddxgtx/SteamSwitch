@@ -30,6 +30,12 @@ namespace SteamSwitcher
             DispatcherUnhandledException += OnDispatcherUnhandledException;
             AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
             TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+            SessionEnding += OnSessionEnding;
+        }
+
+        private void OnSessionEnding(object sender, SessionEndingCancelEventArgs e)
+        {
+            try { SteamSwitcher.Core.DesktopIconService.TryEmergencyRestoreIconsStatic(); } catch { }
         }
 
         protected override void OnStartup(StartupEventArgs e)
@@ -38,6 +44,15 @@ namespace SteamSwitcher
             {
                 base.OnStartup(e);
                 if (_uiPreview) return;
+
+                var guardIdx = Array.FindIndex(e.Args, arg => string.Equals(
+                    arg, "--desktop-icon-guard", StringComparison.OrdinalIgnoreCase));
+                if (guardIdx >= 0 && guardIdx + 1 < e.Args.Length && int.TryParse(e.Args[guardIdx + 1], out var parentPid))
+                {
+                    SteamSwitcher.Core.DesktopIconService.RunOutOfProcessGuard(parentPid);
+                    Shutdown();
+                    return;
+                }
 
                 if (e.Args.Any(arg => string.Equals(
                         arg, "--register-autostart", StringComparison.OrdinalIgnoreCase)))
@@ -93,17 +108,17 @@ namespace SteamSwitcher
                     return;
                 }
 
-                // 上次导入被中断留下的恢复记录如果本身损坏，恢复过程会抛异常。
-                // 异常绝不能冒泡到外层 catch：那会 Shutdown(-1) 并弹致命错误，
-                // 用户此后每次启动都进不去。清掉无法采信的记录后照常启动。
+                // A malformed journal must not prevent startup. An I/O failure is
+                // different: keep its journal and originals for the next recovery attempt.
                 try
                 {
                     ConfigurationBundleService.RecoverInterruptedImport(SettingsService.SettingsDirectory);
                 }
                 catch (Exception recoverEx)
                 {
-                    AppLogger.Error("Interrupted configuration import could not be recovered; starting with the current configuration.", recoverEx);
-                    ConfigurationBundleService.DiscardInterruptedImport(SettingsService.SettingsDirectory);
+                    AppLogger.Error("Interrupted configuration import could not be recovered; recovery copies were preserved.", recoverEx);
+                    if (recoverEx is System.IO.InvalidDataException or System.Text.Json.JsonException)
+                        ConfigurationBundleService.DiscardInterruptedImport(SettingsService.SettingsDirectory);
                 }
                 // 上次中断的下载/未完成的安装会留下陈旧安装包与 .download 残留，
                 // 只在安装成功后清理是不够的——这里每次启动兜一次底。
@@ -165,6 +180,7 @@ namespace SteamSwitcher
                     DispatcherUnhandledException -= OnDispatcherUnhandledException;
                     AppDomain.CurrentDomain.UnhandledException -= OnDomainUnhandledException;
                     TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+                    SessionEnding -= OnSessionEnding;
                 }));
             AppLogger.Info($"Application exit completed. ExitCode={e.ApplicationExitCode}");
             base.OnExit(e);
@@ -218,6 +234,7 @@ namespace SteamSwitcher
 
         private void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
+            try { SteamSwitcher.Core.DesktopIconService.TryEmergencyRestoreIconsStatic(); } catch { }
             if (e.ExceptionObject is Exception ex)
             {
                 WriteCrashLog(ex);
@@ -242,11 +259,14 @@ namespace SteamSwitcher
         {
             try
             {
-                var logPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "SteamSwitch", "crash.log");
+                AppLogger.Error("Unhandled exception recorded.", ex);
+                if (Current is App { _uiPreview: true })
+                    return;
+
+                var logPath = Path.Combine(SettingsService.SettingsDirectory, "crash.log");
                 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-                File.WriteAllText(logPath, FormatException(ex));
+                var header = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Unhandled Exception{Environment.NewLine}";
+                File.WriteAllText(logPath, header + FormatException(ex));
             }
             catch
             {

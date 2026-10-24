@@ -4,15 +4,18 @@ using System.Text.Json;
 namespace SteamSwitcher.Services;
 
 /// <summary>Owns the live settings snapshot and keeps failed writes pending.</summary>
-internal sealed class SettingsSession
+internal sealed class SettingsSession : ISettingsSession
 {
     private readonly Func<AppSettings, bool> _save;
+    private readonly Func<string?> _saveProtectionReason;
     public AppSettings Current { get; private set; }
     public bool IsDirty { get; private set; }
+    public string? SaveProtectionReason => _saveProtectionReason();
 
-    public SettingsSession(AppSettings initial, Func<AppSettings, bool> save)
+    public SettingsSession(AppSettings initial, Func<AppSettings, bool> save, Func<string?>? saveProtectionReason = null)
     {
         _save = save;
+        _saveProtectionReason = saveProtectionReason ?? (() => null);
         Current = Copy(initial);
     }
 

@@ -41,7 +41,7 @@ namespace SteamSwitcher.Services
         public bool TaskbarLyricsAdaptiveWidth { get; set; } = true;
         public int TaskbarLyricsWidth { get; set; } = 320;
         public int TaskbarLyricsFontSize { get; set; } = 14;
-        public string TaskbarLyricsFontFamily { get; set; } = "Segoe UI Variable Text";
+        public string TaskbarLyricsFontFamily { get; set; } = "Microsoft YaHei UI";
         public bool TaskbarLyricsTrackInfoOnly { get; set; }
         public bool TaskbarLyricsShowSecondaryLine { get; set; } = true;
         public bool TaskbarLyricsShowProgressBar { get; set; } = true;
@@ -63,6 +63,10 @@ namespace SteamSwitcher.Services
         public int GameSavePeriodicIntervalMinutes { get; set; } = 30;
         public bool SmartSaveDiscoveryEnabled { get; set; } = true;
         public DateTime? GameSaveLastAutoBackup { get; set; }
+        // 功能模块总开关：关闭后停止对应功能的全部后台行为，并从导航栏隐藏入口。
+        public bool GameSaveCenterEnabled { get; set; } = true;
+        public bool DesktopIconHiderEnabled { get; set; } = true;
+        public bool TaskbarLyricsModuleEnabled { get; set; } = true;
         public bool DesktopFloatingEnabled { get; set; }
         public bool DesktopFloatingTopmost { get; set; } = true;
         public bool DesktopFloatingLocked { get; set; }
@@ -78,7 +82,6 @@ namespace SteamSwitcher.Services
         public double? DesktopFloatingRelativeTop { get; set; }
         public bool EnableLibraryInjection { get; set; }
         public bool AutoScanGamesOnStartup { get; set; }
-        public bool ConfirmBeforeGameLaunch { get; set; } = true;
         public bool SilentCloseSteam { get; set; } = true;
         public bool UseBetaUpdateChannel { get; set; }
         public bool CheckUpdateOnStartup { get; set; } = true;
@@ -254,32 +257,50 @@ namespace SteamSwitcher.Services
         public static bool Save(AppSettings settings)
         {
             lock (FileLock)
+                return SaveToDirectory(settings, SettingsDirectory, _lastLoadWasTransientFallback);
+        }
+
+        internal static string? SaveProtectionReason
+        {
+            get
             {
+                lock (FileLock)
+                    return _lastLoadWasTransientFallback
+                        ? "启动时未能完整读取设置，原文件已保护。请先导出当前修改，再重启程序重新读取原设置。"
+                        : null;
+            }
+        }
+
+        internal static bool SaveToDirectory(AppSettings settings, string directory, bool primaryReadIncomplete = false)
+        {
+            lock (FileLock)
+            {
+                var settingsPath = Path.Combine(directory, "settings.json");
                 // If the last load fell back to in-memory defaults because the primary
                 // file was only transiently unreadable, never overwrite the on-disk file
                 // with those defaults. The real settings stay intact; we defer all writes
                 // for this session rather than risk clobbering the user's configuration.
                 // The trade-off (settings changed during this session won't persist) is
                 // far safer than silently wiping real settings the next launch would fix.
-                if (_lastLoadWasTransientFallback)
+                if (primaryReadIncomplete)
                 {
-                    if (TryLoad(SettingsPath, out _, out _))
+                    if (TryLoad(settingsPath, out _, out _))
                         AppLogger.Warn("Skipping settings save: primary file is readable again after a transient failure; preserving on-disk settings.");
                     else
                         AppLogger.Warn("Skipping settings save: primary settings file is still unreadable after a transient failure.");
-                    return true;
+                    return false;
                 }
 
                 string? temporaryPath = null;
                 try
                 {
-                    Directory.CreateDirectory(SettingsDirectory);
+                    Directory.CreateDirectory(directory);
                     var normalized = Normalize(settings);
                     var json = JsonSerializer.Serialize(normalized, new JsonSerializerOptions
                     {
                         WriteIndented = true
                     });
-                    temporaryPath = Path.Combine(SettingsDirectory, $"settings.{Guid.NewGuid():N}.tmp");
+                    temporaryPath = Path.Combine(directory, $"settings.{Guid.NewGuid():N}.tmp");
                     using (var stream = new FileStream(
                                temporaryPath,
                                FileMode.CreateNew,
@@ -294,7 +315,7 @@ namespace SteamSwitcher.Services
                         stream.Flush(flushToDisk: true);
                     }
 
-                    ReplaceFileWithBackup(temporaryPath, SettingsPath, BackupSettingsPath);
+                    ReplaceFileWithBackup(temporaryPath, settingsPath, settingsPath + ".bak");
                     temporaryPath = null;
                     return true;
                 }
@@ -344,8 +365,9 @@ namespace SteamSwitcher.Services
             settings.TaskbarLyricsVerticalOffset = Math.Clamp(settings.TaskbarLyricsVerticalOffset, -12, 12);
             settings.TaskbarLyricsFontSize = Math.Clamp(settings.TaskbarLyricsFontSize, 12, 18);
             settings.TaskbarLyricsFontFamily = string.IsNullOrWhiteSpace(settings.TaskbarLyricsFontFamily)
-                ? "Segoe UI Variable Text"
+                ? "Microsoft YaHei UI"
                 : settings.TaskbarLyricsFontFamily.Trim();
+            settings.LyricOffsetMs = Math.Clamp(settings.LyricOffsetMs, -3000, 3000);
             settings.DesktopFloatingOpacity = Math.Clamp(settings.DesktopFloatingOpacity, 20, 100);
             settings.DesktopFloatingAvatarSize = Math.Clamp(settings.DesktopFloatingAvatarSize, 24, 96);
             settings.DesktopFloatingGlassColor = NormalizeHexColor(settings.DesktopFloatingGlassColor, "#4A90D9");

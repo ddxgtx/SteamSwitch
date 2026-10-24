@@ -44,6 +44,50 @@ public sealed class ConfigurationApplicationTests
     });
 
     [TestMethod]
+    [DataRow("settings.json")]
+    [DataRow("settings.json.bak")]
+    [DataRow("accounts.json")]
+    [DataRow("accounts.json.bak")]
+    [DataRow("gamebindings.json")]
+    [DataRow("gamebindings.json.bak")]
+    [DataRow("quicklaunch.json")]
+    [DataRow("quicklaunch.json.bak")]
+    [DataRow("configuration-import-pending.json")]
+    [DataRow(@".\SETTINGS.JSON")]
+    public Task PromptedExport_RejectsActiveConfigurationFilesBeforeWriting(string fileName) => RunOnDispatcher(async () =>
+    {
+        using var rig = new Rig();
+        rig.Model.AskBeforeBackupExport = true;
+        Assert.IsTrue(rig.Model.SaveSettingsNow());
+        var chosen = rig.Temp.Combine(fileName);
+        const string original = "{\"keep\":\"original configuration\"}";
+        await File.WriteAllTextAsync(chosen, original);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => rig.Model.ExportBackupAsync(
+            BackupExportKind.Settings, "settings-copy.json",
+            destination => AtomicJsonFile.WriteAsync(destination, new AppSettings { Theme = "Light" }),
+            _ => chosen));
+        Assert.AreEqual(original, await File.ReadAllTextAsync(chosen));
+        Assert.IsFalse(rig.Model.IsBackupExporting);
+        Assert.IsTrue(rig.Model.CanExportBackup);
+        Assert.IsFalse(rig.Model.HasRecentBackupExport, "A rejected destination must not be advertised as a completed backup.");
+    });
+
+    [TestMethod]
+    public Task PromptedExport_AllowsTheSameFileNameInAnIndependentDirectory() => RunOnDispatcher(async () =>
+    {
+        using var rig = new Rig();
+        rig.Model.AskBeforeBackupExport = true;
+        Assert.IsTrue(rig.Model.SaveSettingsNow());
+        var original = await File.ReadAllTextAsync(rig.Temp.Combine("settings.json"));
+        var chosen = rig.Temp.Combine("exports", "settings.json");
+        var saved = await rig.Model.ExportBackupAsync(BackupExportKind.Settings, "settings-copy.json",
+            destination => AtomicJsonFile.WriteAsync(destination, new AppSettings { Theme = "Light" }), _ => chosen);
+        Assert.AreEqual(chosen, saved);
+        Assert.AreEqual("Light", JsonSerializer.Deserialize<AppSettings>(await File.ReadAllTextAsync(chosen))!.Theme);
+        Assert.AreEqual(original, await File.ReadAllTextAsync(rig.Temp.Combine("settings.json")));
+    });
+
+    [TestMethod]
     public Task ExportBusyGate_RejectsDuplicateClicksAndRecordsOnlyCompletedFiles() => RunOnDispatcher(async () =>
     {
         using var rig = new Rig();
@@ -129,6 +173,67 @@ public sealed class ConfigurationApplicationTests
         Assert.IsFalse(saved.MinimizeToTray);
         Assert.AreEqual(next.BackupExportDirectory, saved.BackupExportDirectory);
         Assert.IsTrue(saved.AskBeforeBackupExport);
+    });
+
+    [TestMethod]
+    [DataRow("gamebindings.json")]
+    [DataRow("quicklaunch.json")]
+    public Task ApplySettings_WhenReloadingCollectionsFails_DoesNotReportImportSuccess(string fileName) => RunOnDispatcher(async () =>
+    {
+        using var rig = new Rig();
+        await rig.Model.SaveGameBinding(730, "Original", "76561198000000001", "original");
+        await rig.Model.AddQuickLaunchItemAsync(rig.Temp.Combine("steam.exe"));
+        FileStream? blocker = null;
+        var callbacks = 0;
+        rig.Model.MinimalModeChanged += (_, _) =>
+        {
+            if (++callbacks == 1)
+                blocker = File.Open(rig.Temp.Combine(fileName), FileMode.Open, FileAccess.Read, FileShare.None);
+            else
+                blocker?.Dispose();
+        };
+        var next = rig.Initial();
+        next.Theme = "Light";
+        try
+        {
+            await Assert.ThrowsAsync<IOException>(() => rig.Model.ApplySettingsAsync(next));
+            Assert.AreEqual("Dark", rig.Model.Theme);
+            Assert.AreEqual("Dark", JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(rig.Temp.Combine("settings.json")))!.Theme);
+            Assert.AreEqual("Original", rig.Model.GetGameBinding(730)!.GameName);
+        }
+        finally { blocker?.Dispose(); }
+    });
+
+    [TestMethod]
+    public Task ProtectedStartup_ShowsTheRecoveryStateBeforeAnySaveAttempt() => RunOnDispatcher(async () =>
+    {
+        using var rig = new Rig("启动读取失败，请导出当前修改并重启。");
+        Assert.IsTrue(rig.Model.HasSettingsSaveError);
+        Assert.IsTrue(rig.Model.SettingsSaveStatusText.Contains("原文件已保护"));
+        Assert.IsTrue(rig.Model.SettingsSaveRecoveryHint!.Contains("重启"));
+        Assert.IsFalse(File.Exists(rig.Temp.Combine("settings.json")), "Showing protection must not write fallback defaults.");
+        await Task.CompletedTask;
+    });
+
+    [TestMethod]
+    public Task ProtectedSave_RetainsPendingEditsAndExplainsRecoveryWithoutClaimingRetry() => RunOnDispatcher(async () =>
+    {
+        using var rig = new Rig();
+        rig.CanSave = false;
+        rig.SaveProtectionReason = "启动时未能完整读取设置，原文件已保护。请先导出当前修改，再重启程序。";
+        rig.Model.TaskbarLyricsWidth = 600;
+        Assert.IsFalse(rig.Model.SaveSettingsNow());
+        Assert.IsTrue(rig.Model.HasUnsavedSettings);
+        Assert.IsTrue(rig.Model.HasSettingsSaveError);
+        Assert.IsTrue(rig.Model.SettingsSaveStatusText.Contains("原文件已保护"));
+        Assert.IsTrue(rig.Model.StatusText.Contains("重启"));
+        Assert.IsFalse(rig.Model.SettingsSaveErrorSummary.Contains("正在重试"));
+        rig.SaveProtectionReason = null;
+        rig.CanSave = true;
+        Assert.IsTrue(rig.Model.SaveSettingsNow());
+        Assert.IsFalse(rig.Model.HasUnsavedSettings);
+        Assert.IsFalse(rig.Model.HasSettingsSaveError);
+        await Task.CompletedTask;
     });
 
     [TestMethod]
@@ -226,6 +331,7 @@ public sealed class ConfigurationApplicationTests
     {
         public TemporaryDirectory Temp { get; } = new();
         public bool CanSave { get; set; } = true;
+        public string? SaveProtectionReason { get; set; }
         public bool StartupState { get; set; }
         public MainViewModel Model { get; }
 
@@ -238,8 +344,9 @@ public sealed class ConfigurationApplicationTests
             Theme = "Dark"
         };
 
-        public Rig()
+        public Rig(string? initialProtectionReason = null)
         {
+            SaveProtectionReason = initialProtectionReason;
             File.WriteAllText(Temp.Combine("steam.exe"), "test stub, never execute");
             File.WriteAllText(Temp.Combine("loginusers.vdf"), "\"users\" { }");
             var steam = new SteamService();
@@ -250,7 +357,7 @@ public sealed class ConfigurationApplicationTests
                 if (!CanSave) return false;
                 File.WriteAllText(Temp.Combine("settings.json"), JsonSerializer.Serialize(settings));
                 return true;
-            });
+            }, () => SaveProtectionReason);
             Model = new MainViewModel(accounts, new GameAccountBinding(Temp.Combine("gamebindings.json")),
                 new QuickLaunchService(Temp.Combine("quicklaunch.json")), session,
                 () => StartupState, value => { StartupState = value; return true; }, Temp.Path);

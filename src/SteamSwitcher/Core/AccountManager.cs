@@ -34,6 +34,9 @@ namespace SteamSwitcher.Core
         public List<SteamAccount> Accounts { get; private set; } = new();
         public SteamAccount? CurrentAccount { get; private set; }
         public string? AccountSourceWarning { get; private set; }
+
+        /// <summary>最近一次从 loginusers.vdf 收录到本地账号库的新账号数量（用于保存反馈）。</summary>
+        public int LastCollectedNewAccounts { get; private set; }
         public string AccountLibraryPath => _accountLibrary.LibraryPath;
         public IReadOnlyList<string> IgnoredAccountIds => _accountLibrary.IgnoredAccountIds;
 
@@ -232,7 +235,9 @@ namespace SteamSwitcher.Core
                 AppLogger.Warn($"Unable to read loginusers.vdf; displaying local account metadata: {ex.Message}");
             }
 
-            if (_accountLibrary.MergeFromVdf(vdfAccounts)) _ = SaveLibraryAsync();
+            var libraryChanged = _accountLibrary.MergeFromVdf(vdfAccounts, out var addedAccounts);
+            if (libraryChanged) _ = SaveLibraryAsync();
+            LastCollectedNewAccounts = addedAccounts;
             Accounts = vdfAccounts.OrderByDescending(a => a.MostRecent).ThenByDescending(a => a.Timestamp).ToList();
             Accounts.AddRange(_accountLibrary.BuildArchivedAccounts(vdfAccounts));
             var autoLoginUser = sourceAvailable ? _autoLoginUserReader() : null;

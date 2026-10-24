@@ -8,7 +8,7 @@
         ResizeMode="NoResize"
         WindowStyle="None"
         AllowsTransparency="True"
-        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
+        FontFamily="Microsoft YaHei UI, Segoe UI Variable Text, Segoe UI, sans-serif"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="Grayscale"

@@ -84,6 +84,67 @@ public sealed class ConfigurationBundleTests
     }
 
     [TestMethod]
+    public async Task RuntimeFailure_WhenRollbackIsBlocked_PreservesJournalAndOriginalsForRecovery()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = temp.Combine("settings.json");
+        await File.WriteAllTextAsync(path, "original settings");
+        await File.WriteAllTextAsync(temp.Combine("accounts.json"), "original accounts");
+        FileStream? blocker = null;
+        try
+        {
+            Exception? rollbackError = null;
+            try
+            {
+                await new ConfigurationBundleService(temp.Path).ImportAsync(Sample(), applyRuntime: () =>
+                {
+                    blocker = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    throw new InvalidOperationException("runtime refresh failed while another reader holds settings");
+                });
+            }
+            catch (Exception ex) { rollbackError = ex; }
+            Assert.IsTrue(rollbackError is IOException or UnauthorizedAccessException,
+                "The file lock must block rollback to exercise recovery.");
+            Assert.IsTrue(File.Exists(temp.Combine("configuration-import-pending.json")),
+                "Failed rollback must retain a recovery journal rather than silently abandoning mixed stores.");
+            Assert.HasCount(1, Directory.GetDirectories(temp.Path, ".configuration-import-*"),
+                "Failed rollback must not delete the only complete copies of the originals.");
+        }
+        finally { blocker?.Dispose(); }
+
+        ConfigurationBundleService.RecoverInterruptedImport(temp.Path);
+        Assert.AreEqual("original settings", await File.ReadAllTextAsync(path));
+        Assert.AreEqual("original accounts", await File.ReadAllTextAsync(temp.Combine("accounts.json")));
+        Assert.IsFalse(File.Exists(temp.Combine("gamebindings.json")));
+        Assert.IsFalse(File.Exists(temp.Combine("quicklaunch.json")));
+        Assert.IsFalse(File.Exists(temp.Combine("configuration-import-pending.json")));
+    }
+
+    [TestMethod]
+    public void InvalidRecoveryJournal_IsQuarantinedWithoutDeletingOriginalSnapshots()
+    {
+        using var temp = new TemporaryDirectory();
+        var staging = temp.Combine(".configuration-import-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(staging);
+        File.WriteAllText(Path.Combine(staging, "settings.json"), "only remaining original settings");
+        File.WriteAllText(temp.Combine("configuration-import-pending.json"), "invalid journal");
+        ConfigurationBundleService.DiscardInterruptedImport(temp.Path);
+        Assert.IsFalse(File.Exists(temp.Combine("configuration-import-pending.json")));
+        Assert.HasCount(1, Directory.GetFiles(temp.Path, "configuration-import-pending.json.failed-*"));
+        Assert.AreEqual("only remaining original settings", File.ReadAllText(Path.Combine(staging, "settings.json")));
+    }
+
+    [TestMethod]
+    public void NullRecoveryTransaction_IsRejectedWithoutTouchingConfiguration()
+    {
+        using var temp = new TemporaryDirectory();
+        File.WriteAllText(temp.Combine("settings.json"), "current settings");
+        File.WriteAllText(temp.Combine("configuration-import-pending.json"), "{\"TransactionName\":null,\"ExistingFiles\":[]}");
+        Assert.ThrowsExactly<InvalidDataException>(() => ConfigurationBundleService.RecoverInterruptedImport(temp.Path));
+        Assert.AreEqual("current settings", File.ReadAllText(temp.Combine("settings.json")));
+    }
+
+    [TestMethod]
     public async Task RuntimeApplyFailure_AlsoRollsBackFiles()
     {
         using var temp = new TemporaryDirectory();

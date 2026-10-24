@@ -20,7 +20,6 @@
 - `screenshot_2.png` - 游戏列表与账号绑定页面
 - `screenshot_3.png` - 快捷启动页面
 - `screenshot_4.png` - 设置中心页面
-- `注入.png` - Steam 库注入效果
 
 ## 如何截图
 

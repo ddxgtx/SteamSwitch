@@ -85,7 +85,7 @@ Steam Switch 将账号切换、游戏账号绑定、程序快速启动、任务�
 
 下载 [SteamSwitch-v3.3.0-win-x64-setup.exe](https://github.com/ddxgtx/SteamSwitch/releases/download/v3.3.0/SteamSwitch-v3.3.0-win-x64-setup.exe)。
 
-- SHA-256：`287f41e727eec9130322925bf5c19bf53b61d795aff05abd4c84885118459e0e`
+- SHA-256：`c2af3b72870bee23c1c5c7a1bb1e4b561a24b334c01d367b5aaed4547639904b`
 
 - 中文/英文安装向导。
 - 内置 .NET 8 运行时。
@@ -97,7 +97,7 @@ Steam Switch 将账号切换、游戏账号绑定、程序快速启动、任务�
 
 下载 [SteamSwitch-v3.3.0-win-x64-portable.zip](https://github.com/ddxgtx/SteamSwitch/releases/download/v3.3.0/SteamSwitch-v3.3.0-win-x64-portable.zip)，解压后运行 `SteamSwitch.exe`。
 
-- SHA-256：`a30a367501b8f26ed40bf898cbf97d3d21e60cf38338e922da1661c22480507e`
+- SHA-256：`3faa2016520c0e1405ddf4200e7fe0afa45ae0d467e51833f603f284b252eaed`
 
 > 安装包目前未进行商业代码签名，Windows SmartScreen 可能显示未知发布者。请只从本仓库 Release 下载，并核对 Release 中公布的 SHA-256。
 
